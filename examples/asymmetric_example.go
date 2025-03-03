@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/gourdian25/gourdiantoken/gourdiantoken"
+	"github.com/gourdian25/gourdiantoken"
 )
 
 func asymmetricExample() {

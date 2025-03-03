@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/gourdian25/gourdiantoken/gourdiantoken"
+	"github.com/gourdian25/gourdiantoken"
 )
 
 // Helper function to create an access token
