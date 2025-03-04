@@ -244,7 +244,7 @@ For asymmetric key signing (RSA), you need to generate an RSA key pair. You can 
 
 1. Install Sigil (if not already installed):
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/lordofthemind/sigil/master/install.sh | sh
+   curl -fsSL https://raw.githubusercontent.com/gourdian25/sigil/master/install.sh | sh
    ```
 
 2. Generate RSA keys:
@@ -350,7 +350,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [golang-jwt/jwt](https://github.com/golang-jwt/jwt) for the JWT library.
 - [google/uuid](https://github.com/google/uuid) for UUID generation.
-- [Sigil](https://github.com/lordofthemind/sigil) for simplifying RSA key generation.
+- [Sigil](https://github.com/gourdian25/sigil) for simplifying RSA key generation.
 
 ---
 
