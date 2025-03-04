@@ -1,12 +1,15 @@
 .
+├── CONTRIBUTING.md
 ├── LICENSE
-├── README.md
+├── Readme.md
 ├── claim.go
 ├── config.go
 ├── doc.go
 ├── examples
 │   ├── asymmetric_example.go
 │   ├── example.go
+│   ├── go.mod
+│   ├── go.sum
 │   ├── main.go
 │   ├── middleware_example.go
 │   ├── refresh_example.go
@@ -17,13 +20,8 @@
 ├── gourdiantoken
 │   └── GourdianTokenMaker.go
 ├── helpers.go
-├── keys
-│   ├── rsa_private.pem
-│   └── rsa_public.pem
 ├── keys.go
 ├── maker.go
-├── script
-│   └── rsa_gen.sh
 └── tree.txt
 
-5 directories, 22 files
+3 directories, 22 files
