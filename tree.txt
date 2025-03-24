@@ -1,21 +1,20 @@
 .
 ├── CONTRIBUTING.md
 ├── LICENSE
+├── Makefile
 ├── Readme.md
-├── doc.go
+├── docs.go
 ├── examples
 │   ├── asymmetric_example.go
-│   ├── example.go
 │   ├── go.mod
 │   ├── go.sum
 │   ├── main.go
-│   ├── middleware_example.go
 │   ├── refresh_example.go
-│   ├── symmetric_example.go
-│   └── token_helpers.go
+│   └── symmetric_example.go
 ├── go.mod
 ├── go.sum
 ├── gourdiantoken.go
-└── tree.txt
+├── tree.txt
+└── version.go
 
-2 directories, 17 files
+2 directories, 16 files
