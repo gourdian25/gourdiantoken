@@ -617,9 +617,8 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 		return nil, fmt.Errorf("token rotation not enabled")
 	}
 
-	// Check against reuse interval
-	if maker.config.RefreshToken.ReuseInterval > 0 &&
-		time.Since(claims.IssuedAt) < maker.config.RefreshToken.ReuseInterval {
+	// Only check reuse interval if it's set
+	if maker.config.RefreshToken.ReuseInterval > 0 && time.Since(claims.IssuedAt) < maker.config.RefreshToken.ReuseInterval {
 		return nil, fmt.Errorf("token reuse too soon")
 	}
 
