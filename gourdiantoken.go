@@ -97,17 +97,15 @@ type RefreshTokenConfig struct {
 //   - ExpiresAt: Token expiration time
 //   - TokenType: Token type (access or refresh)
 //   - Role: User role
-//   - Permissions: List of user permissions
 type AccessTokenClaims struct {
-	ID          uuid.UUID `json:"jti"`
-	Subject     uuid.UUID `json:"sub"`
-	Username    string    `json:"usr"`
-	SessionID   uuid.UUID `json:"sid"`
-	IssuedAt    time.Time `json:"iat"`
-	ExpiresAt   time.Time `json:"exp"`
-	TokenType   TokenType `json:"typ"`
-	Role        string    `json:"rol"`
-	Permissions []string  `json:"per"`
+	ID        uuid.UUID `json:"jti"`
+	Subject   uuid.UUID `json:"sub"`
+	Username  string    `json:"usr"`
+	SessionID uuid.UUID `json:"sid"`
+	IssuedAt  time.Time `json:"iat"`
+	ExpiresAt time.Time `json:"exp"`
+	TokenType TokenType `json:"typ"`
+	Role      string    `json:"rol"`
 }
 
 // RefreshTokenClaims contains claims specific to refresh tokens.
@@ -140,16 +138,14 @@ type RefreshTokenClaims struct {
 //   - ExpiresAt: Token expiration time
 //   - IssuedAt: Token issuance time
 //   - Role: User role
-//   - Permissions: List of user permissions
 type AccessTokenResponse struct {
-	Token       string    `json:"tok"`
-	Subject     uuid.UUID `json:"sub"`
-	Username    string    `json:"usr"`
-	SessionID   uuid.UUID `json:"sid"`
-	ExpiresAt   time.Time `json:"exp"`
-	IssuedAt    time.Time `json:"iat"`
-	Role        string    `json:"rol"`
-	Permissions []string  `json:"per"`
+	Token     string    `json:"tok"`
+	Subject   uuid.UUID `json:"sub"`
+	Username  string    `json:"usr"`
+	SessionID uuid.UUID `json:"sid"`
+	ExpiresAt time.Time `json:"exp"`
+	IssuedAt  time.Time `json:"iat"`
+	Role      string    `json:"rol"`
 }
 
 // RefreshTokenResponse represents the response after creating a refresh token.
@@ -178,7 +174,7 @@ type RefreshTokenResponse struct {
 //   - VerifyAccessToken: Verifies and decodes an access token
 //   - VerifyRefreshToken: Verifies and decodes a refresh token
 type GourdianTokenMaker interface {
-	CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID, permissions []string) (*AccessTokenResponse, error)
+	CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
 	VerifyAccessToken(tokenString string) (*AccessTokenClaims, error)
 	VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error)
@@ -238,7 +234,7 @@ func NewGourdianTokenMaker(config GourdianTokenConfig) (GourdianTokenMaker, erro
 }
 
 // CreateAccessToken creates a new access token.
-func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID, permissions []string) (*AccessTokenResponse, error) {
+func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
 	tokenID, err := uuid.NewRandom()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token ID: %w", err)
@@ -246,15 +242,14 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 
 	now := time.Now()
 	claims := AccessTokenClaims{
-		ID:          tokenID,
-		Subject:     userID,
-		Username:    username,
-		SessionID:   sessionID,
-		IssuedAt:    now,
-		ExpiresAt:   now.Add(maker.config.AccessToken.Duration),
-		TokenType:   AccessToken,
-		Role:        role,
-		Permissions: permissions,
+		ID:        tokenID,
+		Subject:   userID,
+		Username:  username,
+		SessionID: sessionID,
+		IssuedAt:  now,
+		ExpiresAt: now.Add(maker.config.AccessToken.Duration),
+		TokenType: AccessToken,
+		Role:      role,
 	}
 
 	token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
@@ -265,14 +260,13 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 	}
 
 	response := &AccessTokenResponse{
-		Token:       signedToken,
-		Subject:     claims.Subject,
-		Username:    claims.Username,
-		SessionID:   claims.SessionID,
-		ExpiresAt:   claims.ExpiresAt,
-		IssuedAt:    claims.IssuedAt,
-		Role:        role,
-		Permissions: permissions,
+		Token:     signedToken,
+		Subject:   claims.Subject,
+		Username:  claims.Username,
+		SessionID: claims.SessionID,
+		ExpiresAt: claims.ExpiresAt,
+		IssuedAt:  claims.IssuedAt,
+		Role:      role,
 	}
 
 	return response, nil
@@ -558,7 +552,6 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 			"exp": v.ExpiresAt.Unix(),
 			"typ": v.TokenType,
 			"rol": v.Role,
-			"per": v.Permissions,
 		}
 	case RefreshTokenClaims:
 		return jwt.MapClaims{
@@ -598,25 +591,15 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		return nil, fmt.Errorf("invalid role type: expected string")
 	}
 
-	permissions := make([]string, 0)
-	if permsInterface, ok := claims["per"].([]interface{}); ok {
-		for _, p := range permsInterface {
-			if perm, ok := p.(string); ok {
-				permissions = append(permissions, perm)
-			}
-		}
-	}
-
 	return &AccessTokenClaims{
-		ID:          tokenID,
-		Subject:     userID,
-		Username:    claims["usr"].(string),
-		SessionID:   sessionID,
-		IssuedAt:    time.Unix(int64(claims["iat"].(float64)), 0),
-		ExpiresAt:   time.Unix(int64(claims["exp"].(float64)), 0),
-		TokenType:   TokenType(claims["typ"].(string)),
-		Role:        role,
-		Permissions: permissions,
+		ID:        tokenID,
+		Subject:   userID,
+		Username:  claims["usr"].(string),
+		SessionID: sessionID,
+		IssuedAt:  time.Unix(int64(claims["iat"].(float64)), 0),
+		ExpiresAt: time.Unix(int64(claims["exp"].(float64)), 0),
+		TokenType: TokenType(claims["typ"].(string)),
+		Role:      role,
 	}, nil
 }
 
