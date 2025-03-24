@@ -31,15 +31,6 @@ const (
 )
 
 // GourdianTokenConfig holds the configuration for token generation and verification.
-//
-// Fields:
-//   - Algorithm: Signing algorithm (e.g., "HS256", "RS256", "ES256")
-//   - SigningMethod: Method to use for signing (symmetric or asymmetric)
-//   - SymmetricKey: Symmetric key for signing tokens (used when SigningMethod is Symmetric)
-//   - PrivateKeyPath: Path to the private key file (used when SigningMethod is Asymmetric)
-//   - PublicKeyPath: Path to the public key file (used when SigningMethod is Asymmetric)
-//   - AccessToken: Configuration for access tokens
-//   - RefreshToken: Configuration for refresh tokens
 type GourdianTokenConfig struct {
 	Algorithm      string
 	SigningMethod  SigningMethod
@@ -51,14 +42,6 @@ type GourdianTokenConfig struct {
 }
 
 // AccessTokenConfig holds configuration specific to access tokens.
-//
-// Fields:
-//   - Duration: Token validity duration
-//   - MaxLifetime: Maximum lifetime of the token
-//   - Issuer: Token issuer
-//   - Audience: Intended audience for the token
-//   - AllowedAlgorithms: List of allowed signing algorithms
-//   - RequiredClaims: List of required claims
 type AccessTokenConfig struct {
 	Duration          time.Duration
 	MaxLifetime       time.Duration
@@ -69,14 +52,6 @@ type AccessTokenConfig struct {
 }
 
 // RefreshTokenConfig holds configuration specific to refresh tokens.
-//
-// Fields:
-//   - Duration: Token validity duration
-//   - MaxLifetime: Maximum lifetime of the token
-//   - ReuseInterval: Time interval before a refresh token can be reused
-//   - RotationEnabled: Whether token rotation is enabled
-//   - FamilyEnabled: Whether token family tracking is enabled
-//   - MaxPerUser: Maximum number of refresh tokens per user
 type RefreshTokenConfig struct {
 	Duration        time.Duration
 	MaxLifetime     time.Duration
@@ -86,17 +61,24 @@ type RefreshTokenConfig struct {
 	MaxPerUser      int
 }
 
+// validateConfig validates the configuration.
+func validateConfig(config *GourdianTokenConfig) error {
+	switch config.SigningMethod {
+	case Symmetric:
+		if config.SymmetricKey == "" {
+			return fmt.Errorf("symmetric key is required for symmetric signing method")
+		}
+	case Asymmetric:
+		if config.PrivateKeyPath == "" || config.PublicKeyPath == "" {
+			return fmt.Errorf("private and public key paths are required for asymmetric signing method")
+		}
+	default:
+		return fmt.Errorf("unsupported signing method: %s, supports %s and %s ", config.SigningMethod, Symmetric, Asymmetric)
+	}
+	return nil
+}
+
 // AccessTokenClaims contains claims specific to access tokens.
-//
-// Fields:
-//   - ID: Unique token ID (JWT ID)
-//   - Subject: User ID (subject)
-//   - Username: Username
-//   - SessionID: Session ID
-//   - IssuedAt: Token issuance time
-//   - ExpiresAt: Token expiration time
-//   - TokenType: Token type (access or refresh)
-//   - Role: User role
 type AccessTokenClaims struct {
 	ID        uuid.UUID `json:"jti"`
 	Subject   uuid.UUID `json:"sub"`
@@ -109,15 +91,6 @@ type AccessTokenClaims struct {
 }
 
 // RefreshTokenClaims contains claims specific to refresh tokens.
-//
-// Fields:
-//   - ID: Unique token ID (JWT ID)
-//   - Subject: User ID (subject)
-//   - Username: Username
-//   - SessionID: Session ID
-//   - IssuedAt: Token issuance time
-//   - ExpiresAt: Token expiration time
-//   - TokenType: Token type (access or refresh)
 type RefreshTokenClaims struct {
 	ID        uuid.UUID `json:"jti"`
 	Subject   uuid.UUID `json:"sub"`
@@ -129,15 +102,6 @@ type RefreshTokenClaims struct {
 }
 
 // AccessTokenResponse represents the response after creating an access token.
-//
-// Fields:
-//   - Token: Signed access token
-//   - Subject: User ID (subject)
-//   - Username: Username
-//   - SessionID: Session ID
-//   - ExpiresAt: Token expiration time
-//   - IssuedAt: Token issuance time
-//   - Role: User role
 type AccessTokenResponse struct {
 	Token     string    `json:"tok"`
 	Subject   uuid.UUID `json:"sub"`
@@ -149,14 +113,6 @@ type AccessTokenResponse struct {
 }
 
 // RefreshTokenResponse represents the response after creating a refresh token.
-//
-// Fields:
-//   - Token: Signed refresh token
-//   - Subject: User ID (subject)
-//   - Username: Username
-//   - SessionID: Session ID
-//   - ExpiresAt: Token expiration time
-//   - IssuedAt: Token issuance time
 type RefreshTokenResponse struct {
 	Token     string    `json:"tok"`
 	Subject   uuid.UUID `json:"sub"`
@@ -167,12 +123,6 @@ type RefreshTokenResponse struct {
 }
 
 // GourdianTokenMaker defines the interface for token management.
-//
-// Methods:
-//   - CreateAccessToken: Creates a new access token
-//   - CreateRefreshToken: Creates a new refresh token
-//   - VerifyAccessToken: Verifies and decodes an access token
-//   - VerifyRefreshToken: Verifies and decodes a refresh token
 type GourdianTokenMaker interface {
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
@@ -189,45 +139,17 @@ type JWTMaker struct {
 }
 
 // NewGourdianTokenMaker creates a new instance of JWTMaker.
-//
-// Parameters:
-//   - config: Token configuration
-//
-// Returns:
-//   - GourdianTokenMaker: Token maker instance
-//   - error: Any error encountered during initialization
 func NewGourdianTokenMaker(config GourdianTokenConfig) (GourdianTokenMaker, error) {
+	if err := validateConfig(&config); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
 	maker := &JWTMaker{
 		config: config,
 	}
 
-	// Set the signing method based on the algorithm
-	switch config.Algorithm {
-	case "HS256":
-		maker.signingMethod = jwt.SigningMethodHS256
-	case "HS384":
-		maker.signingMethod = jwt.SigningMethodHS384
-	case "HS512":
-		maker.signingMethod = jwt.SigningMethodHS512
-	case "RS256":
-		maker.signingMethod = jwt.SigningMethodRS256
-	case "RS384":
-		maker.signingMethod = jwt.SigningMethodRS384
-	case "RS512":
-		maker.signingMethod = jwt.SigningMethodRS512
-	case "ES256":
-		maker.signingMethod = jwt.SigningMethodES256
-	case "ES384":
-		maker.signingMethod = jwt.SigningMethodES384
-	case "ES512":
-		maker.signingMethod = jwt.SigningMethodES512
-	default:
-		return nil, fmt.Errorf("unsupported signing algorithm: %s", config.Algorithm)
-	}
-
-	// Initialize keys based on the signing method
 	if err := maker.initializeKeys(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to initialize keys: %w", err)
 	}
 
 	return maker, nil
@@ -312,7 +234,6 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 // VerifyAccessToken verifies and decodes an access token.
 func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Validate the signing method
 		if token.Method.Alg() != maker.signingMethod.Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -334,13 +255,18 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 		return nil, fmt.Errorf("invalid token type: expected access token")
 	}
 
+	// Explicitly check if the token has expired
+	expiresAt, ok := claims["exp"].(float64)
+	if !ok || time.Unix(int64(expiresAt), 0).Before(time.Now()) {
+		return nil, fmt.Errorf("token has expired")
+	}
+
 	return mapToAccessClaims(claims)
 }
 
 // VerifyRefreshToken verifies and decodes a refresh token.
 func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Validate the signing method
 		if token.Method.Alg() != maker.signingMethod.Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -362,6 +288,12 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 		return nil, fmt.Errorf("invalid token type: expected refresh token")
 	}
 
+	// Explicitly check if the token has expired
+	expiresAt, ok := claims["exp"].(float64)
+	if !ok || time.Unix(int64(expiresAt), 0).Before(time.Now()) {
+		return nil, fmt.Errorf("token has expired")
+	}
+
 	return mapToRefreshClaims(claims)
 }
 
@@ -369,59 +301,42 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 func (maker *JWTMaker) initializeKeys() error {
 	switch maker.config.SigningMethod {
 	case Symmetric:
-		if maker.config.SymmetricKey == "" {
-			return fmt.Errorf("symmetric key is required for symmetric signing method")
-		}
 		maker.privateKey = []byte(maker.config.SymmetricKey)
 		maker.publicKey = []byte(maker.config.SymmetricKey)
 		return nil
 
 	case Asymmetric:
-		if maker.config.PrivateKeyPath == "" {
-			return fmt.Errorf("private key path is required for asymmetric signing method")
-		}
-		if maker.config.PublicKeyPath == "" {
-			return fmt.Errorf("public key path is required for asymmetric signing method")
-		}
-
-		// Load private key
 		privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
 		if err != nil {
 			return fmt.Errorf("failed to read private key file: %w", err)
 		}
 
-		// Load public key
 		publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
 		if err != nil {
 			return fmt.Errorf("failed to read public key file: %w", err)
 		}
 
-		// Parse the keys based on the algorithm
-		switch {
-		case maker.signingMethod.Alg() == "RS256" || maker.signingMethod.Alg() == "RS384" || maker.signingMethod.Alg() == "RS512":
-			// Parse RSA private key
+		switch maker.signingMethod.Alg() {
+		case "RS256", "RS384", "RS512":
 			privateKey, err := parseRSAPrivateKey(privateKeyBytes)
 			if err != nil {
 				return fmt.Errorf("failed to parse RSA private key: %w", err)
 			}
 			maker.privateKey = privateKey
 
-			// Parse RSA public key
 			publicKey, err := parseRSAPublicKey(publicKeyBytes)
 			if err != nil {
 				return fmt.Errorf("failed to parse RSA public key: %w", err)
 			}
 			maker.publicKey = publicKey
 
-		case maker.signingMethod.Alg() == "ES256" || maker.signingMethod.Alg() == "ES384" || maker.signingMethod.Alg() == "ES512":
-			// Parse ECDSA private key
+		case "ES256", "ES384", "ES512":
 			privateKey, err := parseECDSAPrivateKey(privateKeyBytes)
 			if err != nil {
 				return fmt.Errorf("failed to parse ECDSA private key: %w", err)
 			}
 			maker.privateKey = privateKey
 
-			// Parse ECDSA public key
 			publicKey, err := parseECDSAPublicKey(publicKeyBytes)
 			if err != nil {
 				return fmt.Errorf("failed to parse ECDSA public key: %w", err)
