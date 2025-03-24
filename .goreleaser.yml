@@ -1,0 +1,28 @@
+project_name: gourdiantoken
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: "library"
+    skip: true  # Skip binary building for library
+
+archives:
+  - id: "source"
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+      - go.mod
+      - go.sum
+      - ./*.go
+      - examples/*.go
+    name_template: "{{ .ProjectName }}_{{ .Version }}_src"
+
+release:
+  github:
+    owner: gourdian25
+    name: gourdiantoken
+  draft: false
+  prerelease: true
