@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -618,7 +619,8 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 	}
 
 	// Check against reuse interval
-	if time.Since(claims.IssuedAt) < maker.config.RefreshToken.ReuseInterval {
+	if maker.config.RefreshToken.ReuseInterval > 0 &&
+		time.Since(claims.IssuedAt) < maker.config.RefreshToken.ReuseInterval {
 		return nil, fmt.Errorf("token reuse too soon")
 	}
 
@@ -976,5 +978,26 @@ func getUnixTime(claim interface{}) int64 {
 		return v
 	default:
 		return 0
+	}
+}
+
+// MarshalJSON implements the json.Marshaler interface
+func (t TokenType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(t))
+}
+
+// UnmarshalJSON implements the json.Unmarshaler interface
+func (t *TokenType) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+
+	switch TokenType(s) {
+	case AccessToken, RefreshToken:
+		*t = TokenType(s)
+		return nil
+	default:
+		return fmt.Errorf("invalid token type: %s", s)
 	}
 }

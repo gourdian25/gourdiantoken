@@ -11,7 +11,7 @@ import (
 
 func TestClaimsSerialization(t *testing.T) {
 	t.Run("AccessTokenClaims", func(t *testing.T) {
-		now := time.Now().UTC() // Use UTC for consistency
+		now := time.Now().UTC()
 		claims := AccessTokenClaims{
 			ID:        uuid.New(),
 			Subject:   uuid.New(),
@@ -49,7 +49,7 @@ func TestClaimsSerialization(t *testing.T) {
 		assert.Equal(t, claims.SessionID.String(), mapClaims["sid"])
 		assert.Equal(t, claims.IssuedAt.Unix(), mapClaims["iat"])
 		assert.Equal(t, claims.ExpiresAt.Unix(), mapClaims["exp"])
-		assert.Equal(t, string(claims.TokenType), mapClaims["typ"])
+		assert.Equal(t, string(claims.TokenType), mapClaims["typ"]) // Convert TokenType to string for comparison
 		assert.Equal(t, claims.Role, mapClaims["rol"])
 	})
 
@@ -88,6 +88,6 @@ func TestClaimsSerialization(t *testing.T) {
 		assert.Equal(t, claims.SessionID.String(), mapClaims["sid"])
 		assert.Equal(t, claims.IssuedAt.Unix(), mapClaims["iat"])
 		assert.Equal(t, claims.ExpiresAt.Unix(), mapClaims["exp"])
-		assert.Equal(t, string(claims.TokenType), mapClaims["typ"])
+		assert.Equal(t, string(claims.TokenType), mapClaims["typ"]) // Convert TokenType to string for comparison
 	})
 }
