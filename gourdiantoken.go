@@ -14,95 +14,96 @@ import (
 	"github.com/google/uuid"
 )
 
-// TokenType represents the type of token (access or refresh).
+// TokenType represents the type of JWT token (access or refresh).
 type TokenType string
 
 const (
-	AccessToken  TokenType = "access"  // Access token type
-	RefreshToken TokenType = "refresh" // Refresh token type
+	AccessToken  TokenType = "access"  // AccessToken represents an access token type
+	RefreshToken TokenType = "refresh" // RefreshToken represents a refresh token type
 )
 
-// SigningMethod represents the key signing method (symmetric or asymmetric).
+// SigningMethod represents the cryptographic method used for signing tokens.
 type SigningMethod string
 
 const (
-	Symmetric  SigningMethod = "symmetric"  // Symmetric key signing (HMAC)
-	Asymmetric SigningMethod = "asymmetric" // Asymmetric key signing (RSA, ECDSA)
+	Symmetric  SigningMethod = "symmetric"  // Symmetric uses HMAC with a shared secret
+	Asymmetric SigningMethod = "asymmetric" // Asymmetric uses RSA/ECDSA with public/private key pairs
 )
 
-// GourdianTokenConfig holds the configuration for token generation and verification.
+// GourdianTokenConfig holds configuration for token generation and verification.
+// It includes settings for both access and refresh tokens as well as cryptographic options.
 type GourdianTokenConfig struct {
-	Algorithm      string
-	SigningMethod  SigningMethod
-	SymmetricKey   string
-	PrivateKeyPath string
-	PublicKeyPath  string
-	AccessToken    AccessTokenConfig
-	RefreshToken   RefreshTokenConfig
+	Algorithm      string             // JWT signing algorithm (e.g., "HS256", "RS256")
+	SigningMethod  SigningMethod      // Cryptographic method (symmetric or asymmetric)
+	SymmetricKey   string             // Secret key for symmetric signing
+	PrivateKeyPath string             // Path to private key for asymmetric signing
+	PublicKeyPath  string             // Path to public key for asymmetric signing
+	AccessToken    AccessTokenConfig  // Configuration specific to access tokens
+	RefreshToken   RefreshTokenConfig // Configuration specific to refresh tokens
 }
 
-// AccessTokenConfig holds configuration specific to access tokens.
+// AccessTokenConfig contains settings specific to access tokens.
 type AccessTokenConfig struct {
-	Duration          time.Duration
-	MaxLifetime       time.Duration
-	Issuer            string
-	Audience          []string
-	AllowedAlgorithms []string
-	RequiredClaims    []string
+	Duration          time.Duration // Lifetime of the access token
+	MaxLifetime       time.Duration // Maximum absolute lifetime from creation
+	Issuer            string        // Token issuer identifier
+	Audience          []string      // Intended recipients of the token
+	AllowedAlgorithms []string      // Permitted signing algorithms
+	RequiredClaims    []string      // Mandatory claims that must be present
 }
 
-// RefreshTokenConfig holds configuration specific to refresh tokens.
+// RefreshTokenConfig contains settings specific to refresh tokens.
 type RefreshTokenConfig struct {
-	Duration        time.Duration
-	MaxLifetime     time.Duration
-	ReuseInterval   time.Duration
-	RotationEnabled bool
-	FamilyEnabled   bool
-	MaxPerUser      int
+	Duration        time.Duration // Lifetime of the refresh token
+	MaxLifetime     time.Duration // Maximum absolute lifetime from creation
+	ReuseInterval   time.Duration // Minimum time before a refresh token can be reused
+	RotationEnabled bool          // Whether token rotation is enabled
+	FamilyEnabled   bool          // Whether to maintain token families
+	MaxPerUser      int           // Maximum number of active refresh tokens per user
 }
 
-// AccessTokenClaims contains claims specific to access tokens.
+// AccessTokenClaims represents the JWT claims specific to access tokens.
 type AccessTokenClaims struct {
-	ID        uuid.UUID `json:"jti"`
-	Subject   uuid.UUID `json:"sub"`
-	Username  string    `json:"usr"`
-	SessionID uuid.UUID `json:"sid"`
-	IssuedAt  time.Time `json:"iat"`
-	ExpiresAt time.Time `json:"exp"`
-	TokenType TokenType `json:"typ"`
-	Role      string    `json:"rol"`
+	ID        uuid.UUID `json:"jti"` // Unique token identifier
+	Subject   uuid.UUID `json:"sub"` // Subject (user ID)
+	Username  string    `json:"usr"` // Username
+	SessionID uuid.UUID `json:"sid"` // Session identifier
+	IssuedAt  time.Time `json:"iat"` // Time when token was issued
+	ExpiresAt time.Time `json:"exp"` // Time when token expires
+	TokenType TokenType `json:"typ"` // Type of token (access)
+	Role      string    `json:"rol"` // User role/privileges
 }
 
-// RefreshTokenClaims contains claims specific to refresh tokens.
+// RefreshTokenClaims represents the JWT claims specific to refresh tokens.
 type RefreshTokenClaims struct {
-	ID        uuid.UUID `json:"jti"`
-	Subject   uuid.UUID `json:"sub"`
-	Username  string    `json:"usr"`
-	SessionID uuid.UUID `json:"sid"`
-	IssuedAt  time.Time `json:"iat"`
-	ExpiresAt time.Time `json:"exp"`
-	TokenType TokenType `json:"typ"`
+	ID        uuid.UUID `json:"jti"` // Unique token identifier
+	Subject   uuid.UUID `json:"sub"` // Subject (user ID)
+	Username  string    `json:"usr"` // Username
+	SessionID uuid.UUID `json:"sid"` // Session identifier
+	IssuedAt  time.Time `json:"iat"` // Time when token was issued
+	ExpiresAt time.Time `json:"exp"` // Time when token expires
+	TokenType TokenType `json:"typ"` // Type of token (refresh)
 }
 
-// AccessTokenResponse represents the response after creating an access token.
+// AccessTokenResponse contains the response after creating an access token.
 type AccessTokenResponse struct {
-	Token     string    `json:"tok"`
-	Subject   uuid.UUID `json:"sub"`
-	Username  string    `json:"usr"`
-	SessionID uuid.UUID `json:"sid"`
-	ExpiresAt time.Time `json:"exp"`
-	IssuedAt  time.Time `json:"iat"`
-	Role      string    `json:"rol"`
+	Token     string    `json:"tok"` // The signed JWT string
+	Subject   uuid.UUID `json:"sub"` // User ID
+	Username  string    `json:"usr"` // Username
+	SessionID uuid.UUID `json:"sid"` // Session ID
+	ExpiresAt time.Time `json:"exp"` // Expiration time
+	IssuedAt  time.Time `json:"iat"` // Issuance time
+	Role      string    `json:"rol"` // User role
 }
 
-// RefreshTokenResponse represents the response after creating a refresh token.
+// RefreshTokenResponse contains the response after creating a refresh token.
 type RefreshTokenResponse struct {
-	Token     string    `json:"tok"`
-	Subject   uuid.UUID `json:"sub"`
-	Username  string    `json:"usr"`
-	SessionID uuid.UUID `json:"sid"`
-	ExpiresAt time.Time `json:"exp"`
-	IssuedAt  time.Time `json:"iat"`
+	Token     string    `json:"tok"` // The signed JWT string
+	Subject   uuid.UUID `json:"sub"` // User ID
+	Username  string    `json:"usr"` // Username
+	SessionID uuid.UUID `json:"sid"` // Session ID
+	ExpiresAt time.Time `json:"exp"` // Expiration time
+	IssuedAt  time.Time `json:"iat"` // Issuance time
 }
 
 // validateConfig validates the configuration.
@@ -133,24 +134,35 @@ func validateConfig(config *GourdianTokenConfig) error {
 	return nil
 }
 
-// GourdianTokenMaker defines the interface for token management.
+// GourdianTokenMaker defines the interface for token management operations.
 type GourdianTokenMaker interface {
+	// CreateAccessToken generates a new access token for the specified user
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error)
+
+	// CreateRefreshToken generates a new refresh token for the specified user
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
+
+	// VerifyAccessToken validates and parses an access token string
 	VerifyAccessToken(tokenString string) (*AccessTokenClaims, error)
+
+	// VerifyRefreshToken validates and parses a refresh token string
 	VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error)
+
+	// RotateRefreshToken generates a new refresh token while invalidating the old one
 	RotateRefreshToken(oldToken string) (*RefreshTokenResponse, error)
 }
 
-// JWTMaker is the concrete implementation of GourdianTokenMaker using JWT.
+// JWTMaker implements GourdianTokenMaker using JWT tokens.
 type JWTMaker struct {
 	config        GourdianTokenConfig
 	signingMethod jwt.SigningMethod
-	privateKey    interface{} // Can be []byte for HMAC, *rsa.PrivateKey for RSA, or *ecdsa.PrivateKey for ECDSA
-	publicKey     interface{} // Can be []byte for HMAC, *rsa.PublicKey for RSA, or *ecdsa.PublicKey for ECDSA
+	privateKey    interface{} // Key used for signing (HMAC secret, RSA or ECDSA private key)
+	publicKey     interface{} // Key used for verification (HMAC secret, RSA or ECDSA public key)
 }
 
-// NewGourdianTokenMaker (improved version)
+// NewGourdianTokenMaker creates a new token maker instance with the provided configuration.
+// It validates the config, initializes the signing method, and loads cryptographic keys.
+// Returns an error if the configuration is invalid or keys cannot be loaded.
 func NewGourdianTokenMaker(config GourdianTokenConfig) (GourdianTokenMaker, error) {
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -173,7 +185,9 @@ func NewGourdianTokenMaker(config GourdianTokenConfig) (GourdianTokenMaker, erro
 	return maker, nil
 }
 
-// CreateAccessToken creates a new access token.
+// CreateAccessToken generates a new access token with the specified user details.
+// The token includes standard JWT claims along with custom claims for user identity and role.
+// Returns an AccessTokenResponse containing the signed token and its metadata.
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
 	tokenID, err := uuid.NewRandom()
 	if err != nil {
@@ -212,7 +226,9 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 	return response, nil
 }
 
-// CreateRefreshToken creates a new refresh token.
+// CreateRefreshToken generates a new refresh token with the specified user details.
+// Refresh tokens are used to obtain new access tokens without re-authentication.
+// Returns a RefreshTokenResponse containing the signed token and its metadata.
 func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) {
 	tokenID, err := uuid.NewRandom()
 	if err != nil {
@@ -249,7 +265,9 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 	return response, nil
 }
 
-// VerifyAccessToken (improved version)
+// VerifyAccessToken validates an access token string and returns its claims.
+// It checks the token signature, expiration, and required claims.
+// Returns AccessTokenClaims if valid, otherwise returns an error.
 func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != maker.signingMethod.Alg() {
@@ -280,7 +298,9 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 	return mapToAccessClaims(claims)
 }
 
-// VerifyRefreshToken (improved version)
+// VerifyRefreshToken validates a refresh token string and returns its claims.
+// It checks the token signature, expiration, and required claims.
+// Returns RefreshTokenClaims if valid, otherwise returns an error.
 func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != maker.signingMethod.Alg() {
@@ -306,6 +326,9 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 	return mapToRefreshClaims(claims)
 }
 
+// RotateRefreshToken generates a new refresh token while invalidating the old one.
+// This implements refresh token rotation for enhanced security.
+// Returns a new RefreshTokenResponse if successful, otherwise returns an error.
 func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenResponse, error) {
 	claims, err := maker.VerifyRefreshToken(oldToken)
 	if err != nil {
