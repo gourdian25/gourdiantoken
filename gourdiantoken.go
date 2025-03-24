@@ -145,14 +145,38 @@ type RefreshTokenConfig struct {
 // Returns:
 // A fully configured GourdianTokenConfig with no implicit defaults.
 //
-// Asymmetric Example:
+// Examples:
+//
+// # Symmetric Example (HMAC):
+//
+//	config := NewGourdianTokenConfig(
+//	    "HS256",
+//	    Symmetric,
+//	    "your-32-byte-secret-key-1234567890abcdef",
+//	    "",                          // privateKeyPath (empty for symmetric)
+//	    "",                          // publicKeyPath (empty for symmetric)
+//	    30*time.Minute,              // accessDuration
+//	    24*time.Hour,                // accessMaxLifetime
+//	    "auth.myapp.com",            // accessIssuer
+//	    []string{"api.myapp.com"},   // accessAudience
+//	    []string{"HS256"},           // accessAllowedAlgorithms
+//	    []string{"jti", "sub", "exp", "iat", "typ"}, // accessRequiredClaims
+//	    24*time.Hour,                // refreshDuration
+//	    7*24*time.Hour,              // refreshMaxLifetime
+//	    2*time.Minute,               // refreshReuseInterval
+//	    true,                       // refreshRotationEnabled
+//	    false,                      // refreshFamilyEnabled
+//	    10,                         // refreshMaxPerUser
+//	)
+//
+// # Asymmetric Example (RSA):
 //
 //	config := NewGourdianTokenConfig(
 //	    "RS256",
 //	    Asymmetric,
-//	    "",
-//	    "/path/to/private.pem",
-//	    "/path/to/public.pem",
+//	    "",                          // symmetricKey (empty for asymmetric)
+//	    "/path/to/private.pem",      // privateKeyPath
+//	    "/path/to/public.pem",       // publicKeyPath
 //	    1*time.Hour,                // accessDuration
 //	    24*time.Hour,               // accessMaxLifetime
 //	    "myapp.com",                // accessIssuer

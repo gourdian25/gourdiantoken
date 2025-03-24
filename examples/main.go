@@ -11,6 +11,4 @@ func main() {
 	// Example 3: Token refresh example
 	refreshTokenExample()
 
-	// Example 4: Middleware example
-	tokenValidationMiddlewareExample()
 }
