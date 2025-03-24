@@ -11,4 +11,5 @@ func main() {
 	// Example 3: Token refresh example
 	refreshTokenExample()
 
+	defaultUsageExample()
 }

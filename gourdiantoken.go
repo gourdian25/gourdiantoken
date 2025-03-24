@@ -236,6 +236,48 @@ func NewGourdianTokenConfig(
 	}
 }
 
+// DefaultGourdianTokenConfig returns a secure default configuration for common use cases.
+//
+// This configuration provides:
+// - HMAC-SHA256 symmetric signing (recommended for single-service deployments)
+// - Secure defaults for both access and refresh tokens
+// - Reasonable security constraints out of the box
+//
+// # Security Defaults
+// - Access tokens: 30 minute lifetime (24 hour maximum)
+// - Refresh tokens: 7 day lifetime (30 day maximum)
+// - Refresh token rotation enabled
+// - Minimum 1 minute reuse interval
+// - Strict claim requirements
+//
+// Note: You MUST provide your own symmetric key for production use.
+// The empty string placeholder will cause initialization to fail.
+func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
+	return GourdianTokenConfig{
+		Algorithm:      "HS256",
+		SigningMethod:  Symmetric,
+		SymmetricKey:   symmetricKey, // Must be at least 32 bytes
+		PrivateKeyPath: "",
+		PublicKeyPath:  "",
+		AccessToken: AccessTokenConfig{
+			Duration:          30 * time.Minute,
+			MaxLifetime:       24 * time.Hour,
+			Issuer:            "",
+			Audience:          nil,
+			AllowedAlgorithms: []string{"HS256"},
+			RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "rol"},
+		},
+		RefreshToken: RefreshTokenConfig{
+			Duration:        7 * 24 * time.Hour,
+			MaxLifetime:     30 * 24 * time.Hour,
+			ReuseInterval:   time.Minute,
+			RotationEnabled: true,
+			FamilyEnabled:   false,
+			MaxPerUser:      5,
+		},
+	}
+}
+
 // AccessTokenClaims represents the JWT claims specific to access tokens.
 type AccessTokenClaims struct {
 	ID        uuid.UUID `json:"jti"` // Unique token identifier

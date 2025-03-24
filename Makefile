@@ -1,5 +1,5 @@
 # Makefile
-VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.1-dev")
+VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.2")
 
 .PHONY: build
 build:
