@@ -30,36 +30,184 @@ const (
 	Asymmetric SigningMethod = "asymmetric" // Asymmetric uses RSA/ECDSA with public/private key pairs
 )
 
-// GourdianTokenConfig holds configuration for token generation and verification.
-// It includes settings for both access and refresh tokens as well as cryptographic options.
+// GourdianTokenConfig holds the complete configuration for JWT token generation and verification.
+//
+// This struct serves as the central configuration point for the token system, containing:
+// - Cryptographic settings (algorithm, keys)
+// - Access token specific configuration
+// - Refresh token specific configuration
+//
+// # Required Fields
+// - Algorithm: Must be one of the supported JWT algorithms (HS256/384/512, RS256/384/512, ES256/384/512)
+// - SigningMethod: Must be either Symmetric or Asymmetric
+//
+// # Field Requirements
+// For Symmetric signing:
+// - SymmetricKey: Required (minimum 32 bytes)
+// - PrivateKeyPath/PublicKeyPath: Must be empty
+//
+// For Asymmetric signing:
+// - PrivateKeyPath: Required (path to PEM-encoded private key)
+// - PublicKeyPath: Required (path to PEM-encoded public key or certificate)
+// - SymmetricKey: Must be empty
+//
+// # Example
+// Typical usage involves creating a config with NewGourdianTokenConfig() or manually:
+//
+//	config := GourdianTokenConfig{
+//	    Algorithm:     "HS256",
+//	    SigningMethod: Symmetric,
+//	    SymmetricKey:  "your-32-byte-secure-key-1234567890abcdef",
+//	    AccessToken: AccessTokenConfig{
+//	        Duration: time.Hour,
+//	    },
+//	}
 type GourdianTokenConfig struct {
-	Algorithm      string             // JWT signing algorithm (e.g., "HS256", "RS256")
+	Algorithm      string             // JWT signing algorithm (e.g., "HS256", "RS256", "ES256")
 	SigningMethod  SigningMethod      // Cryptographic method (symmetric or asymmetric)
-	SymmetricKey   string             // Secret key for symmetric signing
+	SymmetricKey   string             // Secret key for symmetric signing (min 32 bytes)
 	PrivateKeyPath string             // Path to private key for asymmetric signing
-	PublicKeyPath  string             // Path to public key for asymmetric signing
+	PublicKeyPath  string             // Path to public key for asymmetric verification
 	AccessToken    AccessTokenConfig  // Configuration specific to access tokens
 	RefreshToken   RefreshTokenConfig // Configuration specific to refresh tokens
 }
 
-// AccessTokenConfig contains settings specific to access tokens.
+// AccessTokenConfig contains settings specific to access tokens (short-lived API tokens).
+//
+// These tokens typically have:
+// - Short lifetimes (minutes to hours)
+// - Specific roles/permissions
+// - Strict validation requirements
+//
+// # Recommended Settings
+// - Duration: 15 minutes to 1 hour for most applications
+// - MaxLifetime: 24 hours maximum for security
+// - RequiredClaims: At minimum ["jti", "sub", "exp", "iat"]
+//
+// # Security Notes
+// Always set:
+// - Issuer for validation
+// - Audience when tokens are consumed by multiple services
 type AccessTokenConfig struct {
-	Duration          time.Duration // Lifetime of the access token
-	MaxLifetime       time.Duration // Maximum absolute lifetime from creation
-	Issuer            string        // Token issuer identifier
-	Audience          []string      // Intended recipients of the token
-	AllowedAlgorithms []string      // Permitted signing algorithms
-	RequiredClaims    []string      // Mandatory claims that must be present
+	Duration          time.Duration // Token validity duration from issuance
+	MaxLifetime       time.Duration // Absolute maximum lifetime from creation time
+	Issuer            string        // Token issuer (e.g., "auth.example.com")
+	Audience          []string      // Intended recipients (e.g., ["api.example.com"])
+	AllowedAlgorithms []string      // Permitted algorithms for verification
+	RequiredClaims    []string      // Mandatory claims (e.g., ["jti", "sub", "role"])
 }
 
-// RefreshTokenConfig contains settings specific to refresh tokens.
+// RefreshTokenConfig contains settings specific to refresh tokens (long-lived renewal tokens).
+//
+// These tokens typically have:
+// - Longer lifetimes (days to weeks)
+// - Rotation capabilities
+// - Family tracking for security
+//
+// # Security Recommendations
+// - Enable rotation (RotationEnabled: true)
+// - Set ReuseInterval (e.g., 1 minute)
+// - Consider enabling token families
+// - Limit MaxPerUser (e.g., 5 devices)
 type RefreshTokenConfig struct {
-	Duration        time.Duration // Lifetime of the refresh token
-	MaxLifetime     time.Duration // Maximum absolute lifetime from creation
-	ReuseInterval   time.Duration // Minimum time before a refresh token can be reused
-	RotationEnabled bool          // Whether token rotation is enabled
-	FamilyEnabled   bool          // Whether to maintain token families
-	MaxPerUser      int           // Maximum number of active refresh tokens per user
+	Duration        time.Duration // Token validity duration
+	MaxLifetime     time.Duration // Absolute maximum lifetime
+	ReuseInterval   time.Duration // Minimum time between reuse attempts
+	RotationEnabled bool          // Whether to enable automatic rotation
+	FamilyEnabled   bool          // Whether to track token families
+	MaxPerUser      int           // Maximum concurrent tokens per user
+}
+
+// NewGourdianTokenConfig creates a fully configured GourdianTokenConfig with explicit parameters for all settings.
+//
+// This constructor provides maximum flexibility by requiring all configuration values to be specified,
+// avoiding hidden defaults and making the configuration completely explicit.
+//
+// Parameters:
+//   - algorithm: JWT signing algorithm (e.g., "HS256", "RS256", "ES256")
+//   - signingMethod: Cryptographic method (Symmetric or Asymmetric)
+//   - symmetricKey: Secret key for symmetric signing (leave empty for asymmetric)
+//   - privateKeyPath: Path to private key file (leave empty for symmetric)
+//   - publicKeyPath: Path to public key file (leave empty for symmetric)
+//   - accessDuration: Access token validity duration
+//   - accessMaxLifetime: Maximum absolute lifetime for access tokens
+//   - accessIssuer: Issuer claim for access tokens
+//   - accessAudience: Audience claims for access tokens
+//   - accessAllowedAlgorithms: Permitted algorithms for access token verification
+//   - accessRequiredClaims: Mandatory claims for access tokens
+//   - refreshDuration: Refresh token validity duration
+//   - refreshMaxLifetime: Maximum absolute lifetime for refresh tokens
+//   - refreshReuseInterval: Minimum time between refresh token reuse
+//   - refreshRotationEnabled: Whether refresh token rotation is enabled
+//   - refreshFamilyEnabled: Whether token family tracking is enabled
+//   - refreshMaxPerUser: Maximum concurrent refresh tokens per user
+//
+// Returns:
+// A fully configured GourdianTokenConfig with no implicit defaults.
+//
+// Asymmetric Example:
+//
+//	config := NewGourdianTokenConfig(
+//	    "RS256",
+//	    Asymmetric,
+//	    "",
+//	    "/path/to/private.pem",
+//	    "/path/to/public.pem",
+//	    1*time.Hour,                // accessDuration
+//	    24*time.Hour,               // accessMaxLifetime
+//	    "myapp.com",                // accessIssuer
+//	    []string{"api.myapp.com"},  // accessAudience
+//	    []string{"RS256"},          // accessAllowedAlgorithms
+//	    []string{"jti", "sub"},     // accessRequiredClaims
+//	    7*24*time.Hour,             // refreshDuration
+//	    30*24*time.Hour,            // refreshMaxLifetime
+//	    time.Minute,                // refreshReuseInterval
+//	    true,                       // refreshRotationEnabled
+//	    true,                       // refreshFamilyEnabled
+//	    5,                          // refreshMaxPerUser
+//	)
+func NewGourdianTokenConfig(
+	algorithm string,
+	signingMethod SigningMethod,
+	symmetricKey string,
+	privateKeyPath string,
+	publicKeyPath string,
+	accessDuration time.Duration,
+	accessMaxLifetime time.Duration,
+	accessIssuer string,
+	accessAudience []string,
+	accessAllowedAlgorithms []string,
+	accessRequiredClaims []string,
+	refreshDuration time.Duration,
+	refreshMaxLifetime time.Duration,
+	refreshReuseInterval time.Duration,
+	refreshRotationEnabled bool,
+	refreshFamilyEnabled bool,
+	refreshMaxPerUser int,
+) GourdianTokenConfig {
+	return GourdianTokenConfig{
+		Algorithm:      algorithm,
+		SigningMethod:  signingMethod,
+		SymmetricKey:   symmetricKey,
+		PrivateKeyPath: privateKeyPath,
+		PublicKeyPath:  publicKeyPath,
+		AccessToken: AccessTokenConfig{
+			Duration:          accessDuration,
+			MaxLifetime:       accessMaxLifetime,
+			Issuer:            accessIssuer,
+			Audience:          accessAudience,
+			AllowedAlgorithms: accessAllowedAlgorithms,
+			RequiredClaims:    accessRequiredClaims,
+		},
+		RefreshToken: RefreshTokenConfig{
+			Duration:        refreshDuration,
+			MaxLifetime:     refreshMaxLifetime,
+			ReuseInterval:   refreshReuseInterval,
+			RotationEnabled: refreshRotationEnabled,
+			FamilyEnabled:   refreshFamilyEnabled,
+			MaxPerUser:      refreshMaxPerUser,
+		},
+	}
 }
 
 // AccessTokenClaims represents the JWT claims specific to access tokens.
