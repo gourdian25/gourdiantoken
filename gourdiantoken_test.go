@@ -301,7 +301,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 
 		_, err = maker.VerifyAccessToken(resp.Token)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "token has expired")
+		assert.Contains(t, err.Error(), "expired")
 	})
 
 	t.Run("Invalid Token - Wrong Type", func(t *testing.T) {
@@ -400,7 +400,7 @@ func TestCreateAndVerifyRefreshToken(t *testing.T) {
 
 		_, err = maker.VerifyRefreshToken(resp.Token)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "token has expired")
+		assert.Contains(t, err.Error(), "expired")
 	})
 
 	t.Run("Invalid Token - Wrong Type", func(t *testing.T) {

@@ -11,7 +11,7 @@ import (
 
 func TestClaimsSerialization(t *testing.T) {
 	t.Run("AccessTokenClaims", func(t *testing.T) {
-		now := time.Now()
+		now := time.Now().UTC() // Use UTC for consistency
 		claims := AccessTokenClaims{
 			ID:        uuid.New(),
 			Subject:   uuid.New(),
@@ -30,6 +30,8 @@ func TestClaimsSerialization(t *testing.T) {
 		var decoded AccessTokenClaims
 		err = json.Unmarshal(jsonData, &decoded)
 		assert.NoError(t, err)
+
+		// Compare fields individually
 		assert.Equal(t, claims.ID, decoded.ID)
 		assert.Equal(t, claims.Subject, decoded.Subject)
 		assert.Equal(t, claims.Username, decoded.Username)
@@ -45,8 +47,8 @@ func TestClaimsSerialization(t *testing.T) {
 		assert.Equal(t, claims.Subject.String(), mapClaims["sub"])
 		assert.Equal(t, claims.Username, mapClaims["usr"])
 		assert.Equal(t, claims.SessionID.String(), mapClaims["sid"])
-		assert.Equal(t, claims.IssuedAt.Unix(), int64(mapClaims["iat"].(float64)))
-		assert.Equal(t, claims.ExpiresAt.Unix(), int64(mapClaims["exp"].(float64)))
+		assert.Equal(t, claims.IssuedAt.Unix(), mapClaims["iat"])
+		assert.Equal(t, claims.ExpiresAt.Unix(), mapClaims["exp"])
 		assert.Equal(t, string(claims.TokenType), mapClaims["typ"])
 		assert.Equal(t, claims.Role, mapClaims["rol"])
 	})
@@ -84,8 +86,8 @@ func TestClaimsSerialization(t *testing.T) {
 		assert.Equal(t, claims.Subject.String(), mapClaims["sub"])
 		assert.Equal(t, claims.Username, mapClaims["usr"])
 		assert.Equal(t, claims.SessionID.String(), mapClaims["sid"])
-		assert.Equal(t, claims.IssuedAt.Unix(), int64(mapClaims["iat"].(float64)))
-		assert.Equal(t, claims.ExpiresAt.Unix(), int64(mapClaims["exp"].(float64)))
+		assert.Equal(t, claims.IssuedAt.Unix(), mapClaims["iat"])
+		assert.Equal(t, claims.ExpiresAt.Unix(), mapClaims["exp"])
 		assert.Equal(t, string(claims.TokenType), mapClaims["typ"])
 	})
 }

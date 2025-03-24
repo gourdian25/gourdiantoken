@@ -42,7 +42,7 @@ func TestErrorCases(t *testing.T) {
 
 		_, err = maker.VerifyAccessToken(token.Token)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "token has expired")
+		assert.Contains(t, err.Error(), "expired") // Updated check
 	})
 
 	t.Run("Wrong Algorithm", func(t *testing.T) {

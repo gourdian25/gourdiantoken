@@ -928,8 +928,8 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		IssuedAt:  time.Unix(int64(claims["iat"].(float64)), 0),
-		ExpiresAt: time.Unix(int64(claims["exp"].(float64)), 0),
+		IssuedAt:  time.Unix(getUnixTime(claims["iat"]), 0),
+		ExpiresAt: time.Unix(getUnixTime(claims["exp"]), 0),
 		TokenType: TokenType(claims["typ"].(string)),
 		Role:      role,
 	}, nil
@@ -962,8 +962,19 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		IssuedAt:  time.Unix(int64(claims["iat"].(float64)), 0),
-		ExpiresAt: time.Unix(int64(claims["exp"].(float64)), 0),
+		IssuedAt:  time.Unix(getUnixTime(claims["iat"]), 0),
+		ExpiresAt: time.Unix(getUnixTime(claims["exp"]), 0),
 		TokenType: TokenType(claims["typ"].(string)),
 	}, nil
+}
+
+func getUnixTime(claim interface{}) int64 {
+	switch v := claim.(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	default:
+		return 0
+	}
 }
