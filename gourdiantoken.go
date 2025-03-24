@@ -61,34 +61,6 @@ type RefreshTokenConfig struct {
 	MaxPerUser      int
 }
 
-// validateConfig validates the configuration.
-func validateConfig(config *GourdianTokenConfig) error {
-	switch config.SigningMethod {
-	case Symmetric:
-		if config.SymmetricKey == "" {
-			return fmt.Errorf("symmetric key is required for symmetric signing method")
-		}
-		if len(config.SymmetricKey) < 32 {
-			return fmt.Errorf("symmetric key must be at least 32 bytes")
-		}
-	case Asymmetric:
-		if config.PrivateKeyPath == "" || config.PublicKeyPath == "" {
-			return fmt.Errorf("private and public key paths are required for asymmetric signing method")
-		}
-		// Add file permission checks
-		if err := checkFilePermissions(config.PrivateKeyPath, 0600); err != nil {
-			return fmt.Errorf("insecure private key file permissions: %w", err)
-		}
-		// Add file permission checks
-		if err := checkFilePermissions(config.PublicKeyPath, 0600); err != nil {
-			return fmt.Errorf("insecure public key file permissions: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported signing method: %s, supports %s and %s ", config.SigningMethod, Symmetric, Asymmetric)
-	}
-	return nil
-}
-
 // AccessTokenClaims contains claims specific to access tokens.
 type AccessTokenClaims struct {
 	ID        uuid.UUID `json:"jti"`
@@ -133,12 +105,41 @@ type RefreshTokenResponse struct {
 	IssuedAt  time.Time `json:"iat"`
 }
 
+// validateConfig validates the configuration.
+func validateConfig(config *GourdianTokenConfig) error {
+	switch config.SigningMethod {
+	case Symmetric:
+		if config.SymmetricKey == "" {
+			return fmt.Errorf("symmetric key is required for symmetric signing method")
+		}
+		if len(config.SymmetricKey) < 32 {
+			return fmt.Errorf("symmetric key must be at least 32 bytes")
+		}
+	case Asymmetric:
+		if config.PrivateKeyPath == "" || config.PublicKeyPath == "" {
+			return fmt.Errorf("private and public key paths are required for asymmetric signing method")
+		}
+		// Add file permission checks
+		if err := checkFilePermissions(config.PrivateKeyPath, 0600); err != nil {
+			return fmt.Errorf("insecure private key file permissions: %w", err)
+		}
+		// Add file permission checks
+		if err := checkFilePermissions(config.PublicKeyPath, 0600); err != nil {
+			return fmt.Errorf("insecure public key file permissions: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported signing method: %s, supports %s and %s ", config.SigningMethod, Symmetric, Asymmetric)
+	}
+	return nil
+}
+
 // GourdianTokenMaker defines the interface for token management.
 type GourdianTokenMaker interface {
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
 	VerifyAccessToken(tokenString string) (*AccessTokenClaims, error)
 	VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error)
+	RotateRefreshToken(oldToken string) (*RefreshTokenResponse, error)
 }
 
 // JWTMaker is the concrete implementation of GourdianTokenMaker using JWT.
@@ -149,7 +150,7 @@ type JWTMaker struct {
 	publicKey     interface{} // Can be []byte for HMAC, *rsa.PublicKey for RSA, or *ecdsa.PublicKey for ECDSA
 }
 
-// NewGourdianTokenMaker creates a new instance of JWTMaker.
+// NewGourdianTokenMaker (improved version)
 func NewGourdianTokenMaker(config GourdianTokenConfig) (GourdianTokenMaker, error) {
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -159,6 +160,12 @@ func NewGourdianTokenMaker(config GourdianTokenConfig) (GourdianTokenMaker, erro
 		config: config,
 	}
 
+	// Initialize signing method first
+	if err := maker.initializeSigningMethod(); err != nil {
+		return nil, fmt.Errorf("failed to initialize signing method: %w", err)
+	}
+
+	// Then initialize keys
 	if err := maker.initializeKeys(); err != nil {
 		return nil, fmt.Errorf("failed to initialize keys: %w", err)
 	}
@@ -242,7 +249,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 	return response, nil
 }
 
-// VerifyAccessToken verifies and decodes an access token.
+// VerifyAccessToken (improved version)
 func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != maker.signingMethod.Alg() {
@@ -260,22 +267,20 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 		return nil, fmt.Errorf("invalid token claims")
 	}
 
-	// Verify token type
-	tokenType, ok := claims["typ"].(string)
-	if !ok || TokenType(tokenType) != AccessToken {
-		return nil, fmt.Errorf("invalid token type: expected access token")
+	// Validate standard claims
+	if err := validateTokenClaims(claims, AccessToken); err != nil {
+		return nil, err
 	}
 
-	// Explicitly check if the token has expired
-	expiresAt, ok := claims["exp"].(float64)
-	if !ok || time.Unix(int64(expiresAt), 0).Before(time.Now()) {
-		return nil, fmt.Errorf("token has expired")
+	// Additional access token specific validation
+	if _, ok := claims["rol"]; !ok {
+		return nil, fmt.Errorf("missing role claim in access token")
 	}
 
 	return mapToAccessClaims(claims)
 }
 
-// VerifyRefreshToken verifies and decodes a refresh token.
+// VerifyRefreshToken (improved version)
 func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != maker.signingMethod.Alg() {
@@ -293,16 +298,9 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 		return nil, fmt.Errorf("invalid token claims")
 	}
 
-	// Verify token type
-	tokenType, ok := claims["typ"].(string)
-	if !ok || TokenType(tokenType) != RefreshToken {
-		return nil, fmt.Errorf("invalid token type: expected refresh token")
-	}
-
-	// Explicitly check if the token has expired
-	expiresAt, ok := claims["exp"].(float64)
-	if !ok || time.Unix(int64(expiresAt), 0).Before(time.Now()) {
-		return nil, fmt.Errorf("token has expired")
+	// Validate standard claims
+	if err := validateTokenClaims(claims, RefreshToken); err != nil {
+		return nil, err
 	}
 
 	return mapToRefreshClaims(claims)
@@ -331,7 +329,6 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 	)
 }
 
-// initializeKeys initializes the signing keys based on the configured signing method.
 func (maker *JWTMaker) initializeKeys() error {
 	switch maker.config.SigningMethod {
 	case Symmetric:
@@ -340,51 +337,113 @@ func (maker *JWTMaker) initializeKeys() error {
 		return nil
 
 	case Asymmetric:
-		privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
-		if err != nil {
-			return fmt.Errorf("failed to read private key file: %w", err)
-		}
-
-		publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
-		if err != nil {
-			return fmt.Errorf("failed to read public key file: %w", err)
-		}
-
-		switch maker.signingMethod.Alg() {
-		case "RS256", "RS384", "RS512":
-			privateKey, err := parseRSAPrivateKey(privateKeyBytes)
-			if err != nil {
-				return fmt.Errorf("failed to parse RSA private key: %w", err)
-			}
-			maker.privateKey = privateKey
-
-			publicKey, err := parseRSAPublicKey(publicKeyBytes)
-			if err != nil {
-				return fmt.Errorf("failed to parse RSA public key: %w", err)
-			}
-			maker.publicKey = publicKey
-
-		case "ES256", "ES384", "ES512":
-			privateKey, err := parseECDSAPrivateKey(privateKeyBytes)
-			if err != nil {
-				return fmt.Errorf("failed to parse ECDSA private key: %w", err)
-			}
-			maker.privateKey = privateKey
-
-			publicKey, err := parseECDSAPublicKey(publicKeyBytes)
-			if err != nil {
-				return fmt.Errorf("failed to parse ECDSA public key: %w", err)
-			}
-			maker.publicKey = publicKey
-
-		default:
-			return fmt.Errorf("unsupported algorithm for asymmetric signing: %s", maker.signingMethod.Alg())
-		}
-		return nil
+		return maker.parseKeyPair()
 
 	default:
 		return fmt.Errorf("unsupported signing method: %s", maker.config.SigningMethod)
 	}
+}
+
+// initializeSigningMethod initializes the JWT signing method based on the algorithm
+func (maker *JWTMaker) initializeSigningMethod() error {
+	switch maker.config.Algorithm {
+	case "HS256":
+		maker.signingMethod = jwt.SigningMethodHS256
+	case "HS384":
+		maker.signingMethod = jwt.SigningMethodHS384
+	case "HS512":
+		maker.signingMethod = jwt.SigningMethodHS512
+	case "RS256":
+		maker.signingMethod = jwt.SigningMethodRS256
+	case "RS384":
+		maker.signingMethod = jwt.SigningMethodRS384
+	case "RS512":
+		maker.signingMethod = jwt.SigningMethodRS512
+	case "ES256":
+		maker.signingMethod = jwt.SigningMethodES256
+	case "ES384":
+		maker.signingMethod = jwt.SigningMethodES384
+	case "ES512":
+		maker.signingMethod = jwt.SigningMethodES512
+	default:
+		return fmt.Errorf("unsupported algorithm: %s", maker.config.Algorithm)
+	}
+	return nil
+}
+
+// validateTokenClaims validates the standard JWT claims
+func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
+	// Check required claims
+	requiredClaims := []string{"jti", "sub", "usr", "sid", "iat", "exp", "typ"}
+	for _, claim := range requiredClaims {
+		if _, ok := claims[claim]; !ok {
+			return fmt.Errorf("missing required claim: %s", claim)
+		}
+	}
+
+	// Verify token type
+	tokenType, ok := claims["typ"].(string)
+	if !ok || TokenType(tokenType) != expectedType {
+		return fmt.Errorf("invalid token type: expected %s", expectedType)
+	}
+
+	// Check expiration
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return fmt.Errorf("invalid exp claim type")
+	}
+	if time.Unix(int64(exp), 0).Before(time.Now()) {
+		return fmt.Errorf("token has expired")
+	}
+
+	// Check issued at
+	if iat, ok := claims["iat"].(float64); ok {
+		if time.Unix(int64(iat), 0).After(time.Now()) {
+			return fmt.Errorf("token issued in the future")
+		}
+	}
+
+	return nil
+}
+
+// parseKeyPair parses both private and public keys for asymmetric signing
+func (maker *JWTMaker) parseKeyPair() error {
+	privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to read private key file: %w", err)
+	}
+
+	publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to read public key file: %w", err)
+	}
+
+	switch maker.signingMethod.Alg() {
+	case "RS256", "RS384", "RS512":
+		maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse RSA private key: %w", err)
+		}
+		maker.publicKey, err = parseRSAPublicKey(publicKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse RSA public key: %w", err)
+		}
+
+	case "ES256", "ES384", "ES512":
+		maker.privateKey, err = parseECDSAPrivateKey(privateKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse ECDSA private key: %w", err)
+		}
+		maker.publicKey, err = parseECDSAPublicKey(publicKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse ECDSA public key: %w", err)
+		}
+
+	default:
+		return fmt.Errorf("unsupported algorithm for asymmetric signing: %s", maker.signingMethod.Alg())
+	}
+
+	return nil
 }
 
 // Helper functions to parse PEM encoded keys
@@ -486,6 +545,24 @@ func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("not a valid ECDSA public key")
 	}
 	return ecdsaPub, nil
+}
+
+// checkFilePermissions checks if the file has the required permissions
+func checkFilePermissions(path string, requiredPerm os.FileMode) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Get the actual permissions
+	actualPerm := info.Mode().Perm()
+
+	// Check if the actual permissions are more permissive than required
+	if actualPerm&^requiredPerm != 0 {
+		return fmt.Errorf("file %s has permissions %#o, expected %#o", path, actualPerm, requiredPerm)
+	}
+
+	return nil
 }
 
 // toMapClaims converts claims to jwt.MapClaims.
