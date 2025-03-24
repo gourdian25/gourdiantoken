@@ -7,18 +7,17 @@
 ├── examples
 │   ├── asymmetric_example.go
 │   ├── default_example.go
-│   ├── go.mod
-│   ├── go.sum
 │   ├── keys
 │   │   ├── rsa_private.pem
 │   │   └── rsa_public.pem
 │   ├── main.go
 │   ├── refresh_example.go
-│   └── symmetric_example.go
+│   ├── symmetric_example.go
+│   └── utils.go
 ├── go.mod
 ├── go.sum
 ├── gourdiantoken.go
 ├── tree.txt
 └── version.go
 
-3 directories, 19 files
+3 directories, 18 files

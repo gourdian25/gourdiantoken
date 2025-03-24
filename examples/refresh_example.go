@@ -1,3 +1,4 @@
+// examples/refresh_example.go
 package main
 
 import (
@@ -11,72 +12,119 @@ import (
 )
 
 func refreshTokenExample() {
-	fmt.Println("=== Token Refresh Example ===")
+	printHeader("Token Refresh Flow Example")
 
-	// Use the symmetric example configuration
+	// Configuration with shorter intervals for demo purposes
 	config := gourdiantoken.NewGourdianTokenConfig(
 		"HS256",
 		gourdiantoken.Symmetric,
-		"your-very-secure-secret-key-at-least-32-bytes",
-		"",             // No private key path
-		"",             // No public key path
-		15*time.Minute, // accessDuration
-		24*time.Hour,   // accessMaxLifetime
-		"gourdian-example-app",
-		[]string{"web", "mobile"},
+		"your-32-byte-secret-key-1234567890abcdef",
+		"", "",
+		1*time.Minute, // Short access token for demo
+		10*time.Minute,
+		"auth.example.com",
+		[]string{"api.example.com"},
 		[]string{"HS256"},
-		[]string{"sub", "exp", "jti"},
-		7*24*time.Hour,  // refreshDuration
-		30*24*time.Hour, // refreshMaxLifetime
-		5*time.Minute,   // refreshReuseInterval
-		true,            // refreshRotationEnabled
-		true,            // refreshFamilyEnabled
-		5,               // refreshMaxPerUser
+		[]string{"jti", "sub", "exp", "iat", "typ", "rol"},
+		5*time.Minute, // Refresh token valid for 5 min
+		30*time.Minute,
+		30*time.Second, // Can reuse after 30 seconds (for demo)
+		true,
+		true,
+		5,
 	)
 
+	// Initialize
+	printSection("Initializing Token Maker")
 	maker, err := gourdiantoken.NewGourdianTokenMaker(config)
 	if err != nil {
 		log.Fatalf("Failed to create token maker: %v", err)
 	}
 
-	// Create a refresh token
+	// Initial token creation
+	printSection("Initial Token Creation")
 	userID := uuid.New()
-	username := "john.doe"
+	username := "demo.user@example.com"
 	sessionID := uuid.New()
-	refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+
+	refreshToken, err := maker.CreateRefreshToken(
+		context.Background(),
+		userID,
+		username,
+		sessionID,
+	)
 	if err != nil {
-		log.Fatalf("Failed to create refresh token: %v", err)
+		log.Fatalf("Failed to create initial refresh token: %v", err)
+	}
+	printTokenDetails("Initial Refresh", refreshToken)
+
+	// First access token
+	printSection("First Access Token")
+	accessToken1, err := maker.CreateAccessToken(
+		context.Background(),
+		userID,
+		username,
+		"user",
+		sessionID,
+	)
+	if err != nil {
+		log.Fatalf("Failed to create first access token: %v", err)
+	}
+	printTokenDetails("Access Token 1", accessToken1)
+
+	// Simulate token usage
+	printSection("Simulating API Usage")
+	simulateAPICall(accessToken1.Token)
+	fmt.Println("Waiting for access token to expire...")
+	time.Sleep(65 * time.Second) // Wait slightly longer than access token lifetime
+
+	// Token rotation
+	printSection("Token Rotation")
+	fmt.Println("Attempting to rotate refresh token...")
+
+	// Wait until reuse interval has passed if needed
+	now := time.Now()
+	issuedAt := refreshToken.IssuedAt
+	minReuseTime := issuedAt.Add(config.RefreshToken.ReuseInterval)
+
+	if now.Before(minReuseTime) {
+		waitTime := minReuseTime.Sub(now)
+		fmt.Printf("Waiting %.0f seconds for reuse interval...\n", waitTime.Seconds())
+		time.Sleep(waitTime)
 	}
 
-	// Refresh the token
-	refreshTokenStr := refreshToken.Token
-	refreshClaims, err := maker.VerifyRefreshToken(refreshTokenStr)
+	newRefreshToken, err := maker.RotateRefreshToken(refreshToken.Token)
 	if err != nil {
-		log.Fatalf("Invalid refresh token: %v", err)
+		log.Fatalf("Failed to rotate refresh token: %v", err)
 	}
+	printTokenDetails("New Refresh", newRefreshToken)
 
-	// Extract user information from the refresh token
-	userID = refreshClaims.Subject
-	username = refreshClaims.Username
-	sessionID = refreshClaims.SessionID
-
-	// In a real application, you would look up the user's role from your database
-	role := "admin"
-
-	// Generate a new access token
-	newAccessToken, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+	// New access token
+	printSection("New Access Token")
+	accessToken2, err := maker.CreateAccessToken(
+		context.Background(),
+		userID,
+		username,
+		"user",
+		sessionID,
+	)
 	if err != nil {
 		log.Fatalf("Failed to create new access token: %v", err)
 	}
+	printTokenDetails("Access Token 2", accessToken2)
 
-	// Generate a new refresh token (rotation)
-	newRefreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+	// Verification
+	printSection("Verification")
+	verifyToken(maker, accessToken2.Token, gourdiantoken.AccessToken)
+	verifyToken(maker, newRefreshToken.Token, gourdiantoken.RefreshToken)
+
+	// Security checks
+	printSection("Security Checks")
+	fmt.Println("Attempting to reuse old refresh token...")
+	_, err = maker.RotateRefreshToken(refreshToken.Token)
 	if err != nil {
-		log.Fatalf("Failed to create new refresh token: %v", err)
+		fmt.Printf("✅ Security check passed: %v\n", err)
+	} else {
+		fmt.Println("❌ WARNING: Old refresh token was accepted!")
 	}
-
-	fmt.Println("Token Refresh Successful:")
-	fmt.Printf("  New Access Token: %s...\n", newAccessToken.Token[:30])
-	fmt.Printf("  New Refresh Token: %s...\n", newRefreshToken.Token[:30])
-	fmt.Printf("  User: %s (%s)\n", username, userID)
 }

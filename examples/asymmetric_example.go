@@ -1,3 +1,4 @@
+// examples/asymmetric_example.go
 package main
 
 import (
@@ -11,71 +12,73 @@ import (
 )
 
 func asymmetricExample() {
-	fmt.Println("=== Asymmetric Key Example (RSA) ===")
+	printHeader("Asymmetric Key Example (RSA-SHA256)")
 
-	// Create a configuration with asymmetric keys (RSA)
+	// Configuration
 	config := gourdiantoken.NewGourdianTokenConfig(
 		"RS256",
 		gourdiantoken.Asymmetric,
-		"", // No symmetric key for asymmetric
-		"keys/rsa_private.pem",
-		"keys/rsa_public.pem",
-		15*time.Minute, // accessDuration
-		24*time.Hour,   // accessMaxLifetime
-		"gourdian-example-app",
-		[]string{"web", "mobile"},
+		"", // No symmetric key
+		"examples/keys/rsa_private.pem",
+		"examples/keys/rsa_public.pem",
+		30*time.Minute, // longer access token for demo
+		24*time.Hour,
+		"api.example.com",
+		[]string{"web.example.com", "mobile.example.com"},
 		[]string{"RS256"},
-		[]string{"sub", "exp", "jti"},
-		7*24*time.Hour,  // refreshDuration
-		30*24*time.Hour, // refreshMaxLifetime
-		5*time.Minute,   // refreshReuseInterval
-		true,            // refreshRotationEnabled
-		true,            // refreshFamilyEnabled
-		5,               // refreshMaxPerUser
+		[]string{"jti", "sub", "exp", "iat", "typ", "rol"},
+		14*24*time.Hour, // longer refresh for demo
+		60*24*time.Hour,
+		10*time.Minute, // longer reuse interval
+		true,
+		true,
+		10, // more concurrent tokens allowed
 	)
 
-	// Create a token maker
+	// Initialize
+	printSection("Initializing Token Maker")
 	maker, err := gourdiantoken.NewGourdianTokenMaker(config)
 	if err != nil {
 		log.Fatalf("Failed to create token maker: %v", err)
 	}
+	fmt.Println("Token maker initialized with RSA keys")
 
-	// User and session details
+	// User data
 	userID := uuid.New()
-	username := "jane.doe"
+	username := "jane.doe@example.com"
 	role := "manager"
 	sessionID := uuid.New()
 
-	// Create an access token
-	accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+	// Token creation
+	printSection("Creating Tokens")
+
+	accessToken, err := maker.CreateAccessToken(
+		context.Background(),
+		userID,
+		username,
+		role,
+		sessionID,
+	)
 	if err != nil {
 		log.Fatalf("Failed to create access token: %v", err)
 	}
+	printTokenDetails("Access", accessToken)
 
-	// Create a refresh token
-	refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+	refreshToken, err := maker.CreateRefreshToken(
+		context.Background(),
+		userID,
+		username,
+		sessionID,
+	)
 	if err != nil {
 		log.Fatalf("Failed to create refresh token: %v", err)
 	}
+	printTokenDetails("Refresh", refreshToken)
 
-	// Verify the tokens
-	verifyTokens(maker, accessToken.Token, refreshToken.Token)
-}
+	// Verification
+	verifyToken(maker, accessToken.Token, gourdiantoken.AccessToken)
+	verifyToken(maker, refreshToken.Token, gourdiantoken.RefreshToken)
 
-func verifyTokens(maker gourdiantoken.GourdianTokenMaker, accessToken, refreshToken string) {
-	// Verify access token
-	accessClaims, err := maker.VerifyAccessToken(accessToken)
-	if err != nil {
-		log.Fatalf("Invalid access token: %v", err)
-	}
-	fmt.Printf("Access Token Valid:\n  User: %s (%s)\n  Role: %s\n  Expires: %v\n",
-		accessClaims.Username, accessClaims.Subject, accessClaims.Role, accessClaims.ExpiresAt)
-
-	// Verify refresh token
-	refreshClaims, err := maker.VerifyRefreshToken(refreshToken)
-	if err != nil {
-		log.Fatalf("Invalid refresh token: %v", err)
-	}
-	fmt.Printf("Refresh Token Valid:\n  User: %s (%s)\n  Expires: %v\n",
-		refreshClaims.Username, refreshClaims.Subject, refreshClaims.ExpiresAt)
+	// Simulate usage
+	simulateAPICall(accessToken.Token)
 }

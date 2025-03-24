@@ -1,74 +1,81 @@
+// examples/default_example.go
 package main
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/gourdian25/gourdiantoken"
 )
 
 func defaultUsageExample() {
-	// Generate a secure random key (in production, use a proper key management system)
-	// This is just for demonstration - in real usage, the key should come from secure storage
-	secretKey := "your-32-byte-secret-key-1234567890abcdef" // Replace with actual 32+ byte key
+	printHeader("Default Configuration Example")
 
-	// Create default configuration
-	config := gourdiantoken.DefaultGourdianTokenConfig(secretKey)
+	// Using default configuration
+	printSection("Creating Default Config")
+	config := gourdiantoken.DefaultGourdianTokenConfig(
+		"your-32-byte-secret-key-1234567890abcdef",
+	)
 
-	// Customize specific settings if needed
+	// Customize minimal required settings
 	config.AccessToken.Issuer = "myapp.com"
-	config.AccessToken.Audience = []string{"api.myapp.com"}
+	config.AccessToken.Audience = []string{"api.myapp.com", "web.myapp.com"}
 
-	// Initialize token maker
+	// Initialize
+	printSection("Initializing Token Maker")
 	maker, err := gourdiantoken.NewGourdianTokenMaker(config)
 	if err != nil {
 		log.Fatalf("Failed to create token maker: %v", err)
 	}
+	fmt.Println("Token maker initialized with default configuration")
 
-	// Create sample user data
+	// User data
 	userID := uuid.New()
+	username := "new.user@myapp.com"
 	sessionID := uuid.New()
 
-	// Create access token
+	// Token creation
+	printSection("Creating Tokens")
 	accessToken, err := maker.CreateAccessToken(
 		context.Background(),
 		userID,
-		"john_doe",
-		"admin",
+		username,
+		"user", // default role
 		sessionID,
 	)
 	if err != nil {
 		log.Fatalf("Failed to create access token: %v", err)
 	}
+	printTokenDetails("Access", accessToken)
 
-	log.Printf("Created access token:\nToken: %s\nExpires: %v",
-		accessToken.Token,
-		accessToken.ExpiresAt.Format(time.RFC3339),
-	)
-
-	// Create refresh token
 	refreshToken, err := maker.CreateRefreshToken(
 		context.Background(),
 		userID,
-		"john_doe",
+		username,
 		sessionID,
 	)
 	if err != nil {
 		log.Fatalf("Failed to create refresh token: %v", err)
 	}
+	printTokenDetails("Refresh", refreshToken)
 
-	log.Printf("Created refresh token:\nToken: %s\nExpires: %v",
-		refreshToken.Token,
-		refreshToken.ExpiresAt.Format(time.RFC3339),
-	)
+	// Verification
+	verifyToken(maker, accessToken.Token, gourdiantoken.AccessToken)
+	verifyToken(maker, refreshToken.Token, gourdiantoken.RefreshToken)
 
-	// Verify access token
-	claims, err := maker.VerifyAccessToken(accessToken.Token)
+	// Full lifecycle demo
+	printSection("Full Lifecycle Demo")
+	fmt.Println("1. User authenticates and receives tokens")
+	fmt.Println("2. User makes API requests with access token")
+	simulateAPICall(accessToken.Token)
+	fmt.Println("3. Access token expires")
+	fmt.Println("4. Client uses refresh token to get new tokens")
+
+	newRefreshToken, err := maker.RotateRefreshToken(refreshToken.Token)
 	if err != nil {
-		log.Fatalf("Token verification failed: %v", err)
+		log.Fatalf("Failed to rotate refresh token: %v", err)
 	}
-
-	log.Printf("Token verified for user %s (role: %s)", claims.Username, claims.Role)
+	printTokenDetails("Rotated Refresh", newRefreshToken)
 }
