@@ -30,7 +30,14 @@ func TestClaimsSerialization(t *testing.T) {
 		var decoded AccessTokenClaims
 		err = json.Unmarshal(jsonData, &decoded)
 		assert.NoError(t, err)
-		assert.Equal(t, claims, decoded)
+		assert.Equal(t, claims.ID, decoded.ID)
+		assert.Equal(t, claims.Subject, decoded.Subject)
+		assert.Equal(t, claims.Username, decoded.Username)
+		assert.Equal(t, claims.SessionID, decoded.SessionID)
+		assert.Equal(t, claims.IssuedAt.Unix(), decoded.IssuedAt.Unix())
+		assert.Equal(t, claims.ExpiresAt.Unix(), decoded.ExpiresAt.Unix())
+		assert.Equal(t, claims.TokenType, decoded.TokenType)
+		assert.Equal(t, claims.Role, decoded.Role)
 
 		// Test MapClaims conversion
 		mapClaims := toMapClaims(claims)
@@ -63,7 +70,13 @@ func TestClaimsSerialization(t *testing.T) {
 		var decoded RefreshTokenClaims
 		err = json.Unmarshal(jsonData, &decoded)
 		assert.NoError(t, err)
-		assert.Equal(t, claims, decoded)
+		assert.Equal(t, claims.ID, decoded.ID)
+		assert.Equal(t, claims.Subject, decoded.Subject)
+		assert.Equal(t, claims.Username, decoded.Username)
+		assert.Equal(t, claims.SessionID, decoded.SessionID)
+		assert.Equal(t, claims.IssuedAt.Unix(), decoded.IssuedAt.Unix())
+		assert.Equal(t, claims.ExpiresAt.Unix(), decoded.ExpiresAt.Unix())
+		assert.Equal(t, claims.TokenType, decoded.TokenType)
 
 		// Test MapClaims conversion
 		mapClaims := toMapClaims(claims)
