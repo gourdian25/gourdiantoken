@@ -161,8 +161,70 @@ type JWTMaker struct {
 }
 
 // NewGourdianTokenMaker creates a new token maker instance with the provided configuration.
-// It validates the config, initializes the signing method, and loads cryptographic keys.
-// Returns an error if the configuration is invalid or keys cannot be loaded.
+// This is the primary initialization function for the token management system.
+//
+// The function performs several critical operations:
+//  1. Validates the configuration for completeness and security
+//  2. Initializes the appropriate JWT signing method based on configuration
+//  3. Loads and verifies cryptographic keys (either symmetric or asymmetric)
+//  4. Returns a ready-to-use token maker instance implementing GourdianTokenMaker
+//
+// # Configuration Requirements
+//
+// For symmetric signing (HMAC):
+//   - Must provide SymmetricKey (minimum 32 bytes)
+//   - Supported algorithms: HS256, HS384, HS512
+//
+// For asymmetric signing (RSA/ECDSA):
+//   - Must provide both PrivateKeyPath and PublicKeyPath
+//   - Files must have secure permissions (0600)
+//   - Supported algorithms:
+//   - RSA: RS256, RS384, RS512
+//   - ECDSA: ES256, ES384, ES512
+//
+// # Example Usage
+//
+// ## Symmetric Key Example
+//
+//	config := GourdianTokenConfig{
+//	    Algorithm:     "HS256",
+//	    SigningMethod: Symmetric,
+//	    SymmetricKey:  "your-32-byte-secret-key-here-1234567890",
+//	    AccessToken: AccessTokenConfig{
+//	        Duration:    30 * time.Minute,
+//	        MaxLifetime: 24 * time.Hour,
+//	    },
+//	    RefreshToken: RefreshTokenConfig{
+//	        Duration:        7 * 24 * time.Hour,
+//	        RotationEnabled: true,
+//	    },
+//	}
+//	maker, err := NewGourdianTokenMaker(config)
+//
+// ## Asymmetric Key Example
+//
+//	config := GourdianTokenConfig{
+//	    Algorithm:      "RS256",
+//	    SigningMethod:  Asymmetric,
+//	    PrivateKeyPath: "/path/to/private.pem",
+//	    PublicKeyPath:  "/path/to/public.pem",
+//	    AccessToken: AccessTokenConfig{
+//	        Duration:    time.Hour,
+//	        Issuer:      "your-issuer",
+//	        Audience:    []string{"your-audience"},
+//	    },
+//	}
+//	maker, err := NewGourdianTokenMaker(config)
+//
+// # Error Handling
+//
+// The function may return various errors including:
+//   - ErrInvalidConfig: When configuration is incomplete or invalid
+//   - ErrUnsupportedAlgorithm: When specified algorithm isn't supported
+//   - ErrKeyInitialization: When key loading or parsing fails
+//   - ErrInsecureKeyFile: When key file permissions are too permissive
+//
+// The returned GourdianTokenMaker is safe for concurrent use by multiple goroutines.
 func NewGourdianTokenMaker(config GourdianTokenConfig) (GourdianTokenMaker, error) {
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
