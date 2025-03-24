@@ -611,6 +611,11 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		return nil, fmt.Errorf("invalid session ID: %w", err)
 	}
 
+	username, ok := claims["usr"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid username type: expected string")
+	}
+
 	// Get role as string directly
 	role, ok := claims["rol"].(string)
 	if !ok {
@@ -620,7 +625,7 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 	return &AccessTokenClaims{
 		ID:        tokenID,
 		Subject:   userID,
-		Username:  claims["usr"].(string),
+		Username:  username,
 		SessionID: sessionID,
 		IssuedAt:  time.Unix(int64(claims["iat"].(float64)), 0),
 		ExpiresAt: time.Unix(int64(claims["exp"].(float64)), 0),
@@ -646,10 +651,15 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 		return nil, fmt.Errorf("invalid session ID: %w", err)
 	}
 
+	username, ok := claims["usr"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid username type: expected string")
+	}
+
 	return &RefreshTokenClaims{
 		ID:        tokenID,
 		Subject:   userID,
-		Username:  claims["usr"].(string),
+		Username:  username,
 		SessionID: sessionID,
 		IssuedAt:  time.Unix(int64(claims["iat"].(float64)), 0),
 		ExpiresAt: time.Unix(int64(claims["exp"].(float64)), 0),
