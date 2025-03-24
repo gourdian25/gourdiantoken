@@ -2,8 +2,6 @@
 ├── CONTRIBUTING.md
 ├── LICENSE
 ├── Readme.md
-├── claim.go
-├── config.go
 ├── doc.go
 ├── examples
 │   ├── asymmetric_example.go
@@ -17,11 +15,7 @@
 │   └── token_helpers.go
 ├── go.mod
 ├── go.sum
-├── gourdiantoken
-│   └── GourdianTokenMaker.go
-├── helpers.go
-├── keys.go
-├── maker.go
+├── gourdiantoken.go
 └── tree.txt
 
-3 directories, 22 files
+2 directories, 17 files
