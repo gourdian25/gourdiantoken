@@ -68,9 +68,20 @@ func validateConfig(config *GourdianTokenConfig) error {
 		if config.SymmetricKey == "" {
 			return fmt.Errorf("symmetric key is required for symmetric signing method")
 		}
+		if len(config.SymmetricKey) < 32 {
+			return fmt.Errorf("symmetric key must be at least 32 bytes")
+		}
 	case Asymmetric:
 		if config.PrivateKeyPath == "" || config.PublicKeyPath == "" {
 			return fmt.Errorf("private and public key paths are required for asymmetric signing method")
+		}
+		// Add file permission checks
+		if err := checkFilePermissions(config.PrivateKeyPath, 0600); err != nil {
+			return fmt.Errorf("insecure private key file permissions: %w", err)
+		}
+		// Add file permission checks
+		if err := checkFilePermissions(config.PublicKeyPath, 0600); err != nil {
+			return fmt.Errorf("insecure public key file permissions: %w", err)
 		}
 	default:
 		return fmt.Errorf("unsupported signing method: %s, supports %s and %s ", config.SigningMethod, Symmetric, Asymmetric)
@@ -295,6 +306,29 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 	}
 
 	return mapToRefreshClaims(claims)
+}
+
+func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenResponse, error) {
+	claims, err := maker.VerifyRefreshToken(oldToken)
+	if err != nil {
+		return nil, err
+	}
+
+	if !maker.config.RefreshToken.RotationEnabled {
+		return nil, fmt.Errorf("token rotation not enabled")
+	}
+
+	// Check against reuse interval
+	if time.Since(claims.IssuedAt) < maker.config.RefreshToken.ReuseInterval {
+		return nil, fmt.Errorf("token reuse too soon")
+	}
+
+	return maker.CreateRefreshToken(
+		context.Background(),
+		claims.Subject,
+		claims.Username,
+		claims.SessionID,
+	)
 }
 
 // initializeKeys initializes the signing keys based on the configured signing method.
