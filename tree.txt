@@ -27,6 +27,7 @@
 │   │   ├── revocation.go
 │   │   ├── rsa_example.go
 │   │   ├── rsa_pss_example.go
+│   │   ├── scenarios.go
 │   │   ├── short_lived.go
 │   │   ├── stateless.go
 │   │   ├── symmetric.go
@@ -43,4 +44,4 @@
 ├── tree.txt
 └── version.go
 
-5 directories, 39 files
+5 directories, 40 files
