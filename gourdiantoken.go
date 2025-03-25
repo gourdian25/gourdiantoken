@@ -775,32 +775,23 @@ func (maker *JWTMaker) parseKeyPair() error {
 	}
 
 	switch maker.signingMethod.Alg() {
-	case "RS256", "RS384", "RS512":
-		maker.privateKey, err = x509.ParsePKCS1PrivateKey(privateKeyBytes)
+	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
+		// Use the universal RSA parser for both RSA and RSA-PSS
+		maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse RSA private key: %w", err)
 		}
-		maker.publicKey, err = x509.ParsePKCS1PublicKey(publicKeyBytes)
+		maker.publicKey, err = parseRSAPublicKey(publicKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse RSA public key: %w", err)
 		}
 
-	case "PS256", "PS384", "PS512":
-		maker.privateKey, err = parseRSAPSSPrivateKey(privateKeyBytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse RSA-PSS private key: %w", err)
-		}
-		maker.publicKey, err = parseRSAPSSPublicKey(publicKeyBytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse RSA-PSS public key: %w", err)
-		}
-
 	case "ES256", "ES384", "ES512":
-		maker.privateKey, err = x509.ParseECPrivateKey(privateKeyBytes)
+		maker.privateKey, err = parseECDSAPrivateKey(privateKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse ECDSA private key: %w", err)
 		}
-		maker.publicKey, err = x509.ParsePKIXPublicKey(publicKeyBytes)
+		maker.publicKey, err = parseECDSAPublicKey(publicKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse ECDSA public key: %w", err)
 		}
@@ -877,20 +868,43 @@ func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("failed to parse PEM block containing the RSA private key")
 	}
 
-	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		// Try parsing as PKCS8
-		pkcs8Key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse RSA private key: %w", err)
-		}
-		key, ok := pkcs8Key.(*rsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("not a valid RSA private key")
-		}
+	// First try PKCS1
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
 		return key, nil
 	}
-	return key, nil
+
+	// Then try PKCS8
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		if rsaKey, ok := key.(*rsa.PrivateKey); ok {
+			return rsaKey, nil
+		}
+		return nil, fmt.Errorf("expected RSA private key, got %T", key)
+	}
+
+	// Fallback to manual parsing
+	var privKey pkcs8
+	if _, err := asn1.Unmarshal(block.Bytes, &privKey); err != nil {
+		return nil, fmt.Errorf("failed to parse PKCS8 structure: %w", err)
+	}
+
+	var rsaPriv rsaPrivateKey
+	if _, err := asn1.Unmarshal(privKey.PrivateKey, &rsaPriv); err != nil {
+		return nil, fmt.Errorf("failed to parse RSA private key: %w", err)
+	}
+
+	return &rsa.PrivateKey{
+		PublicKey: rsa.PublicKey{
+			N: rsaPriv.N,
+			E: int(rsaPriv.E.Int64()),
+		},
+		D:      rsaPriv.D,
+		Primes: []*big.Int{rsaPriv.P, rsaPriv.Q},
+		Precomputed: rsa.PrecomputedValues{
+			Dp:   rsaPriv.Dp,
+			Dq:   rsaPriv.Dq,
+			Qinv: rsaPriv.Qinv,
+		},
+	}, nil
 }
 
 func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
@@ -899,26 +913,50 @@ func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to parse PEM block containing the RSA public key")
 	}
 
-	// Try parsing as PKIX
+	// First try standard PKIX parsing
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		// Try parsing as X509 certificate
-		cert, err := x509.ParseCertificate(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse RSA public key: %w", err)
+	if err == nil {
+		if rsaPub, ok := pub.(*rsa.PublicKey); ok {
+			return rsaPub, nil
 		}
-		rsaPub, ok := cert.PublicKey.(*rsa.PublicKey)
-		if !ok {
-			return nil, fmt.Errorf("not a valid RSA public key")
-		}
-		return rsaPub, nil
+		return nil, fmt.Errorf("expected RSA public key, got %T", pub)
 	}
 
-	rsaPub, ok := pub.(*rsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("not a valid RSA public key")
+	// Then try parsing as PKCS1
+	if pub, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
+		return pub, nil
 	}
-	return rsaPub, nil
+
+	// Finally try parsing as certificate
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err == nil {
+		if rsaPub, ok := cert.PublicKey.(*rsa.PublicKey); ok {
+			return rsaPub, nil
+		}
+		return nil, fmt.Errorf("expected RSA public key in certificate, got %T", cert.PublicKey)
+	}
+
+	// Fallback to manual parsing for RSA-PSS keys
+	var pubKey struct {
+		Algo      pkix.AlgorithmIdentifier
+		BitString asn1.BitString
+	}
+	if _, err := asn1.Unmarshal(block.Bytes, &pubKey); err != nil {
+		return nil, fmt.Errorf("failed to parse public key structure: %w", err)
+	}
+
+	var rsaPub struct {
+		N *big.Int
+		E *big.Int
+	}
+	if _, err := asn1.Unmarshal(pubKey.BitString.Bytes, &rsaPub); err != nil {
+		return nil, fmt.Errorf("failed to parse RSA public key: %w", err)
+	}
+
+	return &rsa.PublicKey{
+		N: rsaPub.N,
+		E: int(rsaPub.E.Int64()),
+	}, nil
 }
 
 func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
