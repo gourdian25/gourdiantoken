@@ -32,6 +32,7 @@ func testRedisOptions() *redis.Options {
 		DB:       0,                     // Default DB
 	}
 }
+
 func generateTempRSAPair(t *testing.T) (privatePath, publicPath string) {
 	t.Helper()
 
@@ -202,7 +203,7 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 		}
 		_, err := NewGourdianTokenMaker(config, testRedisOptions())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported algorithm")
+		assert.Contains(t, err.Error(), "algorithm FOO256 not compatible with symmetric signing")
 	})
 
 	t.Run("Invalid Config - Insecure Key Permissions", func(t *testing.T) {
@@ -220,6 +221,48 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 		_, err = NewGourdianTokenMaker(config, testRedisOptions())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "insecure private key file permissions")
+	})
+
+	t.Run("Invalid Config - Mixed Key Configuration", func(t *testing.T) {
+		privatePath, publicPath := generateTempRSAPair(t)
+		config := GourdianTokenConfig{
+			Algorithm:      "HS256",
+			SigningMethod:  Symmetric,
+			SymmetricKey:   "test-secret-32-bytes-long-1234567890",
+			PrivateKeyPath: privatePath, // Should cause error for symmetric
+			PublicKeyPath:  publicPath,  // Should cause error for symmetric
+		}
+		_, err := NewGourdianTokenMaker(config, testRedisOptions())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "private and public key paths must be empty for symmetric signing")
+	})
+
+	t.Run("Invalid Config - Algorithm/Signing Method Mismatch", func(t *testing.T) {
+		config := GourdianTokenConfig{
+			Algorithm:     "RS256", // RSA algorithm
+			SigningMethod: Symmetric,
+			SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+		}
+		_, err := NewGourdianTokenMaker(config, testRedisOptions())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "algorithm RS256 not compatible with symmetric signing")
+	})
+
+	t.Run("Rotation Enabled Without Redis", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = true
+		_, err := NewGourdianTokenMaker(config, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "redis options required for token rotation")
+	})
+
+	t.Run("Valid Rotation Configuration", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(config, testRedisOptions())
+		require.NoError(t, err)
+		assert.NotNil(t, maker)
+		assert.NotNil(t, maker.(*JWTMaker).redisClient)
 	})
 }
 

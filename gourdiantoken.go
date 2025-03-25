@@ -327,20 +327,25 @@ func validateConfig(config *GourdianTokenConfig) error {
 		if len(config.SymmetricKey) < 32 {
 			return fmt.Errorf("symmetric key must be at least 32 bytes")
 		}
+		if config.PrivateKeyPath != "" || config.PublicKeyPath != "" {
+			return fmt.Errorf("private and public key paths must be empty for symmetric signing")
+		}
 	case Asymmetric:
 		if config.PrivateKeyPath == "" || config.PublicKeyPath == "" {
 			return fmt.Errorf("private and public key paths are required for asymmetric signing method")
+		}
+		if config.SymmetricKey != "" {
+			return fmt.Errorf("symmetric key must be empty for asymmetric signing")
 		}
 		// Add file permission checks
 		if err := checkFilePermissions(config.PrivateKeyPath, 0600); err != nil {
 			return fmt.Errorf("insecure private key file permissions: %w", err)
 		}
-		// Add file permission checks
 		if err := checkFilePermissions(config.PublicKeyPath, 0600); err != nil {
 			return fmt.Errorf("insecure public key file permissions: %w", err)
 		}
 	default:
-		return fmt.Errorf("unsupported signing method: %s, supports %s and %s ", config.SigningMethod, Symmetric, Asymmetric)
+		return fmt.Errorf("unsupported signing method: %s, supports %s and %s", config.SigningMethod, Symmetric, Asymmetric)
 	}
 
 	// Check algorithm compatibility with signing method
