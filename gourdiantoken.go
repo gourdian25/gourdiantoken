@@ -675,6 +675,57 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 	return newToken, nil
 }
 
+// parseKeyPair parses both private and public keys for asymmetric signing
+func (maker *JWTMaker) parseKeyPair() error {
+	privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to read private key file: %w", err)
+	}
+
+	publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to read public key file: %w", err)
+	}
+
+	switch maker.signingMethod.Alg() {
+	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
+		// Use the same parser for both RSA and RSA-PSS
+		maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse RSA private key: %w", err)
+		}
+		maker.publicKey, err = parseRSAPublicKey(publicKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse RSA public key: %w", err)
+		}
+
+	case "ES256", "ES384", "ES512":
+		maker.privateKey, err = parseECDSAPrivateKey(privateKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse ECDSA private key: %w", err)
+		}
+		maker.publicKey, err = parseECDSAPublicKey(publicKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse ECDSA public key: %w", err)
+		}
+
+	case "EdDSA":
+		maker.privateKey, err = parseEdDSAPrivateKey(privateKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse EdDSA private key: %w", err)
+		}
+		maker.publicKey, err = parseEdDSAPublicKey(publicKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse EdDSA public key: %w", err)
+		}
+
+	default:
+		return fmt.Errorf("unsupported algorithm for asymmetric signing: %s", maker.signingMethod.Alg())
+	}
+
+	return nil
+}
+
 func (maker *JWTMaker) initializeKeys() error {
 	switch maker.config.SigningMethod {
 	case Symmetric:
@@ -727,6 +778,108 @@ func (maker *JWTMaker) initializeSigningMethod() error {
 	return nil
 }
 
+// toMapClaims converts claims to jwt.MapClaims.
+func toMapClaims(claims interface{}) jwt.MapClaims {
+	switch v := claims.(type) {
+	case AccessTokenClaims:
+		return jwt.MapClaims{
+			"jti": v.ID.String(),
+			"sub": v.Subject.String(),
+			"usr": v.Username,
+			"sid": v.SessionID.String(),
+			"iat": v.IssuedAt.Unix(),
+			"exp": v.ExpiresAt.Unix(),
+			"typ": string(v.TokenType), // Convert TokenType to string explicitly
+			"rol": v.Role,
+		}
+	case RefreshTokenClaims:
+		return jwt.MapClaims{
+			"jti": v.ID.String(),
+			"sub": v.Subject.String(),
+			"usr": v.Username,
+			"sid": v.SessionID.String(),
+			"iat": v.IssuedAt.Unix(),
+			"exp": v.ExpiresAt.Unix(),
+			"typ": string(v.TokenType), // Convert TokenType to string explicitly
+		}
+	default:
+		return nil
+	}
+}
+
+// mapToAccessClaims converts JWT claims to AccessTokenClaims.
+func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
+	tokenID, err := uuid.Parse(claims["jti"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("invalid token ID: %w", err)
+	}
+
+	userID, err := uuid.Parse(claims["sub"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	sessionID, err := uuid.Parse(claims["sid"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("invalid session ID: %w", err)
+	}
+
+	username, ok := claims["usr"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid username type: expected string")
+	}
+
+	// Get role as string directly
+	role, ok := claims["rol"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid role type: expected string")
+	}
+
+	return &AccessTokenClaims{
+		ID:        tokenID,
+		Subject:   userID,
+		Username:  username,
+		SessionID: sessionID,
+		IssuedAt:  time.Unix(getUnixTime(claims["iat"]), 0),
+		ExpiresAt: time.Unix(getUnixTime(claims["exp"]), 0),
+		TokenType: TokenType(claims["typ"].(string)),
+		Role:      role,
+	}, nil
+}
+
+// mapToRefreshClaims converts JWT claims to RefreshTokenClaims.
+func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
+	tokenID, err := uuid.Parse(claims["jti"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("invalid token ID: %w", err)
+	}
+
+	userID, err := uuid.Parse(claims["sub"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	sessionID, err := uuid.Parse(claims["sid"].(string))
+	if err != nil {
+		return nil, fmt.Errorf("invalid session ID: %w", err)
+	}
+
+	username, ok := claims["usr"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid username type: expected string")
+	}
+
+	return &RefreshTokenClaims{
+		ID:        tokenID,
+		Subject:   userID,
+		Username:  username,
+		SessionID: sessionID,
+		IssuedAt:  time.Unix(getUnixTime(claims["iat"]), 0),
+		ExpiresAt: time.Unix(getUnixTime(claims["exp"]), 0),
+		TokenType: TokenType(claims["typ"].(string)),
+	}, nil
+}
+
 // validateTokenClaims validates the standard JWT claims
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
 	// Check required claims
@@ -762,57 +915,7 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
 	return nil
 }
 
-// parseKeyPair parses both private and public keys for asymmetric signing
-func (maker *JWTMaker) parseKeyPair() error {
-	privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to read private key file: %w", err)
-	}
-
-	publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to read public key file: %w", err)
-	}
-
-	switch maker.signingMethod.Alg() {
-	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
-		// Use the same parser for both RSA and RSA-PSS
-		maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse RSA private key: %w", err)
-		}
-		maker.publicKey, err = parseRSAPublicKey(publicKeyBytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse RSA public key: %w", err)
-		}
-
-	case "ES256", "ES384", "ES512":
-		maker.privateKey, err = parseECDSAPrivateKey(privateKeyBytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse ECDSA private key: %w", err)
-		}
-		maker.publicKey, err = parseECDSAPublicKey(publicKeyBytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse ECDSA public key: %w", err)
-		}
-
-	case "EdDSA":
-		maker.privateKey, err = parseEdDSAPrivateKey(privateKeyBytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse EdDSA private key: %w", err)
-		}
-		maker.publicKey, err = parseEdDSAPublicKey(publicKeyBytes)
-		if err != nil {
-			return fmt.Errorf("failed to parse EdDSA public key: %w", err)
-		}
-
-	default:
-		return fmt.Errorf("unsupported algorithm for asymmetric signing: %s", maker.signingMethod.Alg())
-	}
-
-	return nil
-}
-
+// Helper functions to parse PEM encoded keys
 func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
@@ -861,7 +964,6 @@ func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) {
 	return eddsaPub, nil
 }
 
-// Helper functions to parse PEM encoded keys
 func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
@@ -1009,24 +1111,6 @@ func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 	return ecdsaPub, nil
 }
 
-type pkcs8 struct {
-	Version    int
-	Algo       pkix.AlgorithmIdentifier
-	PrivateKey []byte
-}
-
-type rsaPrivateKey struct {
-	Version int
-	N       *big.Int
-	E       *big.Int
-	D       *big.Int
-	P       *big.Int
-	Q       *big.Int
-	Dp      *big.Int
-	Dq      *big.Int
-	Qinv    *big.Int
-}
-
 // checkFilePermissions checks if the file has the required permissions
 func checkFilePermissions(path string, requiredPerm os.FileMode) error {
 	info, err := os.Stat(path)
@@ -1045,108 +1129,6 @@ func checkFilePermissions(path string, requiredPerm os.FileMode) error {
 	return nil
 }
 
-// toMapClaims converts claims to jwt.MapClaims.
-func toMapClaims(claims interface{}) jwt.MapClaims {
-	switch v := claims.(type) {
-	case AccessTokenClaims:
-		return jwt.MapClaims{
-			"jti": v.ID.String(),
-			"sub": v.Subject.String(),
-			"usr": v.Username,
-			"sid": v.SessionID.String(),
-			"iat": v.IssuedAt.Unix(),
-			"exp": v.ExpiresAt.Unix(),
-			"typ": string(v.TokenType), // Convert TokenType to string explicitly
-			"rol": v.Role,
-		}
-	case RefreshTokenClaims:
-		return jwt.MapClaims{
-			"jti": v.ID.String(),
-			"sub": v.Subject.String(),
-			"usr": v.Username,
-			"sid": v.SessionID.String(),
-			"iat": v.IssuedAt.Unix(),
-			"exp": v.ExpiresAt.Unix(),
-			"typ": string(v.TokenType), // Convert TokenType to string explicitly
-		}
-	default:
-		return nil
-	}
-}
-
-// mapToAccessClaims converts JWT claims to AccessTokenClaims.
-func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
-	tokenID, err := uuid.Parse(claims["jti"].(string))
-	if err != nil {
-		return nil, fmt.Errorf("invalid token ID: %w", err)
-	}
-
-	userID, err := uuid.Parse(claims["sub"].(string))
-	if err != nil {
-		return nil, fmt.Errorf("invalid user ID: %w", err)
-	}
-
-	sessionID, err := uuid.Parse(claims["sid"].(string))
-	if err != nil {
-		return nil, fmt.Errorf("invalid session ID: %w", err)
-	}
-
-	username, ok := claims["usr"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid username type: expected string")
-	}
-
-	// Get role as string directly
-	role, ok := claims["rol"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid role type: expected string")
-	}
-
-	return &AccessTokenClaims{
-		ID:        tokenID,
-		Subject:   userID,
-		Username:  username,
-		SessionID: sessionID,
-		IssuedAt:  time.Unix(getUnixTime(claims["iat"]), 0),
-		ExpiresAt: time.Unix(getUnixTime(claims["exp"]), 0),
-		TokenType: TokenType(claims["typ"].(string)),
-		Role:      role,
-	}, nil
-}
-
-// mapToRefreshClaims converts JWT claims to RefreshTokenClaims.
-func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
-	tokenID, err := uuid.Parse(claims["jti"].(string))
-	if err != nil {
-		return nil, fmt.Errorf("invalid token ID: %w", err)
-	}
-
-	userID, err := uuid.Parse(claims["sub"].(string))
-	if err != nil {
-		return nil, fmt.Errorf("invalid user ID: %w", err)
-	}
-
-	sessionID, err := uuid.Parse(claims["sid"].(string))
-	if err != nil {
-		return nil, fmt.Errorf("invalid session ID: %w", err)
-	}
-
-	username, ok := claims["usr"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid username type: expected string")
-	}
-
-	return &RefreshTokenClaims{
-		ID:        tokenID,
-		Subject:   userID,
-		Username:  username,
-		SessionID: sessionID,
-		IssuedAt:  time.Unix(getUnixTime(claims["iat"]), 0),
-		ExpiresAt: time.Unix(getUnixTime(claims["exp"]), 0),
-		TokenType: TokenType(claims["typ"].(string)),
-	}, nil
-}
-
 func getUnixTime(claim interface{}) int64 {
 	switch v := claim.(type) {
 	case float64:
@@ -1156,4 +1138,22 @@ func getUnixTime(claim interface{}) int64 {
 	default:
 		return 0
 	}
+}
+
+type pkcs8 struct {
+	Version    int
+	Algo       pkix.AlgorithmIdentifier
+	PrivateKey []byte
+}
+
+type rsaPrivateKey struct {
+	Version int
+	N       *big.Int
+	E       *big.Int
+	D       *big.Int
+	P       *big.Int
+	Q       *big.Int
+	Dp      *big.Int
+	Dq      *big.Int
+	Qinv    *big.Int
 }
