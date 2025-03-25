@@ -130,7 +130,7 @@ func BenchmarkTokenOperations(b *testing.B) {
 
 	for _, bb := range benchmarks {
 		b.Run(bb.name, func(b *testing.B) {
-			var maker *JWTMaker
+			var maker GourdianTokenMaker
 			var err error
 
 			switch k := bb.signingKey.(type) {
@@ -159,6 +159,13 @@ func BenchmarkTokenOperations(b *testing.B) {
 			}
 			require.NoError(b, err)
 
+			// If you specifically need the JWTMaker for benchmarking internal methods,
+			// you can add a type assertion here:
+			jwtMaker, ok := maker.(*JWTMaker)
+			if !ok {
+				b.Fatal("expected *JWTMaker implementation")
+			}
+
 			userID := uuid.New()
 			username := "benchuser"
 			role := "admin"
@@ -166,19 +173,19 @@ func BenchmarkTokenOperations(b *testing.B) {
 
 			b.Run("Create", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					_, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+					_, err := jwtMaker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
 					if err != nil {
 						b.Fatal(err)
 					}
 				}
 			})
 
-			token, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+			token, err := jwtMaker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
 			require.NoError(b, err)
 
 			b.Run("Verify", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					_, err := maker.VerifyAccessToken(token.Token)
+					_, err := jwtMaker.VerifyAccessToken(token.Token)
 					if err != nil {
 						b.Fatal(err)
 					}
