@@ -26,8 +26,8 @@ func RunHighSecurityExample() {
 	config := gourdiantoken.GourdianTokenConfig{
 		Algorithm:      "ES256", // ECDSA for stronger security
 		SigningMethod:  gourdiantoken.Asymmetric,
-		PrivateKeyPath: "examples/keys/ecdsa_private.pem",
-		PublicKeyPath:  "examples/keys/ecdsa_public.pem",
+		PrivateKeyPath: "examples/keys/ec256_private.pem",
+		PublicKeyPath:  "examples/keys/ec256_public.pem",
 		AccessToken: gourdiantoken.AccessTokenConfig{
 			Duration:          5 * time.Minute,  // Very short-lived access tokens
 			MaxLifetime:       30 * time.Minute, // Absolute maximum
