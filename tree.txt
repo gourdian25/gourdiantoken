@@ -11,6 +11,8 @@
 │   │   ├── ed25519_private.pem
 │   │   ├── ed25519_public.pem
 │   │   ├── rsa_private.pem
+│   │   ├── rsa_pss_private.pem
+│   │   ├── rsa_pss_public.pem
 │   │   └── rsa_public.pem
 │   ├── main.go
 │   ├── scenarios
@@ -37,4 +39,4 @@
 ├── tree.txt
 └── version.go
 
-5 directories, 33 files
+5 directories, 35 files

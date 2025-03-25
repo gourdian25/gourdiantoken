@@ -5,6 +5,7 @@ package gourdiantoken
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -324,6 +325,9 @@ func validateConfig(config *GourdianTokenConfig) error {
 		if config.SymmetricKey == "" {
 			return fmt.Errorf("symmetric key is required for symmetric signing method")
 		}
+		if !strings.HasPrefix(config.Algorithm, "HS") && config.Algorithm != "none" {
+			return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
+		}
 		if len(config.SymmetricKey) < 32 {
 			return fmt.Errorf("symmetric key must be at least 32 bytes")
 		}
@@ -337,27 +341,22 @@ func validateConfig(config *GourdianTokenConfig) error {
 		if config.SymmetricKey != "" {
 			return fmt.Errorf("symmetric key must be empty for asymmetric signing")
 		}
+		if !strings.HasPrefix(config.Algorithm, "RS") &&
+			!strings.HasPrefix(config.Algorithm, "ES") &&
+			!strings.HasPrefix(config.Algorithm, "PS") &&
+			config.Algorithm != "EdDSA" {
+			return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
+		}
 		// Add file permission checks
 		if err := checkFilePermissions(config.PrivateKeyPath, 0600); err != nil {
 			return fmt.Errorf("insecure private key file permissions: %w", err)
 		}
-		if err := checkFilePermissions(config.PublicKeyPath, 0600); err != nil {
+		if err := checkFilePermissions(config.PublicKeyPath, 0644); err != nil {
 			return fmt.Errorf("insecure public key file permissions: %w", err)
 		}
 	default:
-		return fmt.Errorf("unsupported signing method: %s, supports %s and %s", config.SigningMethod, Symmetric, Asymmetric)
-	}
-
-	// Check algorithm compatibility with signing method
-	switch config.SigningMethod {
-	case Symmetric:
-		if !strings.HasPrefix(config.Algorithm, "HS") {
-			return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
-		}
-	case Asymmetric:
-		if !strings.HasPrefix(config.Algorithm, "RS") && !strings.HasPrefix(config.Algorithm, "ES") {
-			return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
-		}
+		return fmt.Errorf("unsupported signing method: %s, supports %s and %s",
+			config.SigningMethod, Symmetric, Asymmetric)
 	}
 
 	return nil
@@ -407,7 +406,7 @@ type JWTMaker struct {
 //
 // For asymmetric signing (RSA/ECDSA):
 //   - Must provide both PrivateKeyPath and PublicKeyPath
-//   - Files must have secure permissions (0600)
+//   - Files must have secure permissions (0600/0644)
 //   - Supported algorithms:
 //   - RSA: RS256, RS384, RS512
 //   - ECDSA: ES256, ES384, ES512
@@ -703,12 +702,22 @@ func (maker *JWTMaker) initializeSigningMethod() error {
 		maker.signingMethod = jwt.SigningMethodRS384
 	case "RS512":
 		maker.signingMethod = jwt.SigningMethodRS512
+	case "PS256":
+		maker.signingMethod = jwt.SigningMethodPS256
+	case "PS384":
+		maker.signingMethod = jwt.SigningMethodPS384
+	case "PS512":
+		maker.signingMethod = jwt.SigningMethodPS512
 	case "ES256":
 		maker.signingMethod = jwt.SigningMethodES256
 	case "ES384":
 		maker.signingMethod = jwt.SigningMethodES384
 	case "ES512":
 		maker.signingMethod = jwt.SigningMethodES512
+	case "EdDSA":
+		maker.signingMethod = jwt.SigningMethodEdDSA
+	case "none":
+		return fmt.Errorf("unsecured tokens are disabled for security reasons")
 	default:
 		return fmt.Errorf("unsupported algorithm: %s", maker.config.Algorithm)
 	}
@@ -763,7 +772,7 @@ func (maker *JWTMaker) parseKeyPair() error {
 	}
 
 	switch maker.signingMethod.Alg() {
-	case "RS256", "RS384", "RS512":
+	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
 		maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse RSA private key: %w", err)
@@ -783,11 +792,69 @@ func (maker *JWTMaker) parseKeyPair() error {
 			return fmt.Errorf("failed to parse ECDSA public key: %w", err)
 		}
 
+	case "EdDSA":
+		maker.privateKey, err = parseEdDSAPrivateKey(privateKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse EdDSA private key: %w", err)
+		}
+		maker.publicKey, err = parseEdDSAPublicKey(publicKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse EdDSA public key: %w", err)
+		}
+
 	default:
 		return fmt.Errorf("unsupported algorithm for asymmetric signing: %s", maker.signingMethod.Alg())
 	}
 
 	return nil
+}
+
+func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, fmt.Errorf("failed to parse PEM block containing the private key")
+	}
+
+	// Try parsing as PKCS8
+	priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse EdDSA private key: %w", err)
+	}
+
+	eddsaPriv, ok := priv.(ed25519.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("not a valid EdDSA private key")
+	}
+
+	return eddsaPriv, nil
+}
+
+func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, fmt.Errorf("failed to parse PEM block containing the public key")
+	}
+
+	// Try parsing as PKIX
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		// Try parsing as X509 certificate
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse EdDSA public key: %w", err)
+		}
+		eddsaPub, ok := cert.PublicKey.(ed25519.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("not a valid EdDSA public key")
+		}
+		return eddsaPub, nil
+	}
+
+	eddsaPub, ok := pub.(ed25519.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("not a valid EdDSA public key")
+	}
+	return eddsaPub, nil
 }
 
 // Helper functions to parse PEM encoded keys
