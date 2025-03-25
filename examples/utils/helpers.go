@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gourdian25/gourdiantoken"
+	"github.com/redis/go-redis/v9"
 )
 
 func PrintSection(title string) {
@@ -64,4 +66,46 @@ func SimulateAPICall(token string) {
 	fmt.Println("Making request with token:", token[:30]+"...")
 	time.Sleep(500 * time.Millisecond)
 	fmt.Println("API request successful!")
+}
+
+// Common configuration setups
+func GetRedisOptions() *redis.Options {
+	return &redis.Options{
+		Addr:     "localhost:6379",
+		Password: "GourdianRedisSecret",
+		DB:       0,
+	}
+}
+
+func CreateTestUser() (uuid.UUID, string, uuid.UUID) {
+	return uuid.New(), "test.user@example.com", uuid.New()
+}
+
+func CreateTokenMaker(config gourdiantoken.GourdianTokenConfig, useRedis bool) (gourdiantoken.GourdianTokenMaker, error) {
+	var redisOpts *redis.Options
+	if useRedis {
+		redisOpts = GetRedisOptions()
+	}
+	return gourdiantoken.NewGourdianTokenMaker(config, redisOpts)
+}
+
+func PrintError(context string, err error) {
+	fmt.Printf("❌ %s: %v\n", context, err)
+}
+
+func VerifyError(context string, err error, expected string) {
+	if err != nil {
+		fmt.Printf("✅ %s (expected: %s)\n", context, expected)
+	} else {
+		fmt.Printf("❌ %s (expected error but got none)\n", context)
+	}
+}
+
+func PrintClaims(claims interface{}) {
+	// ... detailed claims printing ...
+}
+
+func SimulateTokenExpiration(duration time.Duration) {
+	fmt.Printf("Waiting %v for token expiration...\n", duration)
+	time.Sleep(duration)
 }
