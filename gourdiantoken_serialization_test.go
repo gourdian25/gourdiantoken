@@ -6,10 +6,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestClaimsSerialization(t *testing.T) {
+	// Create a test Redis options for the maker
+	redisOpts := &redis.Options{
+		Addr: "localhost:6379", // Use a test Redis instance
+	}
+
 	t.Run("AccessTokenClaims", func(t *testing.T) {
 		now := time.Now().UTC()
 		claims := AccessTokenClaims{
@@ -89,5 +95,20 @@ func TestClaimsSerialization(t *testing.T) {
 		assert.Equal(t, claims.IssuedAt.Unix(), mapClaims["iat"])
 		assert.Equal(t, claims.ExpiresAt.Unix(), mapClaims["exp"])
 		assert.Equal(t, claims.TokenType, TokenType(mapClaims["typ"].(string)))
+	})
+
+	t.Run("NewGourdianTokenMakerWithRedis", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		maker, err := NewGourdianTokenMaker(config, redisOpts)
+		assert.NoError(t, err)
+		assert.NotNil(t, maker)
+	})
+
+	t.Run("NewGourdianTokenMakerWithoutRedis", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = false
+		maker, err := NewGourdianTokenMaker(config, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, maker)
 	})
 }

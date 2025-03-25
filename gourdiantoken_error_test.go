@@ -17,7 +17,8 @@ import (
 func TestErrorCases(t *testing.T) {
 	t.Run("Invalid Token String", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(config)
+		config.RefreshToken.RotationEnabled = false      // Disable rotation for this test
+		maker, err := NewGourdianTokenMaker(config, nil) // Pass nil for Redis
 		require.NoError(t, err)
 
 		_, err = maker.VerifyAccessToken("invalid.token.string")
@@ -27,8 +28,9 @@ func TestErrorCases(t *testing.T) {
 
 	t.Run("Expired Token", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.AccessToken.Duration = -time.Hour // Set to expire immediately
-		maker, err := NewGourdianTokenMaker(config)
+		config.RefreshToken.RotationEnabled = false      // Disable rotation for this test
+		config.AccessToken.Duration = -time.Hour         // Set to expire immediately
+		maker, err := NewGourdianTokenMaker(config, nil) // Pass nil for Redis
 		require.NoError(t, err)
 
 		token, err := maker.CreateAccessToken(
@@ -48,7 +50,8 @@ func TestErrorCases(t *testing.T) {
 	t.Run("Wrong Algorithm", func(t *testing.T) {
 		// Create token with HS256
 		config1 := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker1, err := NewGourdianTokenMaker(config1)
+		config1.RefreshToken.RotationEnabled = false       // Disable rotation for this test
+		maker1, err := NewGourdianTokenMaker(config1, nil) // Pass nil for Redis
 		require.NoError(t, err)
 
 		token, err := maker1.CreateAccessToken(
@@ -80,7 +83,8 @@ func TestErrorCases(t *testing.T) {
 
 	t.Run("Invalid UUID in Claims", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(config)
+		config.RefreshToken.RotationEnabled = false      // Disable rotation for this test
+		maker, err := NewGourdianTokenMaker(config, nil) // Pass nil for Redis
 		require.NoError(t, err)
 
 		// Create a token with invalid UUID format

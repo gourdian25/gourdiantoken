@@ -103,3 +103,56 @@ func BenchmarkVerifyAccessToken(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkTokenOperations(b *testing.B) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, err := NewGourdianTokenMaker(config)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	userID := uuid.New()
+	username := "benchuser"
+	role := "admin"
+	sessionID := uuid.New()
+
+	b.Run("CreateAccessToken", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("VerifyAccessToken", func(b *testing.B) {
+		token, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := maker.VerifyAccessToken(token.Token)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("FullTokenLifecycle", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			// Create
+			token, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			// Verify
+			_, err = maker.VerifyAccessToken(token.Token)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
