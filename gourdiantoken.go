@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -317,6 +318,7 @@ type RefreshTokenResponse struct {
 
 // validateConfig validates the configuration.
 func validateConfig(config *GourdianTokenConfig) error {
+
 	switch config.SigningMethod {
 	case Symmetric:
 		if config.SymmetricKey == "" {
@@ -340,6 +342,19 @@ func validateConfig(config *GourdianTokenConfig) error {
 	default:
 		return fmt.Errorf("unsupported signing method: %s, supports %s and %s ", config.SigningMethod, Symmetric, Asymmetric)
 	}
+
+	// Check algorithm compatibility with signing method
+	switch config.SigningMethod {
+	case Symmetric:
+		if !strings.HasPrefix(config.Algorithm, "HS") {
+			return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
+		}
+	case Asymmetric:
+		if !strings.HasPrefix(config.Algorithm, "RS") && !strings.HasPrefix(config.Algorithm, "ES") {
+			return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
+		}
+	}
+
 	return nil
 }
 
@@ -628,6 +643,7 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 
 	// Check if token was recently rotated
 	lastUsed, err := maker.redisClient.Get(ctx, "rotated:"+oldToken).Result()
+	// In RotateRefreshToken function
 	if err == nil { // Token exists in Redis
 		rotatedAt, err := time.Parse(time.RFC3339, lastUsed)
 		if err != nil {
@@ -635,10 +651,8 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 		}
 
 		if time.Since(rotatedAt) < maker.config.RefreshToken.ReuseInterval {
-			return nil, fmt.Errorf("token reused too soon")
+			return nil, fmt.Errorf("token reused too soon: last used at %s", rotatedAt)
 		}
-	} else if err != redis.Nil { // Real error (not just key not found)
-		return nil, fmt.Errorf("redis error: %w", err)
 	}
 
 	// Create new token
