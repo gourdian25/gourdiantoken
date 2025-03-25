@@ -12,6 +12,8 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -970,5 +972,334 @@ func TestConfigValidation(t *testing.T) {
 		err := validateConfig(&config)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "algorithm RS256 not compatible with symmetric signing")
+	})
+}
+
+func TestTokenEdgeCases(t *testing.T) {
+	t.Run("Token with Empty UUID", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		maker, err := NewGourdianTokenMaker(config, nil)
+		require.NoError(t, err)
+
+		// Create token with empty UUID
+		emptyUUID := uuid.UUID{}
+		_, err = maker.CreateAccessToken(context.Background(), emptyUUID, "user", "role", uuid.New())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid user ID")
+	})
+
+	t.Run("Token with Empty Role", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		maker, err := NewGourdianTokenMaker(config, nil)
+		require.NoError(t, err)
+
+		// Create token with empty role
+		_, err = maker.CreateAccessToken(context.Background(), uuid.New(), "user", "", uuid.New())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "role cannot be empty")
+	})
+
+	t.Run("Token with Very Long Username", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		maker, err := NewGourdianTokenMaker(config, nil)
+		require.NoError(t, err)
+
+		// Create token with very long username
+		longUsername := strings.Repeat("a", 1025) // 1KB+ username
+		_, err = maker.CreateAccessToken(context.Background(), uuid.New(), longUsername, "role", uuid.New())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "username too long")
+	})
+}
+
+func TestEnhancedTokenRotation(t *testing.T) {
+	redisOpts := testRedisOptions()
+
+	t.Run("Concurrent Rotation Attempts", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = true
+		config.RefreshToken.ReuseInterval = time.Second
+		maker, err := NewGourdianTokenMaker(config, redisOpts)
+		require.NoError(t, err)
+
+		// Create initial token
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		// Simulate concurrent rotation attempts
+		var wg sync.WaitGroup
+		errors := make(chan error, 10)
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := maker.RotateRefreshToken(token.Token)
+				if err != nil {
+					errors <- err
+				}
+			}()
+		}
+
+		wg.Wait()
+		close(errors)
+
+		// Only one rotation should succeed, others should fail
+		var successCount int
+		for err := range errors {
+			if err == nil {
+				successCount++
+			} else {
+				assert.Contains(t, err.Error(), "token reused too soon")
+			}
+		}
+		assert.Equal(t, 9, len(errors)) // 9 failures, 1 success
+	})
+
+	t.Run("Rotation with Different Sessions", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(config, redisOpts)
+		require.NoError(t, err)
+
+		userID := uuid.New()
+		username := "user"
+
+		// Create token with session1
+		session1 := uuid.New()
+		token1, err := maker.CreateRefreshToken(context.Background(), userID, username, session1)
+		require.NoError(t, err)
+
+		// Create token with session2
+		session2 := uuid.New()
+		token2, err := maker.CreateRefreshToken(context.Background(), userID, username, session2)
+		require.NoError(t, err)
+
+		// Rotate token1 - should work
+		_, err = maker.RotateRefreshToken(token1.Token)
+		require.NoError(t, err)
+
+		// Rotate token2 - should also work (different session)
+		_, err = maker.RotateRefreshToken(token2.Token)
+		require.NoError(t, err)
+	})
+}
+func TestSecurityScenarios(t *testing.T) {
+	t.Run("Token Replay Attack", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		maker, err := NewGourdianTokenMaker(config, nil)
+		require.NoError(t, err)
+
+		// Create and verify a token
+		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", "role", uuid.New())
+		require.NoError(t, err)
+		_, err = maker.VerifyAccessToken(token.Token)
+		require.NoError(t, err)
+
+		// Verify the same token again - should still work (no built-in replay protection)
+		_, err = maker.VerifyAccessToken(token.Token)
+		require.NoError(t, err)
+	})
+
+	t.Run("Algorithm Confusion Attack", func(t *testing.T) {
+		// Create RSA key pair
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+
+		// Create a token signed with RSA
+		rsaClaims := jwt.MapClaims{
+			"jti": uuid.New().String(),
+			"sub": uuid.New().String(),
+			"usr": "user",
+			"sid": uuid.New().String(),
+			"iat": time.Now().Unix(),
+			"exp": time.Now().Add(time.Hour).Unix(),
+			"typ": AccessToken,
+			"rol": "role",
+		}
+		rsaToken := jwt.NewWithClaims(jwt.SigningMethodRS256, rsaClaims)
+		rsaTokenString, err := rsaToken.SignedString(privateKey)
+		require.NoError(t, err)
+
+		// Try to verify with HMAC using RSA public key as secret
+		hmacConfig := DefaultGourdianTokenConfig(string(pem.EncodeToMemory(&pem.Block{
+			Type:  "PUBLIC KEY",
+			Bytes: x509.MarshalPKCS1PublicKey(&privateKey.PublicKey),
+		})))
+		hmacMaker, err := NewGourdianTokenMaker(hmacConfig, nil)
+		require.NoError(t, err)
+
+		_, err = hmacMaker.VerifyAccessToken(rsaTokenString)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "signature is invalid")
+	})
+}
+
+func TestHelpers(t *testing.T) {
+	t.Run("validateConfig", func(t *testing.T) {
+		t.Run("Valid Symmetric Config", func(t *testing.T) {
+			config := GourdianTokenConfig{
+				Algorithm:     "HS256",
+				SigningMethod: Symmetric,
+				SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+				AccessToken:   AccessTokenConfig{Duration: time.Hour},
+			}
+			assert.NoError(t, validateConfig(&config))
+		})
+
+		t.Run("Invalid Symmetric Key Length", func(t *testing.T) {
+			config := GourdianTokenConfig{
+				Algorithm:     "HS256",
+				SigningMethod: Symmetric,
+				SymmetricKey:  "short",
+				AccessToken:   AccessTokenConfig{Duration: time.Hour},
+			}
+			assert.Error(t, validateConfig(&config))
+			assert.Contains(t, validateConfig(&config).Error(), "symmetric key must be at least 32 bytes")
+		})
+
+		t.Run("Valid Asymmetric Config", func(t *testing.T) {
+			privatePath, publicPath := generateTempRSAPair(t)
+			config := GourdianTokenConfig{
+				Algorithm:      "RS256",
+				SigningMethod:  Asymmetric,
+				PrivateKeyPath: privatePath,
+				PublicKeyPath:  publicPath,
+				AccessToken:    AccessTokenConfig{Duration: time.Hour},
+			}
+			assert.NoError(t, validateConfig(&config))
+		})
+
+		t.Run("Missing Key Paths", func(t *testing.T) {
+			config := GourdianTokenConfig{
+				Algorithm:     "RS256",
+				SigningMethod: Asymmetric,
+				AccessToken:   AccessTokenConfig{Duration: time.Hour},
+			}
+			assert.Error(t, validateConfig(&config))
+			assert.Contains(t, validateConfig(&config).Error(), "private and public key paths are required")
+		})
+	})
+
+	t.Run("toMapClaims", func(t *testing.T) {
+		now := time.Now()
+		accessClaims := AccessTokenClaims{
+			ID:        uuid.New(),
+			Subject:   uuid.New(),
+			Username:  "testuser",
+			SessionID: uuid.New(),
+			IssuedAt:  now,
+			ExpiresAt: now.Add(time.Hour),
+			TokenType: AccessToken,
+			Role:      "admin",
+		}
+
+		refreshClaims := RefreshTokenClaims{
+			ID:        uuid.New(),
+			Subject:   uuid.New(),
+			Username:  "testuser",
+			SessionID: uuid.New(),
+			IssuedAt:  now,
+			ExpiresAt: now.Add(24 * time.Hour),
+			TokenType: RefreshToken,
+		}
+
+		t.Run("AccessTokenClaims", func(t *testing.T) {
+			claims := toMapClaims(accessClaims)
+			assert.Equal(t, accessClaims.ID.String(), claims["jti"])
+			assert.Equal(t, accessClaims.Subject.String(), claims["sub"])
+			assert.Equal(t, accessClaims.Username, claims["usr"])
+			assert.Equal(t, accessClaims.SessionID.String(), claims["sid"])
+			assert.Equal(t, accessClaims.IssuedAt.Unix(), claims["iat"])
+			assert.Equal(t, accessClaims.ExpiresAt.Unix(), claims["exp"])
+			assert.Equal(t, string(accessClaims.TokenType), claims["typ"])
+			assert.Equal(t, accessClaims.Role, claims["rol"])
+		})
+
+		t.Run("RefreshTokenClaims", func(t *testing.T) {
+			claims := toMapClaims(refreshClaims)
+			assert.Equal(t, refreshClaims.ID.String(), claims["jti"])
+			assert.Equal(t, refreshClaims.Subject.String(), claims["sub"])
+			assert.Equal(t, refreshClaims.Username, claims["usr"])
+			assert.Equal(t, refreshClaims.SessionID.String(), claims["sid"])
+			assert.Equal(t, refreshClaims.IssuedAt.Unix(), claims["iat"])
+			assert.Equal(t, refreshClaims.ExpiresAt.Unix(), claims["exp"])
+			assert.Equal(t, string(refreshClaims.TokenType), claims["typ"])
+			assert.Nil(t, claims["rol"]) // Refresh tokens shouldn't have role
+		})
+
+		t.Run("Invalid Type", func(t *testing.T) {
+			assert.Nil(t, toMapClaims("invalid type"))
+		})
+	})
+}
+
+func TestRedisIntegration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	redisOpts := testRedisOptions()
+	client := redis.NewClient(redisOpts)
+	_, err := client.Ping(context.Background()).Result()
+	if err != nil {
+		t.Fatalf("Could not connect to Redis: %v", err)
+	}
+
+	t.Run("Token Rotation State", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = true
+		config.RefreshToken.MaxLifetime = time.Hour
+		maker, err := NewGourdianTokenMaker(config, redisOpts)
+		require.NoError(t, err)
+
+		// Create initial token
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		// Rotate token
+		newToken, err := maker.RotateRefreshToken(token.Token)
+		require.NoError(t, err)
+
+		// Check Redis for the old token
+		val, err := client.Get(context.Background(), "rotated:"+token.Token).Result()
+		require.NoError(t, err)
+		assert.Equal(t, "1", val)
+
+		// Check TTL is approximately MaxLifetime
+		ttl, err := client.TTL(context.Background(), "rotated:"+token.Token).Result()
+		require.NoError(t, err)
+		assert.InDelta(t, float64(config.RefreshToken.MaxLifetime), float64(ttl), float64(10*time.Second))
+
+		// Rotate again with the new token
+		_, err = maker.RotateRefreshToken(newToken.Token)
+		require.NoError(t, err)
+
+		// First token should still be in Redis
+		exists, err := client.Exists(context.Background(), "rotated:"+token.Token).Result()
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), exists)
+	})
+
+	t.Run("Redis Failure During Rotation", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(config, redisOpts)
+		require.NoError(t, err)
+
+		// Create token
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		// Stop Redis to simulate failure
+		require.NoError(t, client.Close())
+
+		// Rotation should fail
+		_, err = maker.RotateRefreshToken(token.Token)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "redis error")
+
+		// Restart Redis for other tests
+		client = redis.NewClient(redisOpts)
 	})
 }
