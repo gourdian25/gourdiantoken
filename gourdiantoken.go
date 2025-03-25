@@ -14,6 +14,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 // TokenType represents the type of JWT token (access or refresh).
@@ -116,8 +117,6 @@ type RefreshTokenConfig struct {
 	MaxLifetime     time.Duration // Absolute maximum lifetime
 	ReuseInterval   time.Duration // Minimum time between reuse attempts
 	RotationEnabled bool          // Whether to enable automatic rotation
-	FamilyEnabled   bool          // Whether to track token families
-	MaxPerUser      int           // Maximum concurrent tokens per user
 }
 
 // NewGourdianTokenConfig creates a fully configured GourdianTokenConfig with explicit parameters for all settings.
@@ -208,8 +207,6 @@ func NewGourdianTokenConfig(
 	refreshMaxLifetime time.Duration,
 	refreshReuseInterval time.Duration,
 	refreshRotationEnabled bool,
-	refreshFamilyEnabled bool,
-	refreshMaxPerUser int,
 ) GourdianTokenConfig {
 	return GourdianTokenConfig{
 		Algorithm:      algorithm,
@@ -230,8 +227,6 @@ func NewGourdianTokenConfig(
 			MaxLifetime:     refreshMaxLifetime,
 			ReuseInterval:   refreshReuseInterval,
 			RotationEnabled: refreshRotationEnabled,
-			FamilyEnabled:   refreshFamilyEnabled,
-			MaxPerUser:      refreshMaxPerUser,
 		},
 	}
 }
@@ -272,8 +267,6 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 			MaxLifetime:     30 * 24 * time.Hour,
 			ReuseInterval:   time.Minute,
 			RotationEnabled: true,
-			FamilyEnabled:   false,
-			MaxPerUser:      5,
 		},
 	}
 }
@@ -372,8 +365,9 @@ type GourdianTokenMaker interface {
 type JWTMaker struct {
 	config        GourdianTokenConfig
 	signingMethod jwt.SigningMethod
-	privateKey    interface{} // Key used for signing (HMAC secret, RSA or ECDSA private key)
-	publicKey     interface{} // Key used for verification (HMAC secret, RSA or ECDSA public key)
+	privateKey    interface{}   // Key used for signing (HMAC secret, RSA or ECDSA private key)
+	publicKey     interface{}   // Key used for verification (HMAC secret, RSA or ECDSA public key)
+	redisClient   *redis.Client // Nil if rotation disabled
 }
 
 // NewGourdianTokenMaker creates a new token maker instance with the provided configuration.
@@ -441,21 +435,33 @@ type JWTMaker struct {
 //   - ErrInsecureKeyFile: When key file permissions are too permissive
 //
 // The returned GourdianTokenMaker is safe for concurrent use by multiple goroutines.
-func NewGourdianTokenMaker(config GourdianTokenConfig) (GourdianTokenMaker, error) {
+func NewGourdianTokenMaker(config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) {
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	// Validate rotation requirements
+	if config.RefreshToken.RotationEnabled && redisOpts == nil {
+		return nil, fmt.Errorf("redis options required for token rotation")
 	}
 
 	maker := &JWTMaker{
 		config: config,
 	}
 
-	// Initialize signing method first
+	// Initialize Redis if rotation enabled
+	if config.RefreshToken.RotationEnabled {
+		maker.redisClient = redis.NewClient(redisOpts)
+		if _, err := maker.redisClient.Ping(context.Background()).Result(); err != nil {
+			return nil, fmt.Errorf("redis connection failed: %w", err)
+		}
+	}
+
+	// Initialize signing method and keys
 	if err := maker.initializeSigningMethod(); err != nil {
 		return nil, fmt.Errorf("failed to initialize signing method: %w", err)
 	}
 
-	// Then initialize keys
 	if err := maker.initializeKeys(); err != nil {
 		return nil, fmt.Errorf("failed to initialize keys: %w", err)
 	}
@@ -608,26 +614,47 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 // This implements refresh token rotation for enhanced security.
 // Returns a new RefreshTokenResponse if successful, otherwise returns an error.
 func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenResponse, error) {
-	claims, err := maker.VerifyRefreshToken(oldToken)
-	if err != nil {
-		return nil, err
-	}
-
 	if !maker.config.RefreshToken.RotationEnabled {
 		return nil, fmt.Errorf("token rotation not enabled")
 	}
 
-	// Only check reuse interval if it's set
-	if maker.config.RefreshToken.ReuseInterval > 0 && time.Since(claims.IssuedAt) < maker.config.RefreshToken.ReuseInterval {
-		return nil, fmt.Errorf("token reuse too soon")
+	// Verify old token first
+	claims, err := maker.VerifyRefreshToken(oldToken)
+	if err != nil {
+		return nil, fmt.Errorf("invalid token: %w", err)
 	}
 
-	return maker.CreateRefreshToken(
-		context.Background(),
-		claims.Subject,
-		claims.Username,
-		claims.SessionID,
-	)
+	ctx := context.Background()
+
+	// Check if token was recently rotated
+	lastUsed, err := maker.redisClient.Get(ctx, "rotated:"+oldToken).Result()
+	if err == nil { // Token exists in Redis
+		rotatedAt, err := time.Parse(time.RFC3339, lastUsed)
+		if err != nil {
+			return nil, fmt.Errorf("invalid rotation timestamp: %w", err)
+		}
+
+		if time.Since(rotatedAt) < maker.config.RefreshToken.ReuseInterval {
+			return nil, fmt.Errorf("token reused too soon")
+		}
+	} else if err != redis.Nil { // Real error (not just key not found)
+		return nil, fmt.Errorf("redis error: %w", err)
+	}
+
+	// Create new token
+	newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Record rotation in Redis (expire after max token lifetime)
+	err = maker.redisClient.Set(ctx, "rotated:"+oldToken, time.Now().Format(time.RFC3339),
+		maker.config.RefreshToken.MaxLifetime).Err()
+	if err != nil {
+		return nil, fmt.Errorf("failed to record rotation: %w", err)
+	}
+
+	return newToken, nil
 }
 
 func (maker *JWTMaker) initializeKeys() error {
