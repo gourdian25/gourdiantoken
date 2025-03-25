@@ -338,6 +338,13 @@ func asymmetricExample() {
 }
 ```
 
+## Supported Key Formats
+
+- **RSA**: PKCS#1 and PKCS#8 private keys, PKIX public keys
+- **RSA-PSS**: Keys generated via OpenSSL with PSS parameters
+- **EdDSA**: Ed25519 keys in PKCS#8 format
+- **ECDSA**: P-256, P-384, P-521 curves
+
 ## Contributing
 
 We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for more details on how to get started.
