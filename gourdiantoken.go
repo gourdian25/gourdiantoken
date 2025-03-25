@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -482,6 +483,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 //	    // Handle invalid token
 //	}
 func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims, error) {
+	// 1. Verify token signature and basic structure
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != maker.signingMethod.Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -498,15 +500,23 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 		return nil, fmt.Errorf("invalid token claims")
 	}
 
+	// 2. Validate all required claims exist
 	if err := validateTokenClaims(claims, AccessToken); err != nil {
 		return nil, err
 	}
 
+	// 3. Convert and validate UUID formats before other validations
+	accessClaims, err := mapToAccessClaims(claims)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Validate role claim exists
 	if _, ok := claims["rol"]; !ok {
 		return nil, fmt.Errorf("missing role claim in access token")
 	}
 
-	return mapToAccessClaims(claims)
+	return accessClaims, nil
 }
 
 // VerifyRefreshToken validates a refresh token string and returns its claims.
@@ -781,29 +791,59 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 
 // mapToAccessClaims converts JWT claims map to AccessTokenClaims struct
 func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
-	tokenID, err := uuid.Parse(claims["jti"].(string))
+	// Validate and convert jti claim
+	jti, ok := claims["jti"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid token ID type: expected string")
+	}
+	tokenID, err := uuid.Parse(jti)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token ID: %w", err)
 	}
 
-	userID, err := uuid.Parse(claims["sub"].(string))
+	// Validate and convert sub claim
+	sub, ok := claims["sub"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid user ID type: expected string")
+	}
+	userID, err := uuid.Parse(sub)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	sessionID, err := uuid.Parse(claims["sid"].(string))
+	// Validate and convert sid claim
+	sid, ok := claims["sid"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid session ID type: expected string")
+	}
+	sessionID, err := uuid.Parse(sid)
 	if err != nil {
 		return nil, fmt.Errorf("invalid session ID: %w", err)
 	}
 
+	// Validate username claim
 	username, ok := claims["usr"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid username type: expected string")
 	}
 
+	// Validate role claim
 	role, ok := claims["rol"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid role type: expected string")
+	}
+
+	// Validate token type claim
+	typ, ok := claims["typ"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid token type: expected string")
+	}
+
+	// Get timestamps with validation
+	iat := getUnixTime(claims["iat"])
+	exp := getUnixTime(claims["exp"])
+	if iat == 0 || exp == 0 {
+		return nil, fmt.Errorf("invalid timestamp format")
 	}
 
 	return &AccessTokenClaims{
@@ -811,9 +851,9 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		IssuedAt:  time.Unix(getUnixTime(claims["iat"]), 0),
-		ExpiresAt: time.Unix(getUnixTime(claims["exp"]), 0),
-		TokenType: TokenType(claims["typ"].(string)),
+		IssuedAt:  time.Unix(iat, 0),
+		ExpiresAt: time.Unix(exp, 0),
+		TokenType: TokenType(typ),
 		Role:      role,
 	}, nil
 }
@@ -853,7 +893,7 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 
 // validateTokenClaims validates the standard JWT claims
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
-	requiredClaims := []string{"jti", "sub", "usr", "sid", "iat", "exp", "typ"}
+	requiredClaims := []string{"jti", "sub", "typ", "usr", "sid", "iat", "exp"}
 	for _, claim := range requiredClaims {
 		if _, ok := claims[claim]; !ok {
 			return fmt.Errorf("missing required claim: %s", claim)
@@ -1082,12 +1122,18 @@ func checkFilePermissions(path string, requiredPerm os.FileMode) error {
 }
 
 // getUnixTime converts various numeric types to int64 timestamp
+// In getUnixTime helper function, expand type support:
 func getUnixTime(claim interface{}) int64 {
 	switch v := claim.(type) {
 	case float64:
 		return int64(v)
 	case int64:
 		return v
+	case int:
+		return int64(v)
+	case json.Number:
+		i, _ := v.Int64()
+		return i
 	default:
 		return 0
 	}

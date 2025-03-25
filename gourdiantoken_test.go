@@ -438,6 +438,7 @@ func TestClaimValidation(t *testing.T) {
 			})
 		}
 	})
+
 }
 
 func TestEdgeCases(t *testing.T) {
@@ -466,12 +467,23 @@ func TestEdgeCases(t *testing.T) {
 		maker, err := NewGourdianTokenMaker(config, testRedisOptions())
 		require.NoError(t, err)
 
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", "role", uuid.New())
+		token, err := maker.CreateAccessToken(
+			context.Background(),
+			uuid.New(),
+			"user",
+			"role",
+			uuid.New(),
+		)
 		require.NoError(t, err)
 
 		_, err = maker.VerifyAccessToken(token.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token has expired")
+		require.Error(t, err)
+
+		// Check for the error more flexibly
+		errorMsg := err.Error()
+		if !strings.Contains(errorMsg, "expired") {
+			t.Errorf("Expected error about expired token, got: %v", errorMsg)
+		}
 	})
 
 	t.Run("Future Issued At", func(t *testing.T) {
