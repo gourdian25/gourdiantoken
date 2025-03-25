@@ -14,7 +14,7 @@ import (
 func BenchmarkCreateAccessToken(b *testing.B) {
 	// Setup symmetric maker
 	symmetricConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-	symmetricMaker, _ := NewGourdianTokenMaker(symmetricConfig)
+	symmetricMaker, _ := NewGourdianTokenMaker(symmetricConfig, testRedisOptions())
 
 	// Setup asymmetric maker
 	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
@@ -59,7 +59,7 @@ func BenchmarkCreateAccessToken(b *testing.B) {
 func BenchmarkVerifyAccessToken(b *testing.B) {
 	// Setup symmetric maker
 	symmetricConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-	symmetricMaker, _ := NewGourdianTokenMaker(symmetricConfig)
+	symmetricMaker, _ := NewGourdianTokenMaker(symmetricConfig, testRedisOptions())
 
 	// Setup asymmetric maker
 	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
@@ -106,7 +106,7 @@ func BenchmarkVerifyAccessToken(b *testing.B) {
 
 func BenchmarkTokenOperations(b *testing.B) {
 	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-	maker, err := NewGourdianTokenMaker(config)
+	maker, err := NewGourdianTokenMaker(config, testRedisOptions())
 	if err != nil {
 		b.Fatal(err)
 	}
