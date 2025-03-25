@@ -16,22 +16,21 @@
 │   │   └── rsa_public.pem
 │   ├── main.go
 │   ├── scenarios
-│   │   ├── asymmetric.go
-│   │   ├── custom_claims.go
-│   │   ├── default_config.go
-│   │   ├── eddsa_example.go
-│   │   ├── high_security.go
-│   │   ├── hmac_example.go
-│   │   ├── multitenant.go
-│   │   ├── refresh_flow.go
-│   │   ├── revocation.go
-│   │   ├── rsa_example.go
-│   │   ├── rsa_pss_example.go
+│   │   ├── basic_usage_scenario.go
+│   │   ├── custom_claims_scenario.go
+│   │   ├── eddsa_scenario.go
+│   │   ├── high_security_scenario.go
+│   │   ├── hmac_scenario.go
+│   │   ├── multitenant_scenario.go
+│   │   ├── refresh_flow_scenario.go
+│   │   ├── revocation_scenario.go
+│   │   ├── rsa_pss_scenario.go
+│   │   ├── rsa_scenario.go
 │   │   ├── scenarios.go
-│   │   ├── short_lived.go
-│   │   ├── stateless.go
-│   │   ├── symmetric.go
-│   │   └── token_family.go
+│   │   ├── short_lived_scenario.go
+│   │   ├── stateless_scenario.go
+│   │   ├── symmetric_scenario.go
+│   │   └── token_family_scenario.go
 │   └── utils
 │       └── helpers.go
 ├── go.mod
@@ -44,4 +43,4 @@
 ├── tree.txt
 └── version.go
 
-5 directories, 40 files
+5 directories, 39 files
