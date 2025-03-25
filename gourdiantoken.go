@@ -8,8 +8,11 @@ import (
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 	"time"
@@ -772,22 +775,32 @@ func (maker *JWTMaker) parseKeyPair() error {
 	}
 
 	switch maker.signingMethod.Alg() {
-	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
-		maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)
+	case "RS256", "RS384", "RS512":
+		maker.privateKey, err = x509.ParsePKCS1PrivateKey(privateKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse RSA private key: %w", err)
 		}
-		maker.publicKey, err = parseRSAPublicKey(publicKeyBytes)
+		maker.publicKey, err = x509.ParsePKCS1PublicKey(publicKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse RSA public key: %w", err)
 		}
 
+	case "PS256", "PS384", "PS512":
+		maker.privateKey, err = parseRSAPSSPrivateKey(privateKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse RSA-PSS private key: %w", err)
+		}
+		maker.publicKey, err = parseRSAPSSPublicKey(publicKeyBytes)
+		if err != nil {
+			return fmt.Errorf("failed to parse RSA-PSS public key: %w", err)
+		}
+
 	case "ES256", "ES384", "ES512":
-		maker.privateKey, err = parseECDSAPrivateKey(privateKeyBytes)
+		maker.privateKey, err = x509.ParseECPrivateKey(privateKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse ECDSA private key: %w", err)
 		}
-		maker.publicKey, err = parseECDSAPublicKey(publicKeyBytes)
+		maker.publicKey, err = x509.ParsePKIXPublicKey(publicKeyBytes)
 		if err != nil {
 			return fmt.Errorf("failed to parse ECDSA public key: %w", err)
 		}
@@ -956,6 +969,105 @@ func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("not a valid ECDSA public key")
 	}
 	return ecdsaPub, nil
+}
+
+type pkcs8 struct {
+	Version    int
+	Algo       pkix.AlgorithmIdentifier
+	PrivateKey []byte
+}
+
+type rsaPrivateKey struct {
+	Version int
+	N       *big.Int
+	E       *big.Int
+	D       *big.Int
+	P       *big.Int
+	Q       *big.Int
+	Dp      *big.Int
+	Dq      *big.Int
+	Qinv    *big.Int
+}
+
+func parseRSAPSSPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
+	}
+
+	// Try standard PKCS8 parsing first
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		if rsaKey, ok := key.(*rsa.PrivateKey); ok {
+			return rsaKey, nil
+		}
+	}
+
+	// Manual parsing for RSA-PSS keys
+	var privKey pkcs8
+	if _, err := asn1.Unmarshal(block.Bytes, &privKey); err != nil {
+		return nil, fmt.Errorf("failed to parse PKCS8 structure: %w", err)
+	}
+
+	var rsaPriv rsaPrivateKey
+	if _, err := asn1.Unmarshal(privKey.PrivateKey, &rsaPriv); err != nil {
+		return nil, fmt.Errorf("failed to parse RSA private key: %w", err)
+	}
+
+	if rsaPriv.Version != 0 {
+		return nil, fmt.Errorf("unsupported RSA private key version: %d", rsaPriv.Version)
+	}
+
+	key := &rsa.PrivateKey{
+		PublicKey: rsa.PublicKey{
+			N: rsaPriv.N,
+			E: int(rsaPriv.E.Int64()),
+		},
+		D:      rsaPriv.D,
+		Primes: []*big.Int{rsaPriv.P, rsaPriv.Q},
+		Precomputed: rsa.PrecomputedValues{
+			Dp:   rsaPriv.Dp,
+			Dq:   rsaPriv.Dq,
+			Qinv: rsaPriv.Qinv,
+		},
+	}
+
+	return key, nil
+}
+
+func parseRSAPSSPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
+	}
+
+	// Try standard parsing first
+	if pub, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+		if rsaPub, ok := pub.(*rsa.PublicKey); ok {
+			return rsaPub, nil
+		}
+	}
+
+	// Manual parsing for RSA-PSS public keys
+	var pubKey struct {
+		Algo      pkix.AlgorithmIdentifier
+		BitString asn1.BitString
+	}
+	if _, err := asn1.Unmarshal(block.Bytes, &pubKey); err != nil {
+		return nil, fmt.Errorf("failed to parse public key structure: %w", err)
+	}
+
+	var rsaPub struct {
+		N *big.Int
+		E *big.Int
+	}
+	if _, err := asn1.Unmarshal(pubKey.BitString.Bytes, &rsaPub); err != nil {
+		return nil, fmt.Errorf("failed to parse RSA public key: %w", err)
+	}
+
+	return &rsa.PublicKey{
+		N: rsaPub.N,
+		E: int(rsaPub.E.Int64()),
+	}, nil
 }
 
 // checkFilePermissions checks if the file has the required permissions
