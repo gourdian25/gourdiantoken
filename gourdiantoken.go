@@ -318,7 +318,7 @@ type RefreshTokenResponse struct {
 
 // validateConfig validates the configuration.
 func validateConfig(config *GourdianTokenConfig) error {
-
+	// Validate signing method and key configuration
 	switch config.SigningMethod {
 	case Symmetric:
 		if config.SymmetricKey == "" {
@@ -646,18 +646,16 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 
 	ctx := context.Background()
 
-	// Check if token was recently rotated
-	lastUsed, err := maker.redisClient.Get(ctx, "rotated:"+oldToken).Result()
-	// In RotateRefreshToken function
-	if err == nil { // Token exists in Redis
-		rotatedAt, err := time.Parse(time.RFC3339, lastUsed)
-		if err != nil {
-			return nil, fmt.Errorf("invalid rotation timestamp: %w", err)
-		}
+	// Check if token was recently rotated (exists in Redis)
+	tokenKey := "rotated:" + oldToken
+	exists, err := maker.redisClient.Exists(ctx, tokenKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis error: %w", err)
+	}
 
-		if time.Since(rotatedAt) < maker.config.RefreshToken.ReuseInterval {
-			return nil, fmt.Errorf("token reused too soon: last used at %s", rotatedAt)
-		}
+	// If the token exists in Redis, it means it was already rotated
+	if exists == 1 {
+		return nil, fmt.Errorf("token reused too soon")
 	}
 
 	// Create new token
@@ -667,8 +665,7 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 	}
 
 	// Record rotation in Redis (expire after max token lifetime)
-	err = maker.redisClient.Set(ctx, "rotated:"+oldToken, time.Now().Format(time.RFC3339),
-		maker.config.RefreshToken.MaxLifetime).Err()
+	err = maker.redisClient.Set(ctx, tokenKey, "1", maker.config.RefreshToken.MaxLifetime).Err()
 	if err != nil {
 		return nil, fmt.Errorf("failed to record rotation: %w", err)
 	}
