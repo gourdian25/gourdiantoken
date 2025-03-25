@@ -15,7 +15,11 @@ func main() {
 	fmt.Println("3. Token Refresh Flow Example")
 	fmt.Println("4. Default Configuration Example")
 	fmt.Println("5. Run All Examples")
-	fmt.Print("Enter your choice (1-5): ")
+	fmt.Println("6. Token Revocation Example")
+	fmt.Println("7. Multi-Tenant Token Example")
+	fmt.Println("8. Token Family Example")
+	fmt.Println("9. Custom Claims Example")
+	fmt.Print("Enter your choice (1-9): ")
 
 	var choice int
 	_, err := fmt.Scan(&choice)
@@ -38,6 +42,21 @@ func main() {
 		asymmetricExample()
 		refreshTokenExample()
 		defaultUsageExample()
+		customClaimsExample()
+		tokenFamilyExample()
+		multiTenantExample()
+		tokenRevocationExample()
+		statelessTokenExample()
+		shortLivedTokenExample()
+		highSecurityExample()
+	case 6:
+		tokenRevocationExample()
+	case 7:
+		multiTenantExample()
+	case 8:
+		tokenFamilyExample()
+	case 9:
+		customClaimsExample()
 	default:
 		fmt.Println("Invalid choice")
 		os.Exit(1)

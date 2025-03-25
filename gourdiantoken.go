@@ -266,7 +266,7 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 			Duration:        7 * 24 * time.Hour,
 			MaxLifetime:     30 * 24 * time.Hour,
 			ReuseInterval:   time.Minute,
-			RotationEnabled: true,
+			RotationEnabled: false,
 		},
 	}
 }

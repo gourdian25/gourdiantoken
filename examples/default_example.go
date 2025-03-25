@@ -1,4 +1,3 @@
-// examples/default_example.go
 package main
 
 import (
@@ -14,18 +13,16 @@ import (
 func defaultUsageExample() {
 	printHeader("Default Configuration Example")
 
-	// Using default configuration with adjusted timings for demo
-
-	// Using default configuration
+	// Using default configuration without rotation
 	printSection("Creating Default Config")
 	config := gourdiantoken.DefaultGourdianTokenConfig(
 		"your-32-byte-secret-key-1234567890abcdef",
 	)
+	config.RefreshToken.RotationEnabled = false // Disable rotation for this example
 	config.AccessToken.Duration = 45 * time.Second
-	config.RefreshToken.ReuseInterval = 10 * time.Second
 
-	// Initialize
-	maker, err := gourdiantoken.NewGourdianTokenMaker(config)
+	// Initialize without Redis
+	maker, err := gourdiantoken.NewGourdianTokenMaker(config, nil)
 	if err != nil {
 		log.Fatalf("Failed to create token maker: %v", err)
 	}
@@ -52,16 +49,7 @@ func defaultUsageExample() {
 	fmt.Println("Waiting for access token to expire...")
 	time.Sleep(50 * time.Second)
 
-	// Rotate tokens
-	printSection("Token Rotation")
-	fmt.Println("Waiting for reuse interval...")
-	time.Sleep(10 * time.Second)
-
-	newRefreshToken, err := maker.RotateRefreshToken(refreshToken.Token)
-	if err != nil {
-		log.Fatalf("Failed to rotate refresh token: %v", err)
-	}
-
+	// Create new access token (no rotation in this example)
 	newAccessToken, err := maker.CreateAccessToken(context.Background(), userID, username, "user", sessionID)
 	if err != nil {
 		log.Fatalf("Failed to create new access token: %v", err)
@@ -69,5 +57,5 @@ func defaultUsageExample() {
 
 	printSection("Final Verification")
 	verifyToken(maker, newAccessToken.Token, gourdiantoken.AccessToken)
-	verifyToken(maker, newRefreshToken.Token, gourdiantoken.RefreshToken)
+	verifyToken(maker, refreshToken.Token, gourdiantoken.RefreshToken)
 }
