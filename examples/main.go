@@ -51,13 +51,12 @@ func displayMenu() {
 	fmt.Println("5.  Token Revocation Demonstration")
 	fmt.Println("6.  Multi-Tenant Token Demonstration")
 	fmt.Println("7.  Token Family Demonstration")
-	fmt.Println("8.  Custom Claims Demonstration")
-	fmt.Println("9.  Stateless Token Demonstration")
-	fmt.Println("10. Short-Lived Token Demonstration")
-	fmt.Println("11. High Security Demonstration")
-	fmt.Println("12. RSA-PSS Token Demonstration")
-	fmt.Println("13. EdDSA Token Demonstration")
-	fmt.Println("14. Run All Demonstrations")
+	fmt.Println("8.  Stateless Token Demonstration")
+	fmt.Println("9. Short-Lived Token Demonstration")
+	fmt.Println("10. High Security Demonstration")
+	fmt.Println("11. RSA-PSS Token Demonstration")
+	fmt.Println("12. EdDSA Token Demonstration")
+	fmt.Println("13. Run All Demonstrations")
 }
 
 func runExample(choice int) {
@@ -77,18 +76,16 @@ func runExample(choice int) {
 	case 7:
 		scenarios.DemonstrateTokenFamilies()
 	case 8:
-		scenarios.DemonstrateCustomClaims()
-	case 9:
 		scenarios.DemonstrateStatelessTokens()
-	case 10:
+	case 9:
 		scenarios.DemonstrateShortLivedTokens()
-	case 11:
+	case 10:
 		scenarios.DemonstrateHighSecurity()
-	case 12:
+	case 11:
 		scenarios.DemonstrateRSAPSSTokens()
-	case 13:
+	case 12:
 		scenarios.DemonstrateEdDSATokens()
-	case 14:
+	case 13:
 		runAllExamples()
 	default:
 		fmt.Println("Invalid choice - please select 1-14")
@@ -111,7 +108,6 @@ func runAllExamples() {
 		{"Token Revocation", scenarios.DemonstrateTokenRevocation},
 		{"Multi-Tenant Token", scenarios.DemonstrateMultiTenant},
 		{"Token Family", scenarios.DemonstrateTokenFamilies},
-		{"Custom Claims", scenarios.DemonstrateCustomClaims},
 		{"Stateless Token", scenarios.DemonstrateStatelessTokens},
 		{"Short-Lived Token", scenarios.DemonstrateShortLivedTokens},
 		{"High Security", scenarios.DemonstrateHighSecurity},

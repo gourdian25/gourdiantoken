@@ -2,7 +2,6 @@ package scenarios
 
 import (
 	"context"
-	"os"
 	"time"
 
 	"github.com/gourdian25/gourdiantoken"
@@ -11,11 +10,6 @@ import (
 
 func DemonstrateRSAPSSTokens() {
 	utils.PrintHeader("RSA-PSS Token Demonstration")
-
-	if _, err := os.Stat("examples/keys/rsa_pss_private.pem"); os.IsNotExist(err) {
-		utils.PrintError("Private key missing", err)
-		return
-	}
 
 	config := gourdiantoken.GourdianTokenConfig{
 		Algorithm:      "PS256",
