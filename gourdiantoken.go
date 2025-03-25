@@ -263,9 +263,9 @@ type RefreshTokenResponse struct {
 type GourdianTokenMaker interface {
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
+	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
 	VerifyAccessToken(tokenString string) (*AccessTokenClaims, error)
 	VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error)
-	RotateRefreshToken(oldToken string) (*RefreshTokenResponse, error)
 }
 
 // JWTMaker implements GourdianTokenMaker using JWT tokens with Redis support for rotation.
@@ -568,12 +568,12 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 // New refresh token response or error if rotation fails.
 //
 // Example Usage:
-// newToken, err := maker.RotateRefreshToken(oldRefreshToken)
+// newToken, err := maker.RotateRefreshToken(context.Background(), oldRefreshToken)
 //
 //	if err != nil {
 //	    // Handle rotation failure
 //	}
-func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenResponse, error) {
+func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) {
 	if !maker.config.RefreshToken.RotationEnabled {
 		return nil, fmt.Errorf("token rotation not enabled")
 	}
@@ -583,7 +583,6 @@ func (maker *JWTMaker) RotateRefreshToken(oldToken string) (*RefreshTokenRespons
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
 
-	ctx := context.Background()
 	tokenKey := "rotated:" + oldToken
 
 	exists, err := maker.redisClient.Exists(ctx, tokenKey).Result()

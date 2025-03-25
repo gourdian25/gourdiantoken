@@ -45,7 +45,7 @@ func DemonstrateShortLivedTokens() {
 	utils.PrintSection("Demonstrating Quick Rotation")
 	utils.SimulateTokenExpiration(70 * time.Second)
 
-	newRefreshToken, err := maker.RotateRefreshToken(refreshToken.Token)
+	newRefreshToken, err := maker.RotateRefreshToken(context.Background(), refreshToken.Token)
 	if err != nil {
 		utils.PrintError("Rotation failed", err)
 		return

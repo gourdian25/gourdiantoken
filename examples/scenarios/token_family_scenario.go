@@ -57,7 +57,7 @@ func DemonstrateTokenFamilies() {
 		utils.PrintSection(fmt.Sprintf("Rotation #%d", i+1))
 		utils.SimulateTokenExpiration(6 * time.Minute)
 
-		newRefreshToken, err := maker.RotateRefreshToken(refreshToken.Token)
+		newRefreshToken, err := maker.RotateRefreshToken(context.Background(), refreshToken.Token)
 		if err != nil {
 			utils.PrintError("Rotation failed", err)
 			return

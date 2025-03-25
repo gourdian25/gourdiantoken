@@ -137,6 +137,7 @@ func BenchmarkTokenOperations(b *testing.B) {
 			case []byte:
 				config := DefaultGourdianTokenConfig(string(k))
 				config.Algorithm = bb.algorithm
+				config.AccessToken.Duration = time.Hour // Set longer duration for benchmarks
 				maker, err = NewGourdianTokenMaker(config, nil)
 			case *rsa.PrivateKey:
 				privatePath, publicPath := writeTempKeyFiles(b, k)
@@ -145,6 +146,10 @@ func BenchmarkTokenOperations(b *testing.B) {
 					SigningMethod:  Asymmetric,
 					PrivateKeyPath: privatePath,
 					PublicKeyPath:  publicPath,
+					AccessToken: AccessTokenConfig{
+						Duration:    24 * time.Hour, // Longer duration for asymmetric
+						MaxLifetime: 7 * 24 * time.Hour,
+					},
 				}
 				maker, err = NewGourdianTokenMaker(config, nil)
 			case *ecdsa.PrivateKey:
@@ -154,13 +159,15 @@ func BenchmarkTokenOperations(b *testing.B) {
 					SigningMethod:  Asymmetric,
 					PrivateKeyPath: privatePath,
 					PublicKeyPath:  publicPath,
+					AccessToken: AccessTokenConfig{
+						Duration:    24 * time.Hour, // Longer duration for asymmetric
+						MaxLifetime: 7 * 24 * time.Hour,
+					},
 				}
 				maker, err = NewGourdianTokenMaker(config, nil)
 			}
 			require.NoError(b, err)
 
-			// If you specifically need the JWTMaker for benchmarking internal methods,
-			// you can add a type assertion here:
 			jwtMaker, ok := maker.(*JWTMaker)
 			if !ok {
 				b.Fatal("expected *JWTMaker implementation")
@@ -180,6 +187,7 @@ func BenchmarkTokenOperations(b *testing.B) {
 				}
 			})
 
+			// Create a fresh token right before verification to ensure it's not expired
 			token, err := jwtMaker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
 			require.NoError(b, err)
 

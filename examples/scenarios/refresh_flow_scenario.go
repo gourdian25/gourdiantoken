@@ -56,7 +56,7 @@ func DemonstrateRefreshFlow() {
 	utils.SimulateTokenExpiration(35 * time.Second)
 
 	utils.PrintSection("Token Rotation")
-	newRefreshToken, err := maker.RotateRefreshToken(refreshToken.Token)
+	newRefreshToken, err := maker.RotateRefreshToken(context.Background(), refreshToken.Token)
 	if err != nil {
 		utils.PrintError("Rotation failed", err)
 		return
@@ -65,6 +65,6 @@ func DemonstrateRefreshFlow() {
 	utils.PrintTokenDetails("New Refresh Token", newRefreshToken)
 
 	utils.PrintSection("Security Validation")
-	_, err = maker.RotateRefreshToken(refreshToken.Token)
+	_, err = maker.RotateRefreshToken(context.Background(), refreshToken.Token)
 	utils.VerifyError("Old token rejection", err, "should reject old token")
 }
