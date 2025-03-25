@@ -23,6 +23,10 @@ func main() {
 	fmt.Println("9. Stateless Token Example")
 	fmt.Println("10. Short-Lived Token Example")
 	fmt.Println("11. High Security Example")
+	fmt.Println("13. RSA Example")
+	fmt.Println("14. RSA-PSS Example")
+	fmt.Println("15. EdDSA Example")
+	fmt.Println("16. HMAC Example")
 	fmt.Println("12. Run All Examples")
 	fmt.Print("Enter your choice (1-12): ")
 
@@ -56,6 +60,14 @@ func main() {
 		scenarios.RunShortLivedExample()
 	case 11:
 		scenarios.RunHighSecurityExample()
+	case 13:
+		scenarios.RunRSAExample()
+	case 14:
+		scenarios.RunRSAPSSExample()
+	case 15:
+		scenarios.RunEdDSAExample()
+	case 16:
+		scenarios.RunHMACExample()
 	case 12:
 		runAllExamples()
 	default:
@@ -78,4 +90,8 @@ func runAllExamples() {
 	scenarios.RunStatelessExample()
 	scenarios.RunShortLivedExample()
 	scenarios.RunHighSecurityExample()
+	scenarios.RunRSAExample()
+	scenarios.RunRSAPSSExample()
+	scenarios.RunEdDSAExample()
+	scenarios.RunHMACExample()
 }
