@@ -25,16 +25,14 @@ func DemonstrateRSATokens() {
 
 	maker, err := utils.CreateTokenMaker(config, false)
 	if err != nil {
-		utils.PrintError("Failed to create token maker", err)
+		utils.PrintError("Token maker creation failed", err)
 		return
 	}
 
 	userID, username, sessionID := utils.CreateTestUser()
 
-	// Create and verify token
 	utils.PrintSection("Creating RSA Token")
-	tokenResp, err := maker.CreateAccessToken(
-		context.Background(),
+	tokenResp, err := maker.CreateAccessToken(context.Background(),
 		userID,
 		username,
 		"user",
@@ -45,5 +43,13 @@ func DemonstrateRSATokens() {
 		return
 	}
 
-	utils.VerifyToken(maker, tokenResp.Token, gourdiantoken.AccessToken)
+	utils.PrintSection("Verifying RSA Token")
+	claims, err := maker.VerifyAccessToken(tokenResp.Token)
+	if err != nil {
+		utils.PrintError("Token verification failed", err)
+		return
+	}
+
+	utils.PrintTokenDetails("RSA Token", tokenResp)
+	utils.PrintClaims(claims)
 }

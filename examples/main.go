@@ -1,4 +1,3 @@
-// examples/main.go
 package main
 
 import (
@@ -15,7 +14,7 @@ func main() {
 	displayMenu()
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\nEnter your choice (1-16, or 'a' for all): ")
+	fmt.Print("\nEnter your choice (1-14, or 'a' for all): ")
 
 	input, err := reader.ReadString('\n')
 	if err != nil {
@@ -45,87 +44,79 @@ func displayMenu() {
 	fmt.Println(strings.Repeat("=", 40))
 	fmt.Println("GourdianToken Examples")
 	fmt.Println(strings.Repeat("=", 40))
-	fmt.Println("1.  Symmetric Key (HMAC) Example")
-	fmt.Println("2.  Asymmetric Key (RSA) Example")
-	fmt.Println("3.  Token Refresh Flow Example")
-	fmt.Println("4.  Default Configuration Example")
-	fmt.Println("5.  Token Revocation Example")
-	fmt.Println("6.  Multi-Tenant Token Example")
-	fmt.Println("7.  Token Family Example")
-	fmt.Println("8.  Custom Claims Example")
-	fmt.Println("9.  Stateless Token Example")
-	fmt.Println("10. Short-Lived Token Example")
-	fmt.Println("11. High Security Example")
-	fmt.Println("12. RSA Example")
-	fmt.Println("13. RSA-PSS Example")
-	fmt.Println("14. EdDSA Example")
-	fmt.Println("15. HMAC Example")
-	fmt.Println("16. Run All Examples")
+	fmt.Println("1.  HMAC Token Demonstration")
+	fmt.Println("2.  RSA Token Demonstration")
+	fmt.Println("3.  Refresh Token Flow Demonstration")
+	fmt.Println("4.  Basic Usage Demonstration")
+	fmt.Println("5.  Token Revocation Demonstration")
+	fmt.Println("6.  Multi-Tenant Token Demonstration")
+	fmt.Println("7.  Token Family Demonstration")
+	fmt.Println("8.  Custom Claims Demonstration")
+	fmt.Println("9.  Stateless Token Demonstration")
+	fmt.Println("10. Short-Lived Token Demonstration")
+	fmt.Println("11. High Security Demonstration")
+	fmt.Println("12. RSA-PSS Token Demonstration")
+	fmt.Println("13. EdDSA Token Demonstration")
+	fmt.Println("14. Run All Demonstrations")
 }
 
 func runExample(choice int) {
 	switch choice {
 	case 1:
-		scenarios.RunSymmetricExample()
+		scenarios.DemonstrateHMACTokens()
 	case 2:
-		scenarios.RunAsymmetricExample()
+		scenarios.DemonstrateRSATokens()
 	case 3:
-		scenarios.RunRefreshFlowExample()
+		scenarios.DemonstrateRefreshFlow()
 	case 4:
-		scenarios.RunDefaultConfigExample()
+		scenarios.DemonstrateBasicUsage()
 	case 5:
-		scenarios.RunRevocationExample()
+		scenarios.DemonstrateTokenRevocation()
 	case 6:
-		scenarios.RunMultiTenantExample()
+		scenarios.DemonstrateMultiTenant()
 	case 7:
-		scenarios.RunTokenFamilyExample()
+		scenarios.DemonstrateTokenFamilies()
 	case 8:
-		scenarios.RunCustomClaimsExample()
+		scenarios.DemonstrateCustomClaims()
 	case 9:
-		scenarios.RunStatelessExample()
+		scenarios.DemonstrateStatelessTokens()
 	case 10:
-		scenarios.RunShortLivedExample()
+		scenarios.DemonstrateShortLivedTokens()
 	case 11:
-		scenarios.RunHighSecurityExample()
+		scenarios.DemonstrateHighSecurity()
 	case 12:
-		scenarios.RunRSAExample()
+		scenarios.DemonstrateRSAPSSTokens()
 	case 13:
-		scenarios.RunRSAPSSExample()
+		scenarios.DemonstrateEdDSATokens()
 	case 14:
-		scenarios.RunEdDSAExample()
-	case 15:
-		scenarios.RunHMACExample()
-	case 16:
 		runAllExamples()
 	default:
-		fmt.Println("Invalid choice - please select 1-16")
+		fmt.Println("Invalid choice - please select 1-14")
 		os.Exit(1)
 	}
 }
 
 func runAllExamples() {
-	fmt.Println("\nRunning all examples...")
+	fmt.Println("\nRunning all demonstrations...")
 	fmt.Println(strings.Repeat("-", 40))
 
 	examples := []struct {
 		name string
 		fn   func()
 	}{
-		{"Symmetric Key (HMAC)", scenarios.RunSymmetricExample},
-		{"Asymmetric Key (RSA)", scenarios.RunAsymmetricExample},
-		{"Token Refresh Flow", scenarios.RunRefreshFlowExample},
-		{"Default Configuration", scenarios.RunDefaultConfigExample},
-		{"Token Revocation", scenarios.RunRevocationExample},
-		{"Multi-Tenant Token", scenarios.RunMultiTenantExample},
-		{"Token Family", scenarios.RunTokenFamilyExample},
-		{"Custom Claims", scenarios.RunCustomClaimsExample},
-		{"Stateless Token", scenarios.RunStatelessExample},
-		{"Short-Lived Token", scenarios.RunShortLivedExample},
-		{"High Security", scenarios.RunHighSecurityExample},
-		{"RSA", scenarios.RunRSAExample},
-		{"RSA-PSS", scenarios.RunRSAPSSExample},
-		{"EdDSA", scenarios.RunEdDSAExample},
-		{"HMAC", scenarios.RunHMACExample},
+		{"HMAC Token", scenarios.DemonstrateHMACTokens},
+		{"RSA Token", scenarios.DemonstrateRSATokens},
+		{"Refresh Token Flow", scenarios.DemonstrateRefreshFlow},
+		{"Basic Usage", scenarios.DemonstrateBasicUsage},
+		{"Token Revocation", scenarios.DemonstrateTokenRevocation},
+		{"Multi-Tenant Token", scenarios.DemonstrateMultiTenant},
+		{"Token Family", scenarios.DemonstrateTokenFamilies},
+		{"Custom Claims", scenarios.DemonstrateCustomClaims},
+		{"Stateless Token", scenarios.DemonstrateStatelessTokens},
+		{"Short-Lived Token", scenarios.DemonstrateShortLivedTokens},
+		{"High Security", scenarios.DemonstrateHighSecurity},
+		{"RSA-PSS Token", scenarios.DemonstrateRSAPSSTokens},
+		{"EdDSA Token", scenarios.DemonstrateEdDSATokens},
 	}
 
 	for i, example := range examples {
