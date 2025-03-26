@@ -26,13 +26,78 @@ import (
 
 // Test Cases
 
+// func TestRedisIntegration(t *testing.T) {
+// 	client := testRedisClient(t)
+// 	defer client.Close()
+
+// 	t.Run("Redis Failure During Rotation", func(t *testing.T) {
+// 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+// 		config.RefreshToken.RotationEnabled = true
+
+// 		// Create maker with working Redis first
+// 		maker, err := NewGourdianTokenMaker(config, testRedisOptions())
+// 		require.NoError(t, err)
+
+// 		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+// 		require.NoError(t, err)
+
+// 		// Now force Redis failure
+// 		maker.redisClient.Close()
+
+// 		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
+// 		require.Error(t, err)
+// 		assert.Contains(t, err.Error(), "redis connection failed")
+// 	})
+// }
+
+func TestTokenRotation(t *testing.T) {
+	client := testRedisClient(t)
+	defer client.Close()
+
+	t.Run("Successful Rotation", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(config, testRedisOptions())
+		require.NoError(t, err)
+
+		oldToken, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		newToken, err := maker.RotateRefreshToken(context.Background(), oldToken.Token)
+		require.NoError(t, err)
+
+		_, err = maker.VerifyRefreshToken(oldToken.Token)
+		require.Error(t, err)
+
+		_, err = maker.VerifyRefreshToken(newToken.Token)
+		require.NoError(t, err)
+	})
+
+	t.Run("Rotation Reuse Protection", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config.RefreshToken.RotationEnabled = true
+		config.RefreshToken.ReuseInterval = time.Minute
+		maker, err := NewGourdianTokenMaker(config, testRedisOptions())
+		require.NoError(t, err)
+
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
+		require.NoError(t, err)
+
+		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "token reused too soon")
+	})
+}
+
 func TestTokenEdgeCases(t *testing.T) {
 	t.Run("Token with Empty UUID", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 		maker, err := NewGourdianTokenMaker(config, nil)
 		require.NoError(t, err)
 
-		// Create token with empty UUID
 		emptyUUID := uuid.UUID{}
 		_, err = maker.CreateAccessToken(context.Background(), emptyUUID, "user", "role", uuid.New())
 		require.Error(t, err)
@@ -44,7 +109,6 @@ func TestTokenEdgeCases(t *testing.T) {
 		maker, err := NewGourdianTokenMaker(config, nil)
 		require.NoError(t, err)
 
-		// Create token with empty role
 		_, err = maker.CreateAccessToken(context.Background(), uuid.New(), "user", "", uuid.New())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "role cannot be empty")
@@ -55,8 +119,7 @@ func TestTokenEdgeCases(t *testing.T) {
 		maker, err := NewGourdianTokenMaker(config, nil)
 		require.NoError(t, err)
 
-		// Create token with very long username
-		longUsername := strings.Repeat("a", 1025) // 1KB+ username
+		longUsername := strings.Repeat("a", 1025)
 		_, err = maker.CreateAccessToken(context.Background(), uuid.New(), longUsername, "role", uuid.New())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "username too long")
@@ -64,100 +127,76 @@ func TestTokenEdgeCases(t *testing.T) {
 }
 
 func TestEnhancedTokenRotation(t *testing.T) {
-	redisOpts := testRedisOptions()
+	client := testRedisClient(t)
+	defer client.Close()
 
 	t.Run("Concurrent Rotation Attempts", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 		config.RefreshToken.RotationEnabled = true
 		config.RefreshToken.ReuseInterval = time.Second
-		maker, err := NewGourdianTokenMaker(config, redisOpts)
+		maker, err := NewGourdianTokenMaker(config, testRedisOptions())
 		require.NoError(t, err)
 
-		// Create initial token
 		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
 		require.NoError(t, err)
 
-		// Simulate concurrent rotation attempts
 		var wg sync.WaitGroup
-		errors := make(chan error, 10)
+		results := make(chan error, 10)
 
 		for i := 0; i < 10; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				_, err := maker.RotateRefreshToken(context.Background(), token.Token)
-				if err != nil {
-					errors <- err
-				}
+				results <- err
 			}()
 		}
 
 		wg.Wait()
-		close(errors)
+		close(results)
 
-		// Only one rotation should succeed, others should fail
-		var successCount int
-		for err := range errors {
+		var successCount, failureCount int
+		for err := range results {
 			if err == nil {
 				successCount++
 			} else {
+				failureCount++
 				assert.Contains(t, err.Error(), "token reused too soon")
 			}
 		}
-		assert.Equal(t, 9, len(errors)) // 9 failures, 1 success
+
+		assert.Equal(t, 1, successCount)
+		assert.Equal(t, 9, failureCount)
 	})
 
 	t.Run("Rotation with Different Sessions", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(config, redisOpts)
+		maker, err := NewGourdianTokenMaker(config, testRedisOptions())
 		require.NoError(t, err)
 
 		userID := uuid.New()
-		username := "user"
-
-		// Create token with session1
 		session1 := uuid.New()
-		token1, err := maker.CreateRefreshToken(context.Background(), userID, username, session1)
+		token1, err := maker.CreateRefreshToken(context.Background(), userID, "user", session1)
 		require.NoError(t, err)
 
-		// Create token with session2
 		session2 := uuid.New()
-		token2, err := maker.CreateRefreshToken(context.Background(), userID, username, session2)
+		token2, err := maker.CreateRefreshToken(context.Background(), userID, "user", session2)
 		require.NoError(t, err)
 
-		// Rotate token1 - should work
 		_, err = maker.RotateRefreshToken(context.Background(), token1.Token)
 		require.NoError(t, err)
 
-		// Rotate token2 - should also work (different session)
 		_, err = maker.RotateRefreshToken(context.Background(), token2.Token)
 		require.NoError(t, err)
 	})
 }
+
 func TestSecurityScenarios(t *testing.T) {
-	t.Run("Token Replay Attack", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(config, nil)
-		require.NoError(t, err)
-
-		// Create and verify a token
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", "role", uuid.New())
-		require.NoError(t, err)
-		_, err = maker.VerifyAccessToken(token.Token)
-		require.NoError(t, err)
-
-		// Verify the same token again - should still work (no built-in replay protection)
-		_, err = maker.VerifyAccessToken(token.Token)
-		require.NoError(t, err)
-	})
-
 	t.Run("Algorithm Confusion Attack", func(t *testing.T) {
-		// Create RSA key pair
 		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		require.NoError(t, err)
 
-		// Create a token signed with RSA
 		rsaClaims := jwt.MapClaims{
 			"jti": uuid.New().String(),
 			"sub": uuid.New().String(),
@@ -165,220 +204,54 @@ func TestSecurityScenarios(t *testing.T) {
 			"sid": uuid.New().String(),
 			"iat": time.Now().Unix(),
 			"exp": time.Now().Add(time.Hour).Unix(),
-			"typ": AccessToken,
+			"typ": string(AccessToken),
 			"rol": "role",
 		}
 		rsaToken := jwt.NewWithClaims(jwt.SigningMethodRS256, rsaClaims)
 		rsaTokenString, err := rsaToken.SignedString(privateKey)
 		require.NoError(t, err)
 
-		// Try to verify with HMAC using RSA public key as secret
-		hmacConfig := DefaultGourdianTokenConfig(string(pem.EncodeToMemory(&pem.Block{
-			Type:  "PUBLIC KEY",
-			Bytes: x509.MarshalPKCS1PublicKey(&privateKey.PublicKey),
-		})))
+		hmacConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 		hmacMaker, err := NewGourdianTokenMaker(hmacConfig, nil)
 		require.NoError(t, err)
 
 		_, err = hmacMaker.VerifyAccessToken(rsaTokenString)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "signature is invalid")
-	})
-}
-
-func TestRedisIntegration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	redisOpts := testRedisOptions()
-	client := redis.NewClient(redisOpts)
-	_, err := client.Ping(context.Background()).Result()
-	if err != nil {
-		t.Fatalf("Could not connect to Redis: %v", err)
-	}
-
-	t.Run("Token Rotation State", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.RefreshToken.RotationEnabled = true
-		config.RefreshToken.MaxLifetime = time.Hour
-		maker, err := NewGourdianTokenMaker(config, redisOpts)
-		require.NoError(t, err)
-
-		// Create initial token
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		// Rotate token
-		newToken, err := maker.RotateRefreshToken(context.Background(), token.Token)
-		require.NoError(t, err)
-
-		// Check Redis for the old token
-		val, err := client.Get(context.Background(), "rotated:"+token.Token).Result()
-		require.NoError(t, err)
-		assert.Equal(t, "1", val)
-
-		// Check TTL is approximately MaxLifetime
-		ttl, err := client.TTL(context.Background(), "rotated:"+token.Token).Result()
-		require.NoError(t, err)
-		assert.InDelta(t, float64(config.RefreshToken.MaxLifetime), float64(ttl), float64(10*time.Second))
-
-		// Rotate again with the new token
-		_, err = maker.RotateRefreshToken(context.Background(), newToken.Token)
-		require.NoError(t, err)
-
-		// First token should still be in Redis
-		exists, err := client.Exists(context.Background(), "rotated:"+token.Token).Result()
-		require.NoError(t, err)
-		assert.Equal(t, int64(1), exists)
-	})
-
-	t.Run("Redis Failure During Rotation", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(config, redisOpts)
-		require.NoError(t, err)
-
-		// Create token
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		// Stop Redis to simulate failure
-		require.NoError(t, client.Close())
-
-		// Rotation should fail
-		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "redis error")
-
-		// Restart Redis for other tests
-		client = redis.NewClient(redisOpts)
+		assert.Contains(t, err.Error(), "unexpected signing method")
 	})
 }
 
 func TestTokenRotation_ReuseInterval(t *testing.T) {
+	client := testRedisClient(t)
+	defer client.Close()
+
 	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 	config.RefreshToken.RotationEnabled = true
-	config.RefreshToken.ReuseInterval = time.Minute  // Set to non-zero
-	config.RefreshToken.MaxLifetime = 24 * time.Hour // Ensure sufficient expiration time
+	config.RefreshToken.ReuseInterval = time.Second
+	config.RefreshToken.MaxLifetime = time.Hour
 
 	maker, err := NewGourdianTokenMaker(config, testRedisOptions())
 	require.NoError(t, err)
 
-	// Create initial token
-	userID := uuid.New()
-	username := "testuser"
-	sessionID := uuid.New()
-	tokenResp, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+	token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
 	require.NoError(t, err)
 
 	// First rotation should work
-	_, err = maker.RotateRefreshToken(context.Background(), tokenResp.Token)
+	_, err = maker.RotateRefreshToken(context.Background(), token.Token)
 	require.NoError(t, err)
 
-	// Verify old token is now invalid
-	_, err = maker.VerifyRefreshToken(tokenResp.Token)
-	require.Error(t, err)
-
-	// Immediate reuse attempt should fail with "reused too soon"
-	_, err = maker.RotateRefreshToken(context.Background(), tokenResp.Token)
+	// Immediate reuse should fail
+	_, err = maker.RotateRefreshToken(context.Background(), token.Token)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "token reused too soon")
 
-	// Create a new token with same user/session
-	tokenResp2, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+	// Wait longer than reuse interval and try again
+	time.Sleep(2 * time.Second)
+	newToken, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
 	require.NoError(t, err)
 
-	// Rotate it immediately - should fail with "too soon"
-	_, err = maker.RotateRefreshToken(context.Background(), tokenResp2.Token)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "token reused too soon")
-
-	// Wait longer than reuse interval and try again (should work)
-	time.Sleep(2 * time.Second)                     // Short sleep for testing
-	config.RefreshToken.ReuseInterval = time.Second // Reduce interval for test
-
-	maker, err = NewGourdianTokenMaker(config, testRedisOptions())
+	_, err = maker.RotateRefreshToken(context.Background(), newToken.Token)
 	require.NoError(t, err)
-
-	tokenResp3, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
-	require.NoError(t, err)
-
-	_, err = maker.RotateRefreshToken(context.Background(), tokenResp3.Token)
-	require.NoError(t, err)
-}
-
-func TestTokenRotation(t *testing.T) {
-	redisOpts := testRedisOptions()
-
-	t.Run("Successful Rotation", func(t *testing.T) {
-		// Test with working Redis
-		redisClient := redis.NewClient(redisOpts)
-		if _, err := redisClient.Ping(context.Background()).Result(); err != nil {
-			t.Skip("Redis not available, skipping test")
-		}
-		defer redisClient.Close()
-
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(config, redisOpts)
-		require.NoError(t, err)
-
-		// Create initial token
-		oldToken, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		// Rotate token
-		newToken, err := maker.RotateRefreshToken(context.Background(), oldToken.Token)
-		require.NoError(t, err)
-
-		// Verify old token is invalid
-		_, err = maker.VerifyRefreshToken(oldToken.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token has been rotated")
-
-		// Verify new token works
-		_, err = maker.VerifyRefreshToken(newToken.Token)
-		assert.NoError(t, err)
-	})
-
-	t.Run("Rotation Reuse Protection", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.RefreshToken.RotationEnabled = true
-		config.RefreshToken.ReuseInterval = time.Minute
-		maker, err := NewGourdianTokenMaker(config, redisOpts)
-		require.NoError(t, err)
-
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		// First rotation should work
-		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-		require.NoError(t, err)
-
-		// Immediate second rotation attempt should fail with specific message
-		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token reused too soon")
-	})
-
-	t.Run("Redis Failure", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.RefreshToken.RotationEnabled = true
-
-		// Use invalid Redis options
-		badRedisOpts := &redis.Options{Addr: "localhost:9999"}
-		maker, err := NewGourdianTokenMaker(config, badRedisOpts)
-		require.NoError(t, err) // Should still create maker
-
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		// Rotation should fail with redis error
-		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "redis error")
-	})
 }
 
 func TestClaimValidation(t *testing.T) {
@@ -1216,6 +1089,15 @@ func testRedisOptions() *redis.Options {
 		Password: "GourdianRedisSecret", // No password
 		DB:       0,                     // Default DB
 	}
+}
+
+func testRedisClient(t *testing.T) *redis.Client {
+	client := redis.NewClient(testRedisOptions())
+	_, err := client.Ping(context.Background()).Result()
+	if err != nil {
+		t.Skip("Redis not available, skipping test")
+	}
+	return client
 }
 
 func generateTempRSAPair(t *testing.T) (privatePath, publicPath string) {

@@ -369,6 +369,17 @@ func NewGourdianTokenMaker(config GourdianTokenConfig, redisOpts *redis.Options)
 //
 //	userID, "john.doe", "admin", sessionID)
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
+
+	if userID == uuid.Nil {
+		return nil, fmt.Errorf("invalid user ID: cannot be empty")
+	}
+	if role == "" {
+		return nil, fmt.Errorf("role cannot be empty")
+	}
+	if len(username) > 1024 {
+		return nil, fmt.Errorf("username too long: max 1024 characters")
+	}
+
 	tokenID, err := uuid.NewRandom()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token ID: %w", err)
@@ -427,6 +438,14 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 //
 //	userID, "john.doe", sessionID)
 func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) {
+
+	if userID == uuid.Nil {
+		return nil, fmt.Errorf("invalid user ID: cannot be empty")
+	}
+	if len(username) > 1024 {
+		return nil, fmt.Errorf("username too long: max 1024 characters")
+	}
+
 	tokenID, err := uuid.NewRandom()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token ID: %w", err)
@@ -495,6 +514,10 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
 
+	if !token.Valid {
+		return nil, fmt.Errorf("invalid token: %v", err)
+	}
+
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid token claims")
@@ -551,6 +574,10 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
 
+	if !token.Valid {
+		return nil, fmt.Errorf("invalid token: %v", err)
+	}
+
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid token claims")
@@ -586,6 +613,10 @@ func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClai
 func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) {
 	if !maker.config.RefreshToken.RotationEnabled {
 		return nil, fmt.Errorf("token rotation not enabled")
+	}
+
+	if _, err := maker.redisClient.Ping(ctx).Result(); err != nil {
+		return nil, fmt.Errorf("redis connection failed: %w", err)
 	}
 
 	claims, err := maker.VerifyRefreshToken(oldToken)
