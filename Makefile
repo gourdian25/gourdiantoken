@@ -1,9 +1,8 @@
-# Makefile
-VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.2")
+VERSION := v0.0.3
 
 .PHONY: build
 build:
-	go build -ldflags="-X github.com/yourusername/gourdiantoken.Version=$(VERSION)" ./...
+	go build -ldflags="-X github.com/gourdian25/gourdiantoken.Version=$(VERSION)" ./...
 
 .PHONY: test
 test:
@@ -13,3 +12,4 @@ test:
 release:
 	git tag $(VERSION)
 	git push origin $(VERSION)
+	goreleaser release --clean
