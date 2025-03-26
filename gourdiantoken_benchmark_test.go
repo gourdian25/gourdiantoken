@@ -15,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -199,6 +200,246 @@ func BenchmarkTokenOperations(b *testing.B) {
 					}
 				}
 			})
+		})
+	}
+}
+
+func BenchmarkRedisTokenRotation(b *testing.B) {
+
+	// At the start of the benchmark
+	conn := redis.NewClient(testRedisOptions())
+	if _, err := conn.Ping(context.Background()).Result(); err != nil {
+		b.Skip("Redis not available, skipping benchmark")
+	}
+	conn.Close()
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config.RefreshToken.RotationEnabled = true
+
+	// Test with different Redis configurations
+	testCases := []struct {
+		name      string
+		redisOpts *redis.Options
+	}{
+		{"LocalRedis", testRedisOptions()}, // Using the helper function here
+		// You could add more test cases with different Redis configurations if needed
+		// For example:
+		// {"RedisWithPassword", &redis.Options{Addr: "localhost:6379", Password: "otherpassword"}},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			maker, err := NewGourdianTokenMaker(config, tc.redisOpts)
+			if err != nil {
+				b.Fatalf("Failed to create token maker: %v", err)
+			}
+
+			userID := uuid.New()
+			username := "benchuser"
+			sessionID := uuid.New()
+
+			// Pre-create tokens to rotate
+			tokens := make([]string, b.N)
+			for i := 0; i < b.N; i++ {
+				token, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+				if err != nil {
+					b.Fatalf("Failed to create refresh token: %v", err)
+				}
+				tokens[i] = token.Token
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := maker.RotateRefreshToken(context.Background(), tokens[i])
+				if err != nil {
+					b.Fatalf("Failed to rotate token: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkTokenRotation(b *testing.B) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config.RefreshToken.RotationEnabled = true
+	maker, _ := NewGourdianTokenMaker(config, testRedisOptions())
+
+	userID := uuid.New()
+	username := "benchuser"
+	sessionID := uuid.New()
+
+	// Pre-create tokens to rotate
+	tokens := make([]string, b.N)
+	for i := 0; i < b.N; i++ {
+		token, _ := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		tokens[i] = token.Token
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := maker.RotateRefreshToken(context.Background(), tokens[i])
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRefreshTokenOperations(b *testing.B) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, _ := NewGourdianTokenMaker(config, testRedisOptions())
+
+	userID := uuid.New()
+	username := "benchuser"
+	sessionID := uuid.New()
+
+	b.Run("Create", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	// Create a fresh token for verification
+	token, _ := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+
+	b.Run("Verify", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := maker.VerifyRefreshToken(token.Token)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkConcurrentTokenCreation(b *testing.B) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, _ := NewGourdianTokenMaker(config, nil)
+
+	b.RunParallel(func(pb *testing.PB) {
+		userID := uuid.New()
+		username := "benchuser"
+		role := "user"
+		sessionID := uuid.New()
+
+		for pb.Next() {
+			_, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkTokenParsing(b *testing.B) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, _ := NewGourdianTokenMaker(config, nil)
+
+	userID := uuid.New()
+	username := "benchuser"
+	role := "user"
+	sessionID := uuid.New()
+
+	token, _ := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+
+	b.Run("WithValidation", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := maker.VerifyAccessToken(token.Token)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("WithoutValidation", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, _, err := new(jwt.Parser).ParseUnverified(token.Token, jwt.MapClaims{})
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkTokenSizeImpact(b *testing.B) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, _ := NewGourdianTokenMaker(config, nil)
+
+	testCases := []struct {
+		name     string
+		username string
+		role     string
+		extra    map[string]interface{}
+	}{
+		{"Small", "user", "guest", nil},
+		{"Medium", "user.with.middlename", "admin", map[string]interface{}{"department": "engineering"}},
+		{"Large", "user.with.very.long.name.and.multiple.parts", "super-admin",
+			map[string]interface{}{
+				"department":  "engineering",
+				"teams":       []string{"backend", "infra", "security"},
+				"permissions": []string{"read", "write", "delete", "admin"},
+			}},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			userID := uuid.New()
+			sessionID := uuid.New()
+
+			for i := 0; i < b.N; i++ {
+				_, err := maker.CreateAccessToken(context.Background(), userID, tc.username, tc.role, sessionID)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkVerificationWithKeySizes(b *testing.B) {
+	keySizes := []struct {
+		name    string
+		size    int
+		algo    string
+		genFunc func() interface{}
+	}{
+		{"RSA-1024", 1024, "RS256", func() interface{} { return generateRSAKey(1024) }},
+		{"RSA-2048", 2048, "RS256", func() interface{} { return generateRSAKey(2048) }},
+		{"RSA-4096", 4096, "RS256", func() interface{} { return generateRSAKey(4096) }},
+		{"ECDSA-P256", 256, "ES256", func() interface{} { return generateECDSAKey(elliptic.P256()) }},
+		{"ECDSA-P384", 384, "ES384", func() interface{} { return generateECDSAKey(elliptic.P384()) }},
+		{"ECDSA-P521", 521, "ES512", func() interface{} { return generateECDSAKey(elliptic.P521()) }},
+	}
+
+	for _, ks := range keySizes {
+		b.Run(ks.name, func(b *testing.B) {
+			privatePath, publicPath := writeTempKeyFiles(b, ks.genFunc())
+			config := GourdianTokenConfig{
+				Algorithm:      ks.algo,
+				SigningMethod:  Asymmetric,
+				PrivateKeyPath: privatePath,
+				PublicKeyPath:  publicPath,
+				AccessToken: AccessTokenConfig{
+					Duration: time.Hour,
+				},
+			}
+			maker, _ := NewGourdianTokenMaker(config, nil)
+
+			userID := uuid.New()
+			username := "benchuser"
+			role := "user"
+			sessionID := uuid.New()
+
+			token, _ := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_, err := maker.VerifyAccessToken(token.Token)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
 		})
 	}
 }

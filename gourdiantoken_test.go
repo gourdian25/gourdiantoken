@@ -313,9 +313,12 @@ func TestTokenRotation(t *testing.T) {
 
 	t.Run("Successful Rotation", func(t *testing.T) {
 		// Test with working Redis
-		if _, err := redis.NewClient(redisOpts).Ping(context.Background()).Result(); err != nil {
+		redisClient := redis.NewClient(redisOpts)
+		if _, err := redisClient.Ping(context.Background()).Result(); err != nil {
 			t.Skip("Redis not available, skipping test")
 		}
+		defer redisClient.Close()
+
 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 		config.RefreshToken.RotationEnabled = true
 		maker, err := NewGourdianTokenMaker(config, redisOpts)
@@ -332,6 +335,7 @@ func TestTokenRotation(t *testing.T) {
 		// Verify old token is invalid
 		_, err = maker.VerifyRefreshToken(oldToken.Token)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "token has been rotated")
 
 		// Verify new token works
 		_, err = maker.VerifyRefreshToken(newToken.Token)
@@ -352,7 +356,7 @@ func TestTokenRotation(t *testing.T) {
 		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
 		require.NoError(t, err)
 
-		// Immediate second rotation attempt should fail
+		// Immediate second rotation attempt should fail with specific message
 		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "token reused too soon")
@@ -370,7 +374,7 @@ func TestTokenRotation(t *testing.T) {
 		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
 		require.NoError(t, err)
 
-		// Rotation should fail
+		// Rotation should fail with redis error
 		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "redis error")
