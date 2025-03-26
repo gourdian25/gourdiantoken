@@ -25,4 +25,14 @@ release:
     owner: gourdian25
     name: gourdiantoken
   draft: false
-  prerelease: true
+  prerelease: auto
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - 'README'
+      - Merge pull request
