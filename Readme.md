@@ -338,6 +338,13 @@ func asymmetricExample() {
 }
 ```
 
+## Supported Key Formats
+
+- **RSA**: PKCS#1 and PKCS#8 private keys, PKIX public keys
+- **RSA-PSS**: Keys generated via OpenSSL with PSS parameters
+- **EdDSA**: Ed25519 keys in PKCS#8 format
+- **ECDSA**: P-256, P-384, P-521 curves
+
 ## Contributing
 
 We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for more details on how to get started.
@@ -357,3 +364,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 For more detailed documentation, please refer to the [GoDoc](https://pkg.go.dev/github.com/gourdian25/gourdiantoken).
 
 ---
+
+## Support
+
+If you encounter any issues or have questions, please open an issue on the [GitHub repository](https://github.com/gourdian25/gourdiantoken/issues).
+
+---
+
+## Author
+
+Sigil is developed and maintained by [gourdian25](https://github.com/gourdian25) and [lordofthemind](https://github.com/lordofthemind).
+
+
+---
+
+Thank you for using gourdiantoken! 🚀

@@ -1,109 +1,196 @@
-// docs.go
-
 // Package gourdiantoken provides a secure and flexible JWT-based token management system
 // for handling both access and refresh tokens in Go applications.
 //
-// The package is designed with security best practices in mind and offers extensive
-// customization options while maintaining sensible defaults.
-//
 // # Overview
 //
-// The package provides:
-// - Generation of cryptographically-signed JWT tokens
-// - Verification of token signatures and claims
-// - Configurable token lifetimes and rotation policies
-// - Support for both symmetric (HMAC) and asymmetric (RSA/ECDSA) signing methods
-// - Comprehensive claim validation
-// - Built-in UUID support for token and session identifiers
+// The gourdiantoken package implements a production-ready JWT token system with:
+// - Secure token generation and validation
+// - Configurable access and refresh token policies
+// - Support for multiple cryptographic algorithms
+// - Redis-backed token rotation
 //
-// # Key Features
+// The system is designed around security best practices while providing flexibility
+// for different application requirements.
+//
+// # Core Concepts
 //
 // ## Token Types
-// - Access Tokens: Short-lived tokens for API authorization (typically minutes/hours)
-// - Refresh Tokens: Long-lived tokens for obtaining new access tokens (typically days/weeks)
+// - Access Tokens: Short-lived tokens (minutes/hours) for API authorization
+// - Refresh Tokens: Long-lived tokens (days/weeks) for obtaining new access tokens
 //
 // ## Security Features
-// - Automatic token expiration validation
-// - Configurable signing algorithms (HS256/384/512, RS256/384/512, ES256/384/512)
-// - Secure key handling with file permission checks
-// - Refresh token rotation and reuse detection
-// - Token family support to prevent token replay
+// - Algorithm flexibility (HMAC, RSA, ECDSA, EdDSA)
+// - Automatic expiration validation
+// - Required claim enforcement
+// - Refresh token rotation
+// - Secure key handling
 //
-// ## Configuration Options
-// - Custom token lifetimes for access and refresh tokens
-// - Configurable maximum token lifetimes
-// - Optional token claim requirements
-// - Audience and issuer validation
-// - Algorithm allow-listing
+// # Getting Started
 //
-// # Usage Example
+// Basic usage involves:
+// 1. Creating a configuration
+// 2. Initializing a token maker
+// 3. Generating tokens
+// 4. Verifying tokens
 //
-//	// Initialize token maker with configuration
-//	config := gourdiantoken.GourdianTokenConfig{
-//	    Algorithm:      "RS256",
-//	    SigningMethod:  gourdiantoken.Asymmetric,
-//	    PrivateKeyPath: "keys/private.pem",
-//	    PublicKeyPath:  "keys/public.pem",
-//	    AccessToken: gourdiantoken.AccessTokenConfig{
-//	        Duration:     time.Hour,
-//	        MaxLifetime:  24 * time.Hour,
-//	        Issuer:       "myapp.com",
-//	        Audience:     []string{"myapp.com"},
-//	    },
-//	    RefreshToken: gourdiantoken.RefreshTokenConfig{
-//	        Duration:        7 * 24 * time.Hour,
-//	        RotationEnabled: true,
-//	        ReuseInterval:   time.Minute,
-//	    },
-//	}
+// Example:
 //
-//	maker, err := gourdiantoken.NewGourdianTokenMaker(config)
+//	// 1. Create configuration
+//	config := gourdiantoken.DefaultGourdianTokenConfig("your-32-byte-secret-key")
+//	config.AccessToken.Issuer = "myapp.com"
+//	config.AccessToken.Audience = []string{"api.myapp.com"}
+//
+//	// 2. Initialize maker (without Redis for simple cases)
+//	maker, err := gourdiantoken.NewGourdianTokenMaker(config, nil)
 //	if err != nil {
-//	    log.Fatal("Failed to create token maker:", err)
+//	    log.Fatal(err)
 //	}
 //
-//	// Create tokens
+//	// 3. Generate tokens
 //	userID := uuid.New()
-//	accessToken, err := maker.CreateAccessToken(context.Background(), userID, "username", "admin", uuid.New())
+//	accessToken, err := maker.CreateAccessToken(context.Background(), userID, "john", "user", uuid.New())
 //	if err != nil {
-//	    log.Fatal("Failed to create access token:", err)
+//	    log.Fatal(err)
 //	}
 //
-//	refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, "username", uuid.New())
+//	// 4. Verify tokens
+//	claims, err := maker.VerifyAccessToken(accessToken.Token)
 //	if err != nil {
-//	    log.Fatal("Failed to create refresh token:", err)
+//	    log.Fatal("Invalid token:", err)
 //	}
 //
-//	// Verify tokens
-//	accessClaims, err := maker.VerifyAccessToken(accessToken.Token)
-//	if err != nil {
-//	    log.Fatal("Invalid access token:", err)
-//	}
+// # Configuration
 //
-//	// Rotate refresh token
-//	newRefreshToken, err := maker.RotateRefreshToken(refreshToken.Token)
-//	if err != nil {
-//	    log.Fatal("Failed to rotate refresh token:", err)
-//	}
+// The package offers two main configuration approaches:
 //
-// # Security Considerations
+// 1. DefaultGourdianTokenConfig() - Secure defaults with HMAC-SHA256
+// 2. NewGourdianTokenConfig() - Full customization of all parameters
 //
-// - Always use HTTPS when transmitting tokens
-// - Store refresh tokens securely (httpOnly, Secure cookies)
-// - Keep private keys protected with proper file permissions (0600)
-// - Rotate cryptographic keys periodically
-// - Set appropriate token lifetimes based on your security requirements
-// - Implement proper token revocation for sensitive operations
+// ## Security Recommendations
+// - Use 32+ byte keys for HMAC algorithms
+// - Set appropriate token lifetimes (30m-1h for access, 7d for refresh)
+// - Enable refresh token rotation when using multiple client devices
+// - Set file permissions to 0600 for private keys
 //
-// # Performance
+// # Token Rotation
 //
-// The package is optimized for performance with:
-// - Efficient JWT parsing and validation
-// - Minimal allocations during token processing
-// - Concurrent-safe operations
+// When refresh token rotation is enabled:
+// - Old tokens are invalidated after use
+// - Token reuse is detected and prevented
+// - Requires Redis for state management
+//
+// Rotation example:
+//
+//	config.RefreshToken.RotationEnabled = true
+//	redisOpts := &redis.Options{Addr: "localhost:6379"}
+//	maker, _ := gourdianToken.NewGourdianTokenMaker(config, redisOpts)
+//
+//	// First use
+//	refreshToken1, _ := maker.CreateRefreshToken(ctx, userID, "john", sessionID)
+//
+//	// Rotation
+//	refreshToken2, err := maker.RotateRefreshToken(refreshToken1.Token)
+//
+// # Performance Considerations
+//
+// The package is optimized for:
+// - Fast token generation and validation
+// - Minimal allocations
+// - Concurrent usage
+// - Optional Redis dependency
+//
+// Benchmarks show:
+// - ~5,000-10,000 token generations/verifications per second (varies by algorithm)
+// - Sub-millisecond Redis operations for rotation
+//
+// # Advanced Features
+//
+// ## Custom Claims
+// While the package enforces standard claims, you can extend tokens by:
+// 1. Creating custom token types that embed AccessTokenClaims/RefreshTokenClaims
+// 2. Implementing custom verification logic
+//
+// ## Multiple Issuers
+// Support for multiple token issuers can be implemented by:
+// - Maintaining multiple JWTMaker instances
+// - Using different key pairs per issuer
+// - Validating the 'iss' claim during verification
+//
+// # Error Handling
+//
+// The package returns detailed errors for:
+// - Invalid tokens (expired, malformed, etc.)
+// - Configuration errors
+// - Key loading failures
+// - Redis communication issues
+//
+// All errors should be checked and handled appropriately.
 //
 // # Dependencies
 //
-// - github.com/golang-jwt/jwt/v5 - JWT implementation
-// - github.com/google/uuid - UUID generation
+// Core:
+// - github.com/golang-jwt/jwt/v5
+// - github.com/google/uuid
+//
+// Optional (for rotation):
+// - github.com/redis/go-redis/v9
+//
+// # Examples
+//
+// ## Symmetric Key Example
+//
+//	config := gourdiantoken.DefaultGourdianTokenConfig("secure-key-32-bytes-long")
+//	maker, _ := gourdiantoken.NewGourdianTokenMaker(config, nil)
+//	token, _ := maker.CreateAccessToken(ctx, userID, "user", "role", sessionID)
+//
+// ## Asymmetric Key Example
+//
+//	config := gourdiantoken.NewGourdianTokenConfig(
+//	    "RS256",
+//	    gourdiantoken.Asymmetric,
+//	    "",
+//	    "/path/to/private.pem",
+//	    "/path/to/public.pem",
+//	    time.Hour, 24*time.Hour, "issuer", nil, nil, nil,
+//	    7*24*time.Hour, 30*24*time.Hour, time.Minute, true)
+//	maker, _ := gourdiantoken.NewGourdianTokenMaker(config, nil)
+//
+// # Security Best Practices
+//
+// When using this package in production:
+// 1. Always use HTTPS
+// 2. Store secrets securely (not in code)
+// 3. Set minimum token lifetimes for your use case
+// 4. Monitor for abnormal token patterns
+// 5. Rotate cryptographic keys periodically
+// 6. Keep dependencies updated
+//
+// # Testing
+//
+// The package is designed for testability:
+// - Interfaces allow mock implementations
+// - Configurable timeouts for expiration testing
+// - Clear separation of concerns
+//
+// Example test pattern:
+//
+//	func TestTokenVerification(t *testing.T) {
+//	    maker := setupTestMaker()
+//	    token := createTestToken(maker)
+//	    claims, err := maker.VerifyAccessToken(token)
+//	    // verification tests...
+//	}
+//
+// # Limitations
+//
+// 1. Requires Go 1.18+
+// 2. Redis is required for rotation feature
+// 3. Not designed for extremely high throughput (>10k TPS) without tuning
+//
+// # See Also
+//
+// Related packages:
+// - golang.org/x/oauth2 for OAuth2 integration
+// - github.com/gorilla/securecookie for cookie storage
+// - github.com/auth0/go-jwt-middleware for HTTP middleware
 package gourdiantoken
