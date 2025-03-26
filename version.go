@@ -1,4 +1,4 @@
 package gourdiantoken
 
 // Version is the current version of the gourdiantoken package.
-var Version = "v0.0.3"
+var Version = "v1.0.1"
