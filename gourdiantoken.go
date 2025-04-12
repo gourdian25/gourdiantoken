@@ -232,7 +232,7 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	return maker, nil
 }
 
-// Helper method for background cleanup of rotated tokens
+// cleanupRotatedTokens runs a background job to clean up expired rotated tokens from Redis
 func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
@@ -242,11 +242,46 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Clean up expired rotation records
-			if maker.redisClient != nil {
-				// This is a simplified example - actual implementation would scan keys
-				// and delete expired ones more efficiently
-				maker.redisClient.Del(ctx, "rotated:*")
+			if maker.redisClient == nil {
+				continue
+			}
+
+			var cursor uint64
+			const batchSize = 100
+
+			for {
+				// Use SCAN to iterate keys matching the pattern in a memory-efficient way
+				keys, newCursor, err := maker.redisClient.Scan(ctx, cursor, "rotated:*", batchSize).Result()
+				if err != nil {
+					fmt.Printf("Error scanning Redis keys: %v\n", err)
+					break
+				}
+
+				// Filter out keys with expired TTL (or TTL = -2 meaning already expired)
+				var keysToDelete []string
+				for _, key := range keys {
+					ttl, err := maker.redisClient.TTL(ctx, key).Result()
+					if err != nil {
+						fmt.Printf("Error checking TTL for key %s: %v\n", key, err)
+						continue
+					}
+					if ttl <= 0 {
+						keysToDelete = append(keysToDelete, key)
+					}
+				}
+
+				// Delete expired keys in batch
+				if len(keysToDelete) > 0 {
+					if _, err := maker.redisClient.Del(ctx, keysToDelete...).Result(); err != nil {
+						fmt.Printf("Error deleting expired rotated tokens: %v\n", err)
+					}
+				}
+
+				// Exit loop if iteration is complete
+				if newCursor == 0 {
+					break
+				}
+				cursor = newCursor
 			}
 		}
 	}
@@ -407,7 +442,7 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 
 	if maker.config.RefreshToken.RevocationEnabled && maker.redisClient != nil {
 
-		exists, err := maker.redisClient.Exists(ctx, "revoked:access:"+tokenString).Result()
+		exists, err := maker.redisClient.Exists(ctx, "revoked:refresh:"+tokenString).Result()
 		if err != nil {
 			return nil, fmt.Errorf("failed to check token revocation: %w", err)
 		}
