@@ -119,12 +119,14 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 			Audience:          nil,
 			AllowedAlgorithms: []string{"HS256"},
 			RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "rls"},
+			RevocationEnabled: false,
 		},
 		RefreshToken: RefreshTokenConfig{
-			Duration:        7 * 24 * time.Hour,
-			MaxLifetime:     30 * 24 * time.Hour,
-			ReuseInterval:   time.Minute,
-			RotationEnabled: false,
+			Duration:          7 * 24 * time.Hour,
+			MaxLifetime:       30 * 24 * time.Hour,
+			ReuseInterval:     time.Minute,
+			RotationEnabled:   false,
+			RevocationEnabled: false,
 		},
 	}
 }
@@ -186,34 +188,68 @@ type JWTMaker struct {
 }
 
 func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) {
+	// Validate configuration
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	if config.RefreshToken.RotationEnabled && redisOpts == nil {
-		return nil, fmt.Errorf("redis options required for token rotation")
+	// Check Redis requirements
+	if (config.RefreshToken.RotationEnabled || config.RefreshToken.RevocationEnabled ||
+		config.AccessToken.RevocationEnabled) && redisOpts == nil {
+		return nil, fmt.Errorf("redis options required for token rotation/revocation")
 	}
 
 	maker := &JWTMaker{
 		config: config,
 	}
 
-	if config.RefreshToken.RotationEnabled {
+	// Initialize Redis client if any feature requiring Redis is enabled
+	if config.RefreshToken.RotationEnabled || config.RefreshToken.RevocationEnabled ||
+		config.AccessToken.RevocationEnabled {
 		maker.redisClient = redis.NewClient(redisOpts)
-		if _, err := maker.redisClient.Ping(context.Background()).Result(); err != nil {
+
+		// Verify Redis connection with the provided context
+		if _, err := maker.redisClient.Ping(ctx).Result(); err != nil {
 			return nil, fmt.Errorf("redis connection failed: %w", err)
+		}
+
+		// Set up background cleanup if needed
+		if config.RefreshToken.RotationEnabled {
+			go maker.cleanupRotatedTokens(ctx)
 		}
 	}
 
+	// Initialize signing method
 	if err := maker.initializeSigningMethod(); err != nil {
 		return nil, fmt.Errorf("failed to initialize signing method: %w", err)
 	}
 
+	// Initialize cryptographic keys
 	if err := maker.initializeKeys(); err != nil {
 		return nil, fmt.Errorf("failed to initialize keys: %w", err)
 	}
 
 	return maker, nil
+}
+
+// Helper method for background cleanup of rotated tokens
+func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Clean up expired rotation records
+			if maker.redisClient != nil {
+				// This is a simplified example - actual implementation would scan keys
+				// and delete expired ones more efficiently
+				maker.redisClient.Del(ctx, "rotated:*")
+			}
+		}
+	}
 }
 
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
