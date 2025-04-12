@@ -27,7 +27,7 @@ import (
 func testRedisOptions() *redis.Options {
 	return &redis.Options{
 		Addr:     "127.0.0.1:6379",
-		Password: "",
+		Password: "GourdianRedisSecret",
 		DB:       0,
 	}
 }
