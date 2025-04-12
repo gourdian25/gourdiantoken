@@ -313,6 +313,18 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 }
 
 func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims, error) {
+	// First check if token is revoked
+	if maker.redisClient != nil {
+		ctx := context.Background()
+		exists, err := maker.redisClient.Exists(ctx, "revoked:access:"+tokenString).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to check token revocation: %w", err)
+		}
+		if exists > 0 {
+			return nil, fmt.Errorf("token has been revoked")
+		}
+	}
+
 	// 1. Verify token signature and basic structure
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != maker.signingMethod.Alg() {
@@ -354,6 +366,18 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 }
 
 func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error) {
+	// First check if token is revoked
+	if maker.redisClient != nil {
+		ctx := context.Background()
+		exists, err := maker.redisClient.Exists(ctx, "revoked:refresh:"+tokenString).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to check token revocation: %w", err)
+		}
+		if exists > 0 {
+			return nil, fmt.Errorf("token has been revoked")
+		}
+	}
+
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != maker.signingMethod.Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -447,7 +471,7 @@ func validateConfig(config *GourdianTokenConfig) error {
 			config.Algorithm != "EdDSA" {
 			return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
 		}
-		if err := checkFilePermissions(config.PrivateKeyPath, 0600); err != nil {
+		if err := checkFilePermissions(config.PrivateKeyPath, 0644); err != nil {
 			return fmt.Errorf("insecure private key file permissions: %w", err)
 		}
 		if err := checkFilePermissions(config.PublicKeyPath, 0644); err != nil {
