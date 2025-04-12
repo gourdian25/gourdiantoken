@@ -116,7 +116,7 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 			Issuer:            "",
 			Audience:          nil,
 			AllowedAlgorithms: []string{"HS256"},
-			RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "rol"},
+			RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "roles"},
 		},
 		RefreshToken: RefreshTokenConfig{
 			Duration:        7 * 24 * time.Hour,
@@ -128,14 +128,14 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 }
 
 type AccessTokenClaims struct {
-	ID        uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
-	Subject   uuid.UUID `json:"sub"` // Subject (user ID as UUID)
-	Username  string    `json:"usr"` // Human-readable username
-	SessionID uuid.UUID `json:"sid"` // Session identifier (UUIDv4)
-	IssuedAt  time.Time `json:"iat"` // Token issuance timestamp
-	ExpiresAt time.Time `json:"exp"` // Token expiration timestamp
-	TokenType TokenType `json:"typ"` // Token type ("access")
-	Role      string    `json:"rol"` // User role/privilege level
+	ID        uuid.UUID `json:"jti"`   // Unique token identifier (UUIDv4)
+	Subject   uuid.UUID `json:"sub"`   // Subject (user ID as UUID)
+	Username  string    `json:"usr"`   // Human-readable username
+	SessionID uuid.UUID `json:"sid"`   // Session identifier (UUIDv4)
+	IssuedAt  time.Time `json:"iat"`   // Token issuance timestamp
+	ExpiresAt time.Time `json:"exp"`   // Token expiration timestamp
+	TokenType TokenType `json:"typ"`   // Token type ("access")
+	Roles     []string  `json:"roles"` // User roles/privilege levels
 }
 
 type RefreshTokenClaims struct {
@@ -149,13 +149,13 @@ type RefreshTokenClaims struct {
 }
 
 type AccessTokenResponse struct {
-	Token     string    `json:"tok"` // The signed JWT string
-	Subject   uuid.UUID `json:"sub"` // User ID (UUID)
-	Username  string    `json:"usr"` // Username
-	SessionID uuid.UUID `json:"sid"` // Session ID (UUID)
-	ExpiresAt time.Time `json:"exp"` // Expiration timestamp
-	IssuedAt  time.Time `json:"iat"` // Issuance timestamp
-	Role      string    `json:"rol"` // User role
+	Token     string    `json:"tok"`   // The signed JWT string
+	Subject   uuid.UUID `json:"sub"`   // User ID (UUID)
+	Username  string    `json:"usr"`   // Username
+	SessionID uuid.UUID `json:"sid"`   // Session ID (UUID)
+	ExpiresAt time.Time `json:"exp"`   // Expiration timestamp
+	IssuedAt  time.Time `json:"iat"`   // Issuance timestamp
+	Roles     []string  `json:"roles"` // User roles
 }
 
 type RefreshTokenResponse struct {
@@ -168,7 +168,7 @@ type RefreshTokenResponse struct {
 }
 
 type GourdianTokenMaker interface {
-	CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error)
+	CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
 	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
 	VerifyAccessToken(tokenString string) (*AccessTokenClaims, error)
@@ -214,16 +214,22 @@ func NewGourdianTokenMaker(config GourdianTokenConfig, redisOpts *redis.Options)
 	return maker, nil
 }
 
-func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username, role string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
-
+func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
 	if userID == uuid.Nil {
 		return nil, fmt.Errorf("invalid user ID: cannot be empty")
 	}
-	if role == "" {
-		return nil, fmt.Errorf("role cannot be empty")
+	if len(roles) == 0 {
+		return nil, fmt.Errorf("at least one role must be provided")
 	}
 	if len(username) > 1024 {
 		return nil, fmt.Errorf("username too long: max 1024 characters")
+	}
+
+	// Validate roles are non-empty strings
+	for _, role := range roles {
+		if role == "" {
+			return nil, fmt.Errorf("roles cannot contain empty strings")
+		}
 	}
 
 	tokenID, err := uuid.NewRandom()
@@ -240,7 +246,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		IssuedAt:  now,
 		ExpiresAt: now.Add(maker.config.AccessToken.Duration),
 		TokenType: AccessToken,
-		Role:      role,
+		Roles:     roles,
 	}
 
 	token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
@@ -257,14 +263,13 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		SessionID: claims.SessionID,
 		ExpiresAt: claims.ExpiresAt,
 		IssuedAt:  claims.IssuedAt,
-		Role:      role,
+		Roles:     roles,
 	}
 
 	return response, nil
 }
 
 func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) {
-
 	if userID == uuid.Nil {
 		return nil, fmt.Errorf("invalid user ID: cannot be empty")
 	}
@@ -340,9 +345,9 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 		return nil, err
 	}
 
-	// 4. Validate role claim exists
-	if _, ok := claims["rol"]; !ok {
-		return nil, fmt.Errorf("missing role claim in access token")
+	// 4. Validate roles claim exists and is non-empty
+	if _, ok := claims["roles"]; !ok {
+		return nil, fmt.Errorf("missing roles claim in access token")
 	}
 
 	return accessClaims, nil
@@ -555,14 +560,14 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 	switch v := claims.(type) {
 	case AccessTokenClaims:
 		return jwt.MapClaims{
-			"jti": v.ID.String(),
-			"sub": v.Subject.String(),
-			"usr": v.Username,
-			"sid": v.SessionID.String(),
-			"iat": v.IssuedAt.Unix(),
-			"exp": v.ExpiresAt.Unix(),
-			"typ": string(v.TokenType),
-			"rol": v.Role,
+			"jti":   v.ID.String(),
+			"sub":   v.Subject.String(),
+			"usr":   v.Username,
+			"sid":   v.SessionID.String(),
+			"iat":   v.IssuedAt.Unix(),
+			"exp":   v.ExpiresAt.Unix(),
+			"typ":   string(v.TokenType),
+			"roles": v.Roles,
 		}
 	case RefreshTokenClaims:
 		return jwt.MapClaims{
@@ -616,10 +621,23 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		return nil, fmt.Errorf("invalid username type: expected string")
 	}
 
-	// Validate role claim
-	role, ok := claims["rol"].(string)
+	// Validate roles claim
+	rolesInterface, ok := claims["roles"].([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid role type: expected string")
+		return nil, fmt.Errorf("invalid roles type: expected array of strings")
+	}
+
+	roles := make([]string, 0, len(rolesInterface))
+	for _, r := range rolesInterface {
+		role, ok := r.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid role type: expected string")
+		}
+		roles = append(roles, role)
+	}
+
+	if len(roles) == 0 {
+		return nil, fmt.Errorf("at least one role must be provided")
 	}
 
 	// Validate token type claim
@@ -643,7 +661,7 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		IssuedAt:  time.Unix(iat, 0),
 		ExpiresAt: time.Unix(exp, 0),
 		TokenType: TokenType(typ),
-		Role:      role,
+		Roles:     roles,
 	}, nil
 }
 
@@ -681,6 +699,10 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
 	requiredClaims := []string{"jti", "sub", "typ", "usr", "sid", "iat", "exp"}
+	if expectedType == AccessToken {
+		requiredClaims = append(requiredClaims, "roles")
+	}
+
 	for _, claim := range requiredClaims {
 		if _, ok := claims[claim]; !ok {
 			return fmt.Errorf("missing required claim: %s", claim)
