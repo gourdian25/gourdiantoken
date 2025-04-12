@@ -1,4 +1,5 @@
 // tests_helpers.go
+
 package gourdiantoken
 
 import (
@@ -11,7 +12,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -22,6 +22,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	testSymmetricKey = "test-secret-32-bytes-long-1234567890"
+)
+
 func testRedisOptions() *redis.Options {
 	return &redis.Options{
 		Addr:     "127.0.0.1:6379",
@@ -30,9 +34,16 @@ func testRedisOptions() *redis.Options {
 	}
 }
 
-// Redis helpers
-func testRedisClient(t *testing.T) *redis.Client {
+func createTestMaker(t *testing.T, config GourdianTokenConfig) *JWTMaker {
 	t.Helper()
+
+	ctx := context.Background()
+	maker, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+	require.NoError(t, err)
+	return maker.(*JWTMaker)
+}
+
+func redisTestClient(t *testing.T) *redis.Client {
 	client := redis.NewClient(testRedisOptions())
 	_, err := client.Ping(context.Background()).Result()
 	if err != nil {
@@ -41,77 +52,72 @@ func testRedisClient(t *testing.T) *redis.Client {
 	return client
 }
 
-// Key generation helpers
-func generateRSAKey(bits int) *rsa.PrivateKey {
-	key, err := rsa.GenerateKey(rand.Reader, bits)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to generate RSA key: %v", err))
-	}
-	return key
-}
-
-func generateECDSAKey(curve elliptic.Curve) *ecdsa.PrivateKey {
-	key, err := ecdsa.GenerateKey(curve, rand.Reader)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to generate ECDSA key: %v", err))
-	}
-	return key
-}
-
-func generateEdDSAKey() ed25519.PrivateKey {
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to generate EdDSA key: %v", err))
-	}
-	return privateKey
-}
-
-// Unified key file writer
-func writeKeyPairToTempFiles(t testing.TB, privateKey interface{}, publicKey interface{}) (privatePath, publicPath string) {
+func generateTempRSAPair(t *testing.T) (privatePath, publicPath string) {
 	t.Helper()
-	tempDir := t.TempDir()
 
-	// Write private key
-	privateBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	require.NoError(t, err, "Failed to marshal private key")
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
 
-	privateBlock := &pem.Block{Type: "PRIVATE KEY", Bytes: privateBytes}
-	privatePath = filepath.Join(tempDir, "private.pem")
-	require.NoError(t, os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600), "Failed to write private key")
+	privateBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateBlock := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateBytes,
+	}
 
-	// Write public key
-	publicBytes, err := x509.MarshalPKIXPublicKey(publicKey)
-	require.NoError(t, err, "Failed to marshal public key")
+	privatePath = filepath.Join(t.TempDir(), "private.pem")
+	err = os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600)
+	require.NoError(t, err)
 
-	publicBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: publicBytes}
-	publicPath = filepath.Join(tempDir, "public.pem")
-	require.NoError(t, os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0644), "Failed to write public key")
+	publicBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	require.NoError(t, err)
+	publicBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicBytes,
+	}
+
+	publicPath = filepath.Join(t.TempDir(), "public.pem")
+	err = os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0600)
+	require.NoError(t, err)
 
 	return privatePath, publicPath
 }
 
-// Key pair generators
-func generateTempRSAPair(t *testing.T) (privatePath, publicPath string) {
-	t.Helper()
-	key := generateRSAKey(2048)
-	return writeKeyPairToTempFiles(t, key, &key.PublicKey)
-}
-
 func generateTempECDSAPair(t *testing.T) (privatePath, publicPath string) {
 	t.Helper()
-	key := generateECDSAKey(elliptic.P256())
-	return writeKeyPairToTempFiles(t, key, &key.PublicKey)
-}
 
-func generateTempEdDSAPair(t *testing.T) (privatePath, publicPath string) {
-	t.Helper()
-	key := generateEdDSAKey()
-	return writeKeyPairToTempFiles(t, key, key.Public().(ed25519.PublicKey))
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	privateBytes, err := x509.MarshalECPrivateKey(privateKey)
+	require.NoError(t, err)
+	privateBlock := &pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: privateBytes,
+	}
+
+	privatePath = filepath.Join(t.TempDir(), "ec_private.pem")
+	err = os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600)
+	require.NoError(t, err)
+
+	publicBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	require.NoError(t, err)
+	publicBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicBytes,
+	}
+
+	publicPath = filepath.Join(t.TempDir(), "ec_public.pem")
+	err = os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0600)
+	require.NoError(t, err)
+
+	return privatePath, publicPath
 }
 
 func generateTempCertificate(t *testing.T) (privatePath, publicPath string) {
 	t.Helper()
-	privateKey := generateRSAKey(2048)
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
 
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
@@ -122,34 +128,115 @@ func generateTempCertificate(t *testing.T) (privatePath, publicPath string) {
 		NotAfter:  time.Now().Add(time.Hour),
 	}
 
-	certBytes, err := x509.CreateCertificate(
-		rand.Reader,
-		&template,
-		&template,
-		&privateKey.PublicKey,
-		privateKey,
-	)
-	require.NoError(t, err, "Failed to create certificate")
+	certBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
 
-	// Write private key
 	privateBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-	privateBlock := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privateBytes}
-	privatePath = filepath.Join(t.TempDir(), "private.pem")
-	require.NoError(t, os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600))
+	privateBlock := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateBytes,
+	}
 
-	// Write certificate
-	certBlock := &pem.Block{Type: "CERTIFICATE", Bytes: certBytes}
-	publicPath = filepath.Join(t.TempDir(), "cert.pem")
-	require.NoError(t, os.WriteFile(publicPath, pem.EncodeToMemory(certBlock), 0644))
+	privatePath = filepath.Join(t.TempDir(), "cert_private.pem")
+	err = os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600)
+	require.NoError(t, err)
+
+	certBlock := &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certBytes,
+	}
+
+	publicPath = filepath.Join(t.TempDir(), "cert_public.pem")
+	err = os.WriteFile(publicPath, pem.EncodeToMemory(certBlock), 0600)
+	require.NoError(t, err)
 
 	return privatePath, publicPath
 }
 
-// Maker helper
-func createTestMaker(t *testing.T, config GourdianTokenConfig) *JWTMaker {
+func generateTempEdDSAKeys(t *testing.T) (privateKeyPath, publicKeyPath string) {
 	t.Helper()
-	ctx := context.Background()
-	maker, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
-	require.NoError(t, err, "Failed to create token maker")
-	return maker.(*JWTMaker)
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// Create temp files
+	privateKeyFile, err := os.CreateTemp("", "ed25519-private-*.pem")
+	require.NoError(t, err)
+	defer privateKeyFile.Close()
+
+	publicKeyFile, err := os.CreateTemp("", "ed25519-public-*.pem")
+	require.NoError(t, err)
+	defer publicKeyFile.Close()
+
+	// Encode private key
+	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+	privateKeyBlock := &pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	}
+	err = pem.Encode(privateKeyFile, privateKeyBlock)
+	require.NoError(t, err)
+
+	// Encode public key
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(publicKey)
+	require.NoError(t, err)
+	publicKeyBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyBytes,
+	}
+	err = pem.Encode(publicKeyFile, publicKeyBlock)
+	require.NoError(t, err)
+
+	return privateKeyFile.Name(), publicKeyFile.Name()
+}
+
+func generateRSAKey(bits int) *rsa.PrivateKey {
+	key, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}
+
+func generateECDSAKey(curve elliptic.Curve) *ecdsa.PrivateKey {
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}
+
+func writeTempKeyFiles(t testing.TB, key interface{}) (privatePath, publicPath string) {
+	t.Helper()
+	tempDir := t.TempDir()
+
+	switch k := key.(type) {
+	case *rsa.PrivateKey:
+		privateBytes := x509.MarshalPKCS1PrivateKey(k)
+		privateBlock := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privateBytes}
+		privatePath = filepath.Join(tempDir, "private.pem")
+		require.NoError(t, os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600))
+
+		publicBytes, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
+		require.NoError(t, err)
+		publicBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: publicBytes}
+		publicPath = filepath.Join(tempDir, "public.pem")
+		require.NoError(t, os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0644))
+
+	case *ecdsa.PrivateKey:
+		privateBytes, err := x509.MarshalECPrivateKey(k)
+		require.NoError(t, err)
+		privateBlock := &pem.Block{Type: "EC PRIVATE KEY", Bytes: privateBytes}
+		privatePath = filepath.Join(tempDir, "ec_private.pem")
+		require.NoError(t, os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600))
+
+		publicBytes, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
+		require.NoError(t, err)
+		publicBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: publicBytes}
+		publicPath = filepath.Join(tempDir, "ec_public.pem")
+		require.NoError(t, os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0644))
+	}
+
+	return privatePath, publicPath
 }

@@ -26,7 +26,7 @@ import (
 // TestTokenEdgeCases tests various edge cases in token creation and validation
 func TestTokenEdgeCases(t *testing.T) {
 	t.Run("Token with Empty UUID", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
 
@@ -37,7 +37,7 @@ func TestTokenEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Token with Empty Roles", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
 
@@ -47,7 +47,7 @@ func TestTokenEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Token with Empty Role String", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
 
@@ -57,7 +57,7 @@ func TestTokenEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Token with Very Long Username", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
 
@@ -70,11 +70,11 @@ func TestTokenEdgeCases(t *testing.T) {
 
 // TestEnhancedTokenRotation tests advanced token rotation scenarios
 func TestEnhancedTokenRotation(t *testing.T) {
-	client := testRedisClient(t)
+	client := redisTestClient(t)
 	defer client.Close()
 
 	t.Run("Concurrent Rotation Attempts", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = true
 		config.RefreshToken.ReuseInterval = time.Second
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
@@ -113,7 +113,7 @@ func TestEnhancedTokenRotation(t *testing.T) {
 	})
 
 	t.Run("Rotation with Different Sessions", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = true
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestEnhancedTokenRotation(t *testing.T) {
 	})
 
 	t.Run("Rotation Chain", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = true
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -176,7 +176,7 @@ func TestSecurityScenarios(t *testing.T) {
 		rsaTokenString, err := rsaToken.SignedString(privateKey)
 		require.NoError(t, err)
 
-		hmacConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		hmacConfig := DefaultGourdianTokenConfig(testSymmetricKey)
 		hmacMaker, err := NewGourdianTokenMaker(context.Background(), hmacConfig, nil)
 		require.NoError(t, err)
 
@@ -200,7 +200,7 @@ func TestSecurityScenarios(t *testing.T) {
 		tokenString, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
 		require.NoError(t, err)
 
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
 
@@ -210,10 +210,10 @@ func TestSecurityScenarios(t *testing.T) {
 	})
 
 	t.Run("Token Replay Attack", func(t *testing.T) {
-		client := testRedisClient(t)
+		client := redisTestClient(t)
 		defer client.Close()
 
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.AccessToken.RevocationEnabled = true
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -242,10 +242,10 @@ func TestSecurityScenarios(t *testing.T) {
 
 // TestTokenRotation_ReuseInterval tests token rotation with reuse intervals
 func TestTokenRotation_ReuseInterval(t *testing.T) {
-	client := testRedisClient(t)
+	client := redisTestClient(t)
 	defer client.Close()
 
-	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config := DefaultGourdianTokenConfig(testSymmetricKey)
 	config.RefreshToken.RotationEnabled = true
 	config.RefreshToken.ReuseInterval = time.Second
 	config.RefreshToken.MaxLifetime = time.Hour
@@ -277,7 +277,7 @@ func TestTokenRotation_ReuseInterval(t *testing.T) {
 // TestCreateAndVerifyRefreshToken tests refresh token creation and verification
 func TestCreateAndVerifyRefreshToken(t *testing.T) {
 	// Setup symmetric maker
-	symmetricConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	symmetricConfig := DefaultGourdianTokenConfig(testSymmetricKey)
 	symmetricMaker, err := NewGourdianTokenMaker(context.Background(), symmetricConfig, testRedisOptions())
 	require.NoError(t, err)
 
@@ -347,7 +347,7 @@ func TestCreateAndVerifyRefreshToken(t *testing.T) {
 
 	t.Run("Invalid Token - Expired", func(t *testing.T) {
 		// Create a token with very short lifetime
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.Duration = time.Millisecond
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -463,7 +463,7 @@ func TestKeyParsing(t *testing.T) {
 
 // TestTokenClaimsValidation tests various token claim validation scenarios
 func TestTokenClaimsValidation(t *testing.T) {
-	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config := DefaultGourdianTokenConfig(testSymmetricKey)
 	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 	require.NoError(t, err)
 
@@ -554,7 +554,7 @@ func TestTokenClaimsValidation(t *testing.T) {
 // TestDefaultConfig tests the default configuration
 func TestDefaultConfig(t *testing.T) {
 	t.Run("Valid Default Config", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		assert.Equal(t, "HS256", config.Algorithm)
 		assert.Equal(t, Symmetric, config.SigningMethod)
 		assert.Equal(t, 30*time.Minute, config.AccessToken.Duration)
@@ -578,7 +578,7 @@ func TestDefaultConfig(t *testing.T) {
 // TestTokenRotation_EdgeCases tests edge cases in token rotation
 func TestTokenRotation_EdgeCases(t *testing.T) {
 	t.Run("Rotation with Disabled Config", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = false
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -592,7 +592,7 @@ func TestTokenRotation_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("Rotation with Invalid Token", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = true
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -603,7 +603,7 @@ func TestTokenRotation_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("Rotation with Expired Token", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = true
 		config.RefreshToken.Duration = time.Millisecond // Very short expiration
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
@@ -627,7 +627,7 @@ func TestConfigValidation(t *testing.T) {
 		config := GourdianTokenConfig{
 			Algorithm:      "HS256",
 			SigningMethod:  Symmetric,
-			SymmetricKey:   "test-secret-32-bytes-long-1234567890",
+			SymmetricKey:   testSymmetricKey,
 			PrivateKeyPath: "",
 			PublicKeyPath:  "",
 			AccessToken:    AccessTokenConfig{Duration: time.Hour},
@@ -657,7 +657,7 @@ func TestConfigValidation(t *testing.T) {
 		config := GourdianTokenConfig{
 			Algorithm:      "HS256",
 			SigningMethod:  Symmetric,
-			SymmetricKey:   "test-secret-32-bytes-long-1234567890",
+			SymmetricKey:   testSymmetricKey,
 			PrivateKeyPath: privatePath, // This should cause validation to fail
 			PublicKeyPath:  publicPath,  // This should cause validation to fail
 			AccessToken: AccessTokenConfig{
@@ -674,7 +674,7 @@ func TestConfigValidation(t *testing.T) {
 		config := GourdianTokenConfig{
 			Algorithm:     "RS256", // RSA algorithm
 			SigningMethod: Symmetric,
-			SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+			SymmetricKey:  testSymmetricKey,
 			AccessToken:   AccessTokenConfig{Duration: time.Hour},
 		}
 		err := validateConfig(&config)
@@ -690,7 +690,7 @@ func TestHelpers(t *testing.T) {
 			config := GourdianTokenConfig{
 				Algorithm:     "HS256",
 				SigningMethod: Symmetric,
-				SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+				SymmetricKey:  testSymmetricKey,
 				AccessToken:   AccessTokenConfig{Duration: time.Hour},
 			}
 			assert.NoError(t, validateConfig(&config))
@@ -785,11 +785,11 @@ func TestHelpers(t *testing.T) {
 
 // TestRevocation tests token revocation functionality
 func TestRevocation(t *testing.T) {
-	client := testRedisClient(t)
+	client := redisTestClient(t)
 	defer client.Close()
 
 	t.Run("Access Token Revocation", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.AccessToken.RevocationEnabled = true
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -812,7 +812,7 @@ func TestRevocation(t *testing.T) {
 	})
 
 	t.Run("Refresh Token Revocation", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RevocationEnabled = true
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -835,7 +835,7 @@ func TestRevocation(t *testing.T) {
 	})
 
 	t.Run("Revocation Not Enabled", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
 
@@ -848,7 +848,7 @@ func TestRevocation(t *testing.T) {
 	})
 
 	t.Run("Revocation with Invalid Token", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.AccessToken.RevocationEnabled = true
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -867,7 +867,7 @@ func TestRedisConnectionLoss(t *testing.T) {
 	}
 
 	t.Run("Rotation with Redis Down", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = true
 
 		// Create maker with failing Redis options
@@ -885,7 +885,7 @@ func TestRedisConnectionLoss(t *testing.T) {
 	})
 
 	t.Run("Revocation with Redis Down", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.AccessToken.RevocationEnabled = true
 
 		// Create maker with failing Redis options
@@ -905,7 +905,7 @@ func TestRedisConnectionLoss(t *testing.T) {
 
 // TestClaimValidation tests various claim validation scenarios
 func TestClaimValidation(t *testing.T) {
-	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config := DefaultGourdianTokenConfig(testSymmetricKey)
 	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 	require.NoError(t, err)
 
@@ -1007,7 +1007,7 @@ func TestClaimValidation(t *testing.T) {
 // TestNewGourdianTokenMaker tests the token maker initialization
 func TestNewGourdianTokenMaker(t *testing.T) {
 	t.Run("Symmetric HS256", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
 		assert.NotNil(t, maker)
@@ -1068,7 +1068,7 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 		config := GourdianTokenConfig{
 			Algorithm:     "FOO256",
 			SigningMethod: Symmetric,
-			SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+			SymmetricKey:  testSymmetricKey,
 		}
 		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.Error(t, err)
@@ -1097,7 +1097,7 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 		config := GourdianTokenConfig{
 			Algorithm:      "HS256",
 			SigningMethod:  Symmetric,
-			SymmetricKey:   "test-secret-32-bytes-long-1234567890",
+			SymmetricKey:   testSymmetricKey,
 			PrivateKeyPath: privatePath, // Should cause error for symmetric
 			PublicKeyPath:  publicPath,  // Should cause error for symmetric
 		}
@@ -1110,7 +1110,7 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 		config := GourdianTokenConfig{
 			Algorithm:     "RS256", // RSA algorithm
 			SigningMethod: Symmetric,
-			SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+			SymmetricKey:  testSymmetricKey,
 		}
 		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.Error(t, err)
@@ -1118,7 +1118,7 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 	})
 
 	t.Run("Rotation Enabled Without Redis", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = true
 		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.Error(t, err)
@@ -1126,7 +1126,7 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 	})
 
 	t.Run("Valid Rotation Configuration", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshToken.RotationEnabled = true
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -1138,7 +1138,7 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 // TestCreateAndVerifyAccessToken tests access token creation and verification
 func TestCreateAndVerifyAccessToken(t *testing.T) {
 	// Setup symmetric maker
-	symmetricConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	symmetricConfig := DefaultGourdianTokenConfig(testSymmetricKey)
 	symmetricMaker, err := NewGourdianTokenMaker(context.Background(), symmetricConfig, testRedisOptions())
 	require.NoError(t, err)
 
@@ -1210,7 +1210,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 
 	t.Run("Invalid Token - Expired", func(t *testing.T) {
 		// Create a token with very short lifetime
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.AccessToken.Duration = time.Millisecond
 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 		require.NoError(t, err)
@@ -1240,7 +1240,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 // // TestEdgeCases tests various edge cases in token handling
 // func TestEdgeCases(t *testing.T) {
 // 	t.Run("Empty Token String", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 // 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 // 		require.NoError(t, err)
 
@@ -1250,7 +1250,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 // 	})
 
 // 	t.Run("Malformed Token", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 // 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 // 		require.NoError(t, err)
 
@@ -1259,7 +1259,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 // 	})
 
 // 	t.Run("Expired Token", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 // 		config.AccessToken.Duration = -time.Hour // Force expired
 // 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 // 		require.NoError(t, err)
@@ -1279,7 +1279,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 // 	})
 
 // 	t.Run("Future Issued At", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 // 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 // 		require.NoError(t, err)
 
@@ -1303,7 +1303,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 // 	})
 
 // 	t.Run("Token with Empty Signature", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 // 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
 // 		require.NoError(t, err)
 
@@ -1345,7 +1345,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 // 	defer cancel()
 
 // 	t.Run("Cleanup Rotated Tokens", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 // 		config.RefreshToken.RotationEnabled = true
 // 		maker, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
 // 		require.NoError(t, err)
@@ -1364,7 +1364,7 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 // 	})
 
 // 	t.Run("Cleanup Revoked Tokens", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 // 		config.AccessToken.RevocationEnabled = true
 // 		maker, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
 // 		require.NoError(t, err)

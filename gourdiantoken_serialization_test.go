@@ -169,7 +169,7 @@ func TestTokenMakerInitialization(t *testing.T) {
 	})
 
 	t.Run("AsymmetricRSA", func(t *testing.T) {
-		privatePath, publicPath := generateTestRSAKeys(t)
+		privatePath, publicPath := generateTempRSAPair(t)
 		defer os.Remove(privatePath)
 		defer os.Remove(publicPath)
 
@@ -201,7 +201,7 @@ func TestTokenMakerInitialization(t *testing.T) {
 	})
 
 	t.Run("AsymmetricECDSA", func(t *testing.T) {
-		privatePath, publicPath := generateTestECDSAKeys(t)
+		privatePath, publicPath := generateTempECDSAPair(t)
 		defer os.Remove(privatePath)
 		defer os.Remove(publicPath)
 
@@ -230,7 +230,7 @@ func TestTokenMakerInitialization(t *testing.T) {
 	})
 
 	t.Run("AsymmetricEdDSA", func(t *testing.T) {
-		privatePath, publicPath := generateTestEdDSAKeys(t)
+		privatePath, publicPath := generateTempEdDSAKeys(t)
 		defer os.Remove(privatePath)
 		defer os.Remove(publicPath)
 
@@ -293,7 +293,7 @@ func TestTokenMakerInitialization(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				ctx := context.Background()
-				_, err := NewGourdianTokenMaker(ctx, tc.config, testRedisOpts)
+				_, err := NewGourdianTokenMaker(ctx, tc.config, testRedisOptions())
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tc.expectedErr)
 			})
@@ -341,7 +341,7 @@ func TestTokenCreationAndVerification(t *testing.T) {
 	})
 
 	t.Run("AsymmetricRS256", func(t *testing.T) {
-		privatePath, publicPath := generateTestRSAKeys(t)
+		privatePath, publicPath := generateTempRSAPair(t)
 		defer os.Remove(privatePath)
 		defer os.Remove(publicPath)
 
