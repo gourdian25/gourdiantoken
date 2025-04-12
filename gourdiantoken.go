@@ -174,9 +174,11 @@ type RefreshTokenResponse struct {
 type GourdianTokenMaker interface {
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
-	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
 	VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
 	VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error)
+	RevokeAccessToken(ctx context.Context, token string) error
+	RevokeRefreshToken(ctx context.Context, token string) error
+	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
 }
 
 type JWTMaker struct {
@@ -476,6 +478,62 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 	}
 
 	return mapToRefreshClaims(claims)
+}
+
+func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) error {
+	if !maker.config.AccessToken.RevocationEnabled || maker.redisClient == nil {
+		return fmt.Errorf("access token revocation is not enabled")
+	}
+
+	// Parse the token to extract expiration time
+	parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
+		return maker.publicKey, nil
+	})
+	if err != nil || !parsed.Valid {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return fmt.Errorf("invalid token claims")
+	}
+
+	exp := getUnixTime(claims["exp"])
+	if exp == 0 {
+		return fmt.Errorf("token missing exp claim")
+	}
+	ttl := time.Until(time.Unix(exp, 0))
+
+	// Store the token string as revoked in Redis with expiry
+	return maker.redisClient.Set(ctx, "revoked:access:"+token, "1", ttl).Err()
+}
+
+func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) error {
+	if !maker.config.RefreshToken.RevocationEnabled || maker.redisClient == nil {
+		return fmt.Errorf("refresh token revocation is not enabled")
+	}
+
+	// Parse the token to extract expiration time
+	parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
+		return maker.publicKey, nil
+	})
+	if err != nil || !parsed.Valid {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return fmt.Errorf("invalid token claims")
+	}
+
+	exp := getUnixTime(claims["exp"])
+	if exp == 0 {
+		return fmt.Errorf("token missing exp claim")
+	}
+	ttl := time.Until(time.Unix(exp, 0))
+
+	// Store the token string as revoked in Redis with expiry
+	return maker.redisClient.Set(ctx, "revoked:refresh:"+token, "1", ttl).Err()
 }
 
 func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) {
