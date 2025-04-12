@@ -54,13 +54,15 @@ type AccessTokenConfig struct {
 	Audience          []string      // Intended recipients (optional)
 	AllowedAlgorithms []string      // Permitted algorithms for verification (must include primary algorithm)
 	RequiredClaims    []string      // Mandatory claims (e.g., ["jti", "sub", "exp", "iat", "typ"])
+	RevocationEnabled bool
 }
 
 type RefreshTokenConfig struct {
-	Duration        time.Duration // Token validity duration (e.g., 7d)
-	MaxLifetime     time.Duration // Absolute maximum lifetime (e.g., 30d)
-	ReuseInterval   time.Duration // Minimum time between reuse attempts (e.g., 1m)
-	RotationEnabled bool          // Whether refresh token rotation is enabled (requires Redis)
+	Duration          time.Duration // Token validity duration (e.g., 7d)
+	MaxLifetime       time.Duration // Absolute maximum lifetime (e.g., 30d)
+	ReuseInterval     time.Duration // Minimum time between reuse attempts (e.g., 1m)
+	RotationEnabled   bool          // Whether refresh token rotation is enabled (requires Redis)
+	RevocationEnabled bool
 }
 
 func NewGourdianTokenConfig(
@@ -171,8 +173,8 @@ type GourdianTokenMaker interface {
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
 	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
-	VerifyAccessToken(tokenString string) (*AccessTokenClaims, error)
-	VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error)
+	VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
+	VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error)
 }
 
 type JWTMaker struct {
@@ -183,7 +185,7 @@ type JWTMaker struct {
 	redisClient   *redis.Client       // Redis client for token rotation (nil if rotation disabled)
 }
 
-func NewGourdianTokenMaker(config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) {
+func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) {
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -312,10 +314,10 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 	return response, nil
 }
 
-func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims, error) {
-	// First check if token is revoked
-	if maker.redisClient != nil {
-		ctx := context.Background()
+func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
+
+	if maker.config.AccessToken.RevocationEnabled && maker.redisClient != nil {
+
 		exists, err := maker.redisClient.Exists(ctx, "revoked:access:"+tokenString).Result()
 		if err != nil {
 			return nil, fmt.Errorf("failed to check token revocation: %w", err)
@@ -365,11 +367,11 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 	return accessClaims, nil
 }
 
-func (maker *JWTMaker) VerifyRefreshToken(tokenString string) (*RefreshTokenClaims, error) {
-	// First check if token is revoked
-	if maker.redisClient != nil {
-		ctx := context.Background()
-		exists, err := maker.redisClient.Exists(ctx, "revoked:refresh:"+tokenString).Result()
+func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error) {
+
+	if maker.config.RefreshToken.RevocationEnabled && maker.redisClient != nil {
+
+		exists, err := maker.redisClient.Exists(ctx, "revoked:access:"+tokenString).Result()
 		if err != nil {
 			return nil, fmt.Errorf("failed to check token revocation: %w", err)
 		}
@@ -414,7 +416,7 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 		return nil, fmt.Errorf("redis connection failed: %w", err)
 	}
 
-	claims, err := maker.VerifyRefreshToken(oldToken)
+	claims, err := maker.VerifyRefreshToken(ctx, oldToken)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
