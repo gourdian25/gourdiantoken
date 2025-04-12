@@ -22,9 +22,11 @@ func DemonstrateRefreshFlow() {
 		nil,
 		[]string{"HS256"},
 		nil,
+		true,
 		2*time.Minute,
 		10*time.Minute,
 		15*time.Second,
+		true,
 		true,
 	)
 

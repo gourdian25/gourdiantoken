@@ -39,7 +39,7 @@ func DemonstrateMultiTenant() {
 	}
 
 	utils.PrintSection("Verifying Tenant Context")
-	claims, err := maker.VerifyAccessToken(tenant1Token.Token)
+	claims, err := maker.VerifyAccessToken(context.Background(), tenant1Token.Token)
 	if err != nil {
 		utils.PrintError("Token verification failed", err)
 		return

@@ -63,9 +63,9 @@ func DemonstrateTokenRevocation() {
 	}
 
 	utils.PrintSection("Post-Revocation Verification")
-	_, err = maker.VerifyAccessToken(accessToken.Token)
+	_, err = maker.VerifyAccessToken(context.Background(), accessToken.Token)
 	utils.VerifyError("Access token verification", err, "should fail")
 
-	_, err = maker.VerifyRefreshToken(refreshToken.Token)
+	_, err = maker.VerifyRefreshToken(context.Background(), refreshToken.Token)
 	utils.VerifyError("Refresh token verification", err, "should fail")
 }

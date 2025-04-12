@@ -77,10 +77,12 @@ func NewGourdianTokenConfig(
 	accessAudience []string,
 	accessAllowedAlgorithms []string,
 	accessRequiredClaims []string,
+	accessRevocationEnabled bool,
 	refreshDuration time.Duration,
 	refreshMaxLifetime time.Duration,
 	refreshReuseInterval time.Duration,
 	refreshRotationEnabled bool,
+	refreshRevocationEnabled bool,
 ) GourdianTokenConfig {
 	return GourdianTokenConfig{
 		Algorithm:      algorithm,
@@ -95,12 +97,14 @@ func NewGourdianTokenConfig(
 			Audience:          accessAudience,
 			AllowedAlgorithms: accessAllowedAlgorithms,
 			RequiredClaims:    accessRequiredClaims,
+			RevocationEnabled: accessRevocationEnabled,
 		},
 		RefreshToken: RefreshTokenConfig{
-			Duration:        refreshDuration,
-			MaxLifetime:     refreshMaxLifetime,
-			ReuseInterval:   refreshReuseInterval,
-			RotationEnabled: refreshRotationEnabled,
+			Duration:          refreshDuration,
+			MaxLifetime:       refreshMaxLifetime,
+			ReuseInterval:     refreshReuseInterval,
+			RotationEnabled:   refreshRotationEnabled,
+			RevocationEnabled: refreshRevocationEnabled,
 		},
 	}
 }

@@ -44,7 +44,7 @@ func DemonstrateRSATokens() {
 	}
 
 	utils.PrintSection("Verifying RSA Token")
-	claims, err := maker.VerifyAccessToken(tokenResp.Token)
+	claims, err := maker.VerifyAccessToken(context.Background(), tokenResp.Token)
 	if err != nil {
 		utils.PrintError("Token verification failed", err)
 		return

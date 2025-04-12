@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -50,9 +51,9 @@ func VerifyToken(maker gourdiantoken.GourdianTokenMaker, token string, tokenType
 	var claims interface{}
 	switch tokenType {
 	case gourdiantoken.AccessToken:
-		claims, err = maker.VerifyAccessToken(token)
+		claims, err = maker.VerifyAccessToken(context.Background(), token)
 	case gourdiantoken.RefreshToken:
-		claims, err = maker.VerifyRefreshToken(token)
+		claims, err = maker.VerifyRefreshToken(context.Background(), token)
 	}
 
 	if err != nil {
@@ -92,7 +93,7 @@ func CreateTokenMaker(config gourdiantoken.GourdianTokenConfig, useRedis bool) (
 	if useRedis {
 		redisOpts = GetRedisOptions()
 	}
-	return gourdiantoken.NewGourdianTokenMaker(config, redisOpts)
+	return gourdiantoken.NewGourdianTokenMaker(context.Background(), config, redisOpts)
 }
 
 // PrintError displays an error message with context

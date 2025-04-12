@@ -31,7 +31,7 @@ func DemonstrateHMACTokens() {
 	}
 
 	utils.PrintSection("Verifying HMAC Token")
-	claims, err := maker.VerifyAccessToken(tokenResp.Token)
+	claims, err := maker.VerifyAccessToken(context.Background(), tokenResp.Token)
 	if err != nil {
 		utils.PrintError("Token verification failed", err)
 		return
