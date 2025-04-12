@@ -41,7 +41,7 @@ func DemonstrateHighSecurity() {
 	userID, username, sessionID := utils.CreateTestUser()
 
 	utils.PrintSection("Token Creation")
-	tokenResp, err := maker.CreateAccessToken(context.Background(), userID, username, "admin", sessionID)
+	tokenResp, err := maker.CreateAccessToken(context.Background(), userID, username, []string{"user"}, sessionID)
 	if err != nil {
 		utils.PrintError("Token creation failed", err)
 		return

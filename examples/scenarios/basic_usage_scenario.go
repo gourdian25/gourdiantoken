@@ -32,7 +32,7 @@ func DemonstrateBasicUsage() {
 		return
 	}
 
-	accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, "user", sessionID)
+	accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, []string{"user"}, sessionID)
 	if err != nil {
 		utils.PrintError("Access token creation failed", err)
 		return
@@ -43,7 +43,7 @@ func DemonstrateBasicUsage() {
 	utils.SimulateTokenExpiration(50 * time.Second)
 
 	utils.PrintSection("New Access Token")
-	newAccessToken, err := maker.CreateAccessToken(context.Background(), userID, username, "user", sessionID)
+	newAccessToken, err := maker.CreateAccessToken(context.Background(), userID, username, []string{"user"}, sessionID)
 	if err != nil {
 		utils.PrintError("New access token creation failed", err)
 		return

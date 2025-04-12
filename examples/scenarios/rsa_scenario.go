@@ -35,7 +35,7 @@ func DemonstrateRSATokens() {
 	tokenResp, err := maker.CreateAccessToken(context.Background(),
 		userID,
 		username,
-		"user",
+		[]string{"user"},
 		sessionID,
 	)
 	if err != nil {

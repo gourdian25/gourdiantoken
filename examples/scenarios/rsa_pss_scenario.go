@@ -33,7 +33,7 @@ func DemonstrateRSAPSSTokens() {
 	userID, username, sessionID := utils.CreateTestUser()
 
 	utils.PrintSection("Creating RSA-PSS Token")
-	tokenResp, err := maker.CreateAccessToken(context.Background(), userID, username, "admin", sessionID)
+	tokenResp, err := maker.CreateAccessToken(context.Background(), userID, username, []string{"admin"}, sessionID)
 	if err != nil {
 		utils.PrintError("Token creation failed", err)
 		return

@@ -29,7 +29,7 @@ func PrintTokenDetails(tokenType string, token interface{}) {
 		fmt.Printf("  Token: %s...\n", t.Token[:20])
 		fmt.Printf("  User: %s (%s)\n", t.Username, t.Subject)
 		fmt.Printf("  Session: %s\n", t.SessionID)
-		fmt.Printf("  Role: %s\n", t.Role)
+		fmt.Printf("  Role: %s\n", t.Roles)
 		fmt.Printf("  Issued: %s\n", t.IssuedAt.Format(time.RFC3339))
 		fmt.Printf("  Expires: %s\n", t.ExpiresAt.Format(time.RFC3339))
 	case *gourdiantoken.RefreshTokenResponse:
@@ -118,7 +118,7 @@ func PrintClaims(claims interface{}) {
 		fmt.Printf("  Subject:   %s\n", c.Subject)
 		fmt.Printf("  Username:  %s\n", c.Username)
 		fmt.Printf("  SessionID: %s\n", c.SessionID)
-		fmt.Printf("  Role:      %s\n", c.Role)
+		fmt.Printf("  Role:      %s\n", c.Roles)
 		fmt.Printf("  IssuedAt:  %s\n", c.IssuedAt.Format(time.RFC3339))
 		fmt.Printf("  ExpiresAt: %s\n", c.ExpiresAt.Format(time.RFC3339))
 		fmt.Printf("  TokenType: %s\n", c.TokenType)

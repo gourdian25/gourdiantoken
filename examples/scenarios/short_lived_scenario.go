@@ -36,7 +36,7 @@ func DemonstrateShortLivedTokens() {
 		return
 	}
 
-	_, err = maker.CreateAccessToken(context.Background(), userID, username, "user", sessionID)
+	_, err = maker.CreateAccessToken(context.Background(), userID, username, []string{"user"}, sessionID)
 	if err != nil {
 		utils.PrintError("Access token creation failed", err)
 		return
@@ -51,7 +51,7 @@ func DemonstrateShortLivedTokens() {
 		return
 	}
 
-	newAccessToken, err := maker.CreateAccessToken(context.Background(), userID, username, "user", sessionID)
+	newAccessToken, err := maker.CreateAccessToken(context.Background(), userID, username, []string{"user"}, sessionID)
 	if err != nil {
 		utils.PrintError("New access token creation failed", err)
 		return

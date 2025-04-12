@@ -37,7 +37,7 @@ func DemonstrateTokenFamilies() {
 		return
 	}
 
-	accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, "user", uuid.New())
+	accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, []string{"user"}, uuid.New())
 	if err != nil {
 		utils.PrintError("Access token creation failed", err)
 		return
@@ -63,7 +63,7 @@ func DemonstrateTokenFamilies() {
 			return
 		}
 
-		newAccessToken, err := maker.CreateAccessToken(ctx, userID, username, "user", uuid.New())
+		newAccessToken, err := maker.CreateAccessToken(ctx, userID, username, []string{"user"}, uuid.New())
 		if err != nil {
 			utils.PrintError("Access token creation failed", err)
 			return

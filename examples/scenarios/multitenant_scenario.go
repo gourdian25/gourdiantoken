@@ -30,7 +30,7 @@ func DemonstrateMultiTenant() {
 		context.Background(),
 		tenant1User,
 		"user1@tenant1.example.com",
-		"tenant_user",
+		[]string{"tenant_user"},
 		uuid.New(),
 	)
 	if err != nil {

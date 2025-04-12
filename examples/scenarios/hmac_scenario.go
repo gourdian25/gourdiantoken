@@ -24,7 +24,7 @@ func DemonstrateHMACTokens() {
 	userID, username, sessionID := utils.CreateTestUser()
 
 	utils.PrintSection("Creating HMAC Token")
-	tokenResp, err := maker.CreateAccessToken(context.Background(), userID, username, "user", sessionID)
+	tokenResp, err := maker.CreateAccessToken(context.Background(), userID, username, []string{"user"}, sessionID)
 	if err != nil {
 		utils.PrintError("Token creation failed", err)
 		return

@@ -116,7 +116,7 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 			Issuer:            "",
 			Audience:          nil,
 			AllowedAlgorithms: []string{"HS256"},
-			RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "roles"},
+			RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "rls"},
 		},
 		RefreshToken: RefreshTokenConfig{
 			Duration:        7 * 24 * time.Hour,
@@ -128,14 +128,14 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 }
 
 type AccessTokenClaims struct {
-	ID        uuid.UUID `json:"jti"`   // Unique token identifier (UUIDv4)
-	Subject   uuid.UUID `json:"sub"`   // Subject (user ID as UUID)
-	Username  string    `json:"usr"`   // Human-readable username
-	SessionID uuid.UUID `json:"sid"`   // Session identifier (UUIDv4)
-	IssuedAt  time.Time `json:"iat"`   // Token issuance timestamp
-	ExpiresAt time.Time `json:"exp"`   // Token expiration timestamp
-	TokenType TokenType `json:"typ"`   // Token type ("access")
-	Roles     []string  `json:"roles"` // User roles/privilege levels
+	ID        uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
+	Subject   uuid.UUID `json:"sub"` // Subject (user ID as UUID)
+	Username  string    `json:"usr"` // Human-readable username
+	SessionID uuid.UUID `json:"sid"` // Session identifier (UUIDv4)
+	IssuedAt  time.Time `json:"iat"` // Token issuance timestamp
+	ExpiresAt time.Time `json:"exp"` // Token expiration timestamp
+	TokenType TokenType `json:"typ"` // Token type ("access")
+	Roles     []string  `json:"rls"` // User roles/privilege levels
 }
 
 type RefreshTokenClaims struct {
@@ -149,13 +149,13 @@ type RefreshTokenClaims struct {
 }
 
 type AccessTokenResponse struct {
-	Token     string    `json:"tok"`   // The signed JWT string
-	Subject   uuid.UUID `json:"sub"`   // User ID (UUID)
-	Username  string    `json:"usr"`   // Username
-	SessionID uuid.UUID `json:"sid"`   // Session ID (UUID)
-	ExpiresAt time.Time `json:"exp"`   // Expiration timestamp
-	IssuedAt  time.Time `json:"iat"`   // Issuance timestamp
-	Roles     []string  `json:"roles"` // User roles
+	Token     string    `json:"tok"` // The signed JWT string
+	Subject   uuid.UUID `json:"sub"` // User ID (UUID)
+	Username  string    `json:"usr"` // Username
+	SessionID uuid.UUID `json:"sid"` // Session ID (UUID)
+	ExpiresAt time.Time `json:"exp"` // Expiration timestamp
+	IssuedAt  time.Time `json:"iat"` // Issuance timestamp
+	Roles     []string  `json:"rls"` // User roles
 }
 
 type RefreshTokenResponse struct {
@@ -346,7 +346,7 @@ func (maker *JWTMaker) VerifyAccessToken(tokenString string) (*AccessTokenClaims
 	}
 
 	// 4. Validate roles claim exists and is non-empty
-	if _, ok := claims["roles"]; !ok {
+	if _, ok := claims["rls"]; !ok {
 		return nil, fmt.Errorf("missing roles claim in access token")
 	}
 
@@ -560,14 +560,14 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 	switch v := claims.(type) {
 	case AccessTokenClaims:
 		return jwt.MapClaims{
-			"jti":   v.ID.String(),
-			"sub":   v.Subject.String(),
-			"usr":   v.Username,
-			"sid":   v.SessionID.String(),
-			"iat":   v.IssuedAt.Unix(),
-			"exp":   v.ExpiresAt.Unix(),
-			"typ":   string(v.TokenType),
-			"roles": v.Roles,
+			"jti": v.ID.String(),
+			"sub": v.Subject.String(),
+			"usr": v.Username,
+			"sid": v.SessionID.String(),
+			"iat": v.IssuedAt.Unix(),
+			"exp": v.ExpiresAt.Unix(),
+			"typ": string(v.TokenType),
+			"rls": v.Roles,
 		}
 	case RefreshTokenClaims:
 		return jwt.MapClaims{
@@ -622,7 +622,7 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 	}
 
 	// Validate roles claim
-	rolesInterface, ok := claims["roles"].([]interface{})
+	rolesInterface, ok := claims["rls"].([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid roles type: expected array of strings")
 	}
@@ -700,7 +700,7 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
 	requiredClaims := []string{"jti", "sub", "typ", "usr", "sid", "iat", "exp"}
 	if expectedType == AccessToken {
-		requiredClaims = append(requiredClaims, "roles")
+		requiredClaims = append(requiredClaims, "rls")
 	}
 
 	for _, claim := range requiredClaims {

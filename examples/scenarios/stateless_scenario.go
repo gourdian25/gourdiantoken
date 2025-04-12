@@ -28,7 +28,7 @@ func DemonstrateStatelessTokens() {
 	userID, username, sessionID := utils.CreateTestUser()
 
 	utils.PrintSection("Creating Tokens")
-	accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, "user", sessionID)
+	accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, []string{"user"}, sessionID)
 	if err != nil {
 		utils.PrintError("Access token creation failed", err)
 		return
