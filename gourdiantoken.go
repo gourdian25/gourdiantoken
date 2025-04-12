@@ -219,6 +219,9 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 		if config.RefreshToken.RotationEnabled {
 			go maker.cleanupRotatedTokens(ctx)
 		}
+		if config.RefreshToken.RevocationEnabled || config.AccessToken.RevocationEnabled {
+			go maker.cleanupRevokedTokens(ctx)
+		}
 	}
 
 	// Initialize signing method
@@ -232,61 +235,6 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	}
 
 	return maker, nil
-}
-
-// cleanupRotatedTokens runs a background job to clean up expired rotated tokens from Redis
-func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if maker.redisClient == nil {
-				continue
-			}
-
-			var cursor uint64
-			const batchSize = 100
-
-			for {
-				// Use SCAN to iterate keys matching the pattern in a memory-efficient way
-				keys, newCursor, err := maker.redisClient.Scan(ctx, cursor, "rotated:*", batchSize).Result()
-				if err != nil {
-					fmt.Printf("Error scanning Redis keys: %v\n", err)
-					break
-				}
-
-				// Filter out keys with expired TTL (or TTL = -2 meaning already expired)
-				var keysToDelete []string
-				for _, key := range keys {
-					ttl, err := maker.redisClient.TTL(ctx, key).Result()
-					if err != nil {
-						fmt.Printf("Error checking TTL for key %s: %v\n", key, err)
-						continue
-					}
-					if ttl <= 0 {
-						keysToDelete = append(keysToDelete, key)
-					}
-				}
-
-				// Delete expired keys in batch
-				if len(keysToDelete) > 0 {
-					if _, err := maker.redisClient.Del(ctx, keysToDelete...).Result(); err != nil {
-						fmt.Printf("Error deleting expired rotated tokens: %v\n", err)
-					}
-				}
-
-				// Exit loop if iteration is complete
-				if newCursor == 0 {
-					break
-				}
-				cursor = newCursor
-			}
-		}
-	}
 }
 
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
@@ -574,46 +522,110 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 	return newToken, nil
 }
 
-func validateConfig(config *GourdianTokenConfig) error {
-	switch config.SigningMethod {
-	case Symmetric:
-		if config.SymmetricKey == "" {
-			return fmt.Errorf("symmetric key is required for symmetric signing method")
-		}
-		if !strings.HasPrefix(config.Algorithm, "HS") && config.Algorithm != "none" {
-			return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
-		}
-		if len(config.SymmetricKey) < 32 {
-			return fmt.Errorf("symmetric key must be at least 32 bytes")
-		}
-		if config.PrivateKeyPath != "" || config.PublicKeyPath != "" {
-			return fmt.Errorf("private and public key paths must be empty for symmetric signing")
-		}
-	case Asymmetric:
-		if config.PrivateKeyPath == "" || config.PublicKeyPath == "" {
-			return fmt.Errorf("private and public key paths are required for asymmetric signing method")
-		}
-		if config.SymmetricKey != "" {
-			return fmt.Errorf("symmetric key must be empty for asymmetric signing")
-		}
-		if !strings.HasPrefix(config.Algorithm, "RS") &&
-			!strings.HasPrefix(config.Algorithm, "ES") &&
-			!strings.HasPrefix(config.Algorithm, "PS") &&
-			config.Algorithm != "EdDSA" {
-			return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
-		}
-		if err := checkFilePermissions(config.PrivateKeyPath, 0644); err != nil {
-			return fmt.Errorf("insecure private key file permissions: %w", err)
-		}
-		if err := checkFilePermissions(config.PublicKeyPath, 0644); err != nil {
-			return fmt.Errorf("insecure public key file permissions: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported signing method: %s, supports %s and %s",
-			config.SigningMethod, Symmetric, Asymmetric)
-	}
+func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
 
-	return nil
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if maker.redisClient == nil {
+				continue
+			}
+
+			var cursor uint64
+			const batchSize = 100
+
+			for {
+				// Use SCAN to iterate keys matching the pattern in a memory-efficient way
+				keys, newCursor, err := maker.redisClient.Scan(ctx, cursor, "rotated:*", batchSize).Result()
+				if err != nil {
+					fmt.Printf("Error scanning Redis keys: %v\n", err)
+					break
+				}
+
+				// Filter out keys with expired TTL (or TTL = -2 meaning already expired)
+				var keysToDelete []string
+				for _, key := range keys {
+					ttl, err := maker.redisClient.TTL(ctx, key).Result()
+					if err != nil {
+						fmt.Printf("Error checking TTL for key %s: %v\n", key, err)
+						continue
+					}
+					if ttl <= 0 {
+						keysToDelete = append(keysToDelete, key)
+					}
+				}
+
+				// Delete expired keys in batch
+				if len(keysToDelete) > 0 {
+					if _, err := maker.redisClient.Del(ctx, keysToDelete...).Result(); err != nil {
+						fmt.Printf("Error deleting expired rotated tokens: %v\n", err)
+					}
+				}
+
+				// Exit loop if iteration is complete
+				if newCursor == 0 {
+					break
+				}
+				cursor = newCursor
+			}
+		}
+	}
+}
+
+func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if maker.redisClient == nil {
+				continue
+			}
+
+			for _, prefix := range []string{"revoked:access:", "revoked:refresh:"} {
+				var cursor uint64
+				const batchSize = 100
+
+				for {
+					keys, newCursor, err := maker.redisClient.Scan(ctx, cursor, prefix+"*", batchSize).Result()
+					if err != nil {
+						fmt.Printf("Error scanning Redis keys for %s: %v\n", prefix, err)
+						break
+					}
+
+					var keysToDelete []string
+					for _, key := range keys {
+						ttl, err := maker.redisClient.TTL(ctx, key).Result()
+						if err != nil {
+							fmt.Printf("Error checking TTL for key %s: %v\n", key, err)
+							continue
+						}
+						if ttl <= 0 {
+							keysToDelete = append(keysToDelete, key)
+						}
+					}
+
+					if len(keysToDelete) > 0 {
+						if _, err := maker.redisClient.Del(ctx, keysToDelete...).Result(); err != nil {
+							fmt.Printf("Error deleting expired revoked tokens: %v\n", err)
+						}
+					}
+
+					if newCursor == 0 {
+						break
+					}
+					cursor = newCursor
+				}
+			}
+		}
+	}
 }
 
 func (maker *JWTMaker) initializeSigningMethod() error {
@@ -706,6 +718,48 @@ func (maker *JWTMaker) parseKeyPair() error {
 		}
 	default:
 		return fmt.Errorf("unsupported algorithm for asymmetric signing: %s", maker.signingMethod.Alg())
+	}
+
+	return nil
+}
+
+func validateConfig(config *GourdianTokenConfig) error {
+	switch config.SigningMethod {
+	case Symmetric:
+		if config.SymmetricKey == "" {
+			return fmt.Errorf("symmetric key is required for symmetric signing method")
+		}
+		if !strings.HasPrefix(config.Algorithm, "HS") && config.Algorithm != "none" {
+			return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
+		}
+		if len(config.SymmetricKey) < 32 {
+			return fmt.Errorf("symmetric key must be at least 32 bytes")
+		}
+		if config.PrivateKeyPath != "" || config.PublicKeyPath != "" {
+			return fmt.Errorf("private and public key paths must be empty for symmetric signing")
+		}
+	case Asymmetric:
+		if config.PrivateKeyPath == "" || config.PublicKeyPath == "" {
+			return fmt.Errorf("private and public key paths are required for asymmetric signing method")
+		}
+		if config.SymmetricKey != "" {
+			return fmt.Errorf("symmetric key must be empty for asymmetric signing")
+		}
+		if !strings.HasPrefix(config.Algorithm, "RS") &&
+			!strings.HasPrefix(config.Algorithm, "ES") &&
+			!strings.HasPrefix(config.Algorithm, "PS") &&
+			config.Algorithm != "EdDSA" {
+			return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
+		}
+		if err := checkFilePermissions(config.PrivateKeyPath, 0644); err != nil {
+			return fmt.Errorf("insecure private key file permissions: %w", err)
+		}
+		if err := checkFilePermissions(config.PublicKeyPath, 0644); err != nil {
+			return fmt.Errorf("insecure public key file permissions: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported signing method: %s, supports %s and %s",
+			config.SigningMethod, Symmetric, Asymmetric)
 	}
 
 	return nil
