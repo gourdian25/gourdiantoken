@@ -355,3 +355,125 @@ func BenchmarkVerificationWithKeySizes(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkCreateRefreshToken(b *testing.B) {
+	symmetricConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	symmetricMaker, _ := NewGourdianTokenMaker(context.Background(), symmetricConfig, nil)
+
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	privatePath, publicPath := writeTempKeyFiles(b, privateKey)
+	asymmetricConfig := GourdianTokenConfig{
+		Algorithm:      "RS256",
+		SigningMethod:  Asymmetric,
+		PrivateKeyPath: privatePath,
+		PublicKeyPath:  publicPath,
+		RefreshToken: RefreshTokenConfig{
+			Duration: time.Hour * 24 * 7,
+		},
+	}
+	asymmetricMaker, _ := NewGourdianTokenMaker(context.Background(), asymmetricConfig, nil)
+
+	userID := uuid.New()
+	username := "benchuser"
+	sessionID := uuid.New()
+
+	b.Run("Symmetric", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := symmetricMaker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Asymmetric", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := asymmetricMaker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+func BenchmarkVerifyRefreshToken(b *testing.B) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, _ := NewGourdianTokenMaker(context.Background(), config, nil)
+
+	userID := uuid.New()
+	username := "benchuser"
+	sessionID := uuid.New()
+
+	token, _ := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := maker.VerifyRefreshToken(context.Background(), token.Token)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+func BenchmarkRotateRefreshToken_RedisReuseInterval(b *testing.B) {
+	opts := testRedisOptions()
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config.RefreshToken.RotationEnabled = true
+	config.RefreshToken.ReuseInterval = 2 * time.Second
+
+	maker, err := NewGourdianTokenMaker(context.Background(), config, opts)
+	require.NoError(b, err)
+
+	userID := uuid.New()
+	username := "benchuser"
+	sessionID := uuid.New()
+
+	token, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+	require.NoError(b, err)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = maker.RotateRefreshToken(context.Background(), token.Token)
+		time.Sleep(config.RefreshToken.ReuseInterval) // simulate delay to avoid reuse error
+	}
+}
+func BenchmarkRevokeAndVerifyToken_Redis(b *testing.B) {
+	opts := testRedisOptions()
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config.AccessToken.RevocationEnabled = true
+
+	maker, err := NewGourdianTokenMaker(context.Background(), config, opts)
+	require.NoError(b, err)
+
+	userID := uuid.New()
+	username := "benchuser"
+	roles := []string{"user"}
+	sessionID := uuid.New()
+
+	token, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+	require.NoError(b, err)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = maker.RevokeAccessToken(context.Background(), token.Token)
+		_, _ = maker.VerifyAccessToken(context.Background(), token.Token)
+	}
+}
+func BenchmarkWithMultipleRoles(b *testing.B) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, _ := NewGourdianTokenMaker(context.Background(), config, nil)
+
+	userID := uuid.New()
+	username := "benchuser"
+	sessionID := uuid.New()
+	roles := make([]string, 100)
+	for i := range roles {
+		roles[i] = "role" + uuid.NewString()
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
