@@ -466,6 +466,61 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	return maker, nil
 }
 
+// NewGourdianTokenMakerWithDefaults creates a new token maker with secure defaults
+// using HMAC-SHA256 (HS256) symmetric signing. When Redis options are provided,
+// it automatically enables revocation and rotation features.
+//
+// Default Configuration:
+//   - Algorithm: HS256 (HMAC-SHA256)
+//   - Signing: Symmetric (using provided key)
+//   - Access Token:
+//   - Lifetime: 30 minutes
+//   - Max Lifetime: 24 hours
+//   - Required Claims: jti, sub, exp, iat, typ, rls
+//   - Revocation: Disabled (enabled if Redis provided)
+//   - Refresh Token:
+//   - Lifetime: 7 days
+//   - Max Lifetime: 30 days
+//   - Reuse Interval: 1 minute
+//   - Rotation: Disabled (enabled if Redis provided)
+//   - Revocation: Disabled (enabled if Redis provided)
+//
+// Security automatically enhanced when Redis is provided:
+//   - Access token revocation
+//   - Refresh token revocation
+//   - Refresh token rotation
+//
+// Parameters:
+//   - ctx: Context for request-scoped values, cancellations, and deadlines
+//   - symmetricKey: Base64-encoded secret key (min 32 bytes for HS256 security)
+//   - redisOpts: Optional Redis configuration (nil disables advanced features)
+//
+// Returns:
+//   - Initialized GourdianTokenMaker instance
+//   - Error if configuration or initialization fails
+//
+// Example without Redis:
+//
+//	maker, err := NewGourdianTokenMakerWithDefaults(ctx, key, nil)
+//
+// Example with Redis:
+//
+//	redisOpts := &redis.Options{Addr: "localhost:6379"}
+//	maker, err := NewGourdianTokenMakerWithDefaults(ctx, key, redisOpts)
+func NewGourdianTokenMakerWithDefaults(
+	ctx context.Context,
+	symmetricKey string,
+	redisOpts *redis.Options,
+) (GourdianTokenMaker, error) {
+	config := DefaultGourdianTokenConfig(symmetricKey)
+	if redisOpts != nil {
+		config.AccessToken.RevocationEnabled = true
+		config.RefreshToken.RevocationEnabled = true
+		config.RefreshToken.RotationEnabled = true
+	}
+	return NewGourdianTokenMaker(ctx, config, redisOpts)
+}
+
 // CreateAccessToken generates a new JWT access token containing the user's identity and authorization claims.
 // The token is signed using the maker's private key and includes standard JWT claims along with custom claims
 // for roles and session management. The token expiration is determined by the maker's configuration.
