@@ -49,16 +49,18 @@ func TestTokenClaimsSerialization(t *testing.T) {
 		t.Run("JSONSerializationEmptyRoles", func(t *testing.T) {
 			emptyRolesClaims := claims
 			emptyRolesClaims.Roles = []string{}
-			_, err := json.Marshal(emptyRolesClaims)
-			assert.Error(t, err, "should fail with empty roles")
+			assert.Panics(t, func() {
+				toMapClaims(emptyRolesClaims)
+			}, "should panic with empty roles")
 		})
 
 		// Test JSON serialization with nil roles
 		t.Run("JSONSerializationNilRoles", func(t *testing.T) {
 			nilRolesClaims := claims
 			nilRolesClaims.Roles = nil
-			_, err := json.Marshal(nilRolesClaims)
-			assert.Error(t, err, "should fail with nil roles")
+			assert.Panics(t, func() {
+				toMapClaims(nilRolesClaims)
+			}, "should panic with nil roles")
 		})
 
 		// Test MapClaims conversion
@@ -78,7 +80,7 @@ func TestTokenClaimsSerialization(t *testing.T) {
 		t.Run("MapToAccessClaims", func(t *testing.T) {
 			mapClaims := toMapClaims(claims)
 			decodedClaims, err := mapToAccessClaims(mapClaims)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			assert.Equal(t, claims.ID, decodedClaims.ID)
 			assert.Equal(t, claims.Subject, decodedClaims.Subject)

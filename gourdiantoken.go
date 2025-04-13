@@ -772,6 +772,9 @@ func validateConfig(config *GourdianTokenConfig) error {
 func toMapClaims(claims interface{}) jwt.MapClaims {
 	switch v := claims.(type) {
 	case AccessTokenClaims:
+		if len(v.Roles) == 0 {
+			panic("at least one role must be provided")
+		}
 		return jwt.MapClaims{
 			"jti": v.ID.String(),
 			"sub": v.Subject.String(),
@@ -793,7 +796,7 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 			"typ": string(v.TokenType),
 		}
 	default:
-		return nil
+		panic(fmt.Sprintf("unsupported claims type: %T", claims))
 	}
 }
 
@@ -835,18 +838,26 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 	}
 
 	// Validate roles claim
-	rolesInterface, ok := claims["rls"].([]interface{})
+	rolesInterface, ok := claims["rls"]
 	if !ok {
-		return nil, fmt.Errorf("invalid roles type: expected array of strings")
+		return nil, fmt.Errorf("missing roles claim")
 	}
 
-	roles := make([]string, 0, len(rolesInterface))
-	for _, r := range rolesInterface {
-		role, ok := r.(string)
-		if !ok {
-			return nil, fmt.Errorf("invalid role type: expected string")
+	var roles []string
+	switch v := rolesInterface.(type) {
+	case []interface{}:
+		roles = make([]string, 0, len(v))
+		for _, r := range v {
+			role, ok := r.(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid role type: expected string")
+			}
+			roles = append(roles, role)
 		}
-		roles = append(roles, role)
+	case []string:
+		roles = v
+	default:
+		return nil, fmt.Errorf("invalid roles type: expected array of strings")
 	}
 
 	if len(roles) == 0 {
