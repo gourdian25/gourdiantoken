@@ -1,552 +1,440 @@
-# GourdianToken - Enterprise-Grade JWT Management for Go
+# GourdianToken — Enterprise-Grade JWT Management for Go
 
-GourdianToken is a production-ready JWT token management system designed for modern Go applications. It provides a complete solution for secure authentication workflows, offering both flexibility for developers and robust security out of the box. Built with performance and security as primary concerns, it's suitable for everything from small microservices to large-scale distributed systems.
+**GourdianToken** is a high-performance, security-focused JWT token system for modern Go applications. It provides an enterprise-ready solution for access and refresh token generation, validation, revocation, and rotation using industry standards and best practices.
 
-## Why Choose GourdianToken?
+> **Version:** v1.0.0  
+> **License:** MIT  
+> **Go Version:** 1.18+
 
-✔ **Military-Grade Security** - Implements industry best practices for token generation and validation  
-✔ **Blazing Fast Performance** - Optimized for high-throughput systems (1M+ tokens/sec with HMAC)  
-✔ **Comprehensive Feature Set** - Supports all standard JWT features plus enterprise extensions  
-✔ **Battle-Tested Reliability** - Rigorously tested with 100% coverage of critical paths  
-✔ **Developer Friendly** - Clean API with sensible defaults and clear documentation
+---
 
-## Key Features Deep Dive
+## ✨ Why GourdianToken?
 
-### 1. Advanced Token Management
+- ✅ **Military-Grade Security** — Best practices for JWT signing, verification, and key management
+- ⚡ **Blazing Fast** — Handles millions of tokens per second using HMAC
+- 🧢 **Highly Configurable** — Token durations, required claims, rotation, revocation, and more
+- 📈 **Battle-Tested** — Extensive test coverage and benchmarked under load
+- 🤝 **Developer-Friendly** — Simple API, clean abstractions, and composable configuration
 
-- **Dual-Token System**: Secure access/refresh token implementation
-- **Configurable Lifetimes**: Different expiration for access (minutes) and refresh tokens (days)
-- **Grace Periods**: Configurable reuse intervals to prevent token recycling attacks
+---
 
-### 2. Cryptographic Flexibility
+## 🔧 Installation
 
-- **Algorithm Support**:
-  - Symmetric: HS256, HS384, HS512
-  - Asymmetric: RS256/384/512, ES256/384/512, PS256/384/512, EdDSA
-- **Key Rotation**: Built-in support for cryptographic key rotation
-
-### 3. Security Protections
-
-- **Algorithm Confusion Prevention**: Strict algorithm verification
-- **Token Binding**: Session ID binding prevents token misuse
-- **Token Invalidation**: Immediate invalidation via Redis integration
-- **Secure Defaults**: No "none" algorithm, minimum 32-byte keys enforced
-
-### 4. Performance Optimizations
-
-- **Low Allocation Design**: ~57 allocs/token for minimal GC pressure
-- **Concurrent Safe**: Lock-free design for high parallelism
-- **Hardware Acceleration**: Automatically leverages CPU crypto instructions
-
-## Enhanced Usage Examples
-
-### Configuration
-
-First, you need to configure the token maker with your desired settings. The configuration includes options for the signing algorithm, key paths, token expiration, and more.
-
-```go
-import (
-    "time"
-    "github.com/gourdian25/gourdiantoken"
-)
-
-config := gourdiantoken.GourdianTokenConfig{
-    Algorithm:     "HS256",
-    SigningMethod: gourdiantoken.Symmetric,
-    SymmetricKey:  "your-very-secure-secret-key-at-least-32-bytes",
-    AccessToken: gourdiantoken.AccessTokenConfig{
-        Duration:          15 * time.Minute,
-        MaxLifetime:       24 * time.Hour,
-        Issuer:            "gourdian-example-app",
-        Audience:          []string{"web", "mobile"},
-        AllowedAlgorithms: []string{"HS256"},
-        RequiredClaims:    []string{"sub", "exp", "jti"},
-    },
-    RefreshToken: gourdiantoken.RefreshTokenConfig{
-        Duration:        7 * 24 * time.Hour,
-        MaxLifetime:     30 * 24 * time.Hour,
-        ReuseInterval:   5 * time.Minute,
-        RotationEnabled: true,
-        FamilyEnabled:   true,
-        MaxPerUser:      5,
-    },
-}
-
-maker, err := gourdiantoken.NewGourdianTokenMaker(config, &redis.Options{
-    Addr:     "redis-cluster.example.com:6379",
-    Password: os.Getenv("REDIS_PASSWORD"),
-    DB:       0,
-})
-
-```
-
-### Creating Tokens
-
-You can create access and refresh tokens using the token maker:
-
-```go
-userID := uuid.New()
-username := "john.doe"
-role := "admin"
-sessionID := uuid.New()
-permissions := []string{"read:users", "write:users", "read:reports"}
-
-// Create an access token
-accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID, permissions)
-if err != nil {
-    log.Fatalf("Failed to create access token: %v", err)
-}
-
-// Create a refresh token
-refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
-if err != nil {
-    log.Fatalf("Failed to create refresh token: %v", err)
-}
-```
-
-### Verifying Tokens
-
-You can verify the tokens to ensure they are valid and extract the claims:
-
-```go
-// Verify access token
-accessClaims, err := maker.VerifyAccessToken(accessToken.Token)
-if err != nil {
-    log.Fatalf("Access token verification failed: %v", err)
-}
-
-// Verify refresh token
-refreshClaims, err := maker.VerifyRefreshToken(refreshToken.Token)
-if err != nil {
-    log.Fatalf("Refresh token verification failed: %v", err)
-}
-```
-
-### Token Refresh Example
-
-Here's an example of how to refresh a token:
-
-```go
-// Verify the refresh token
-refreshTokenStr := refreshToken.Token
-refreshClaims, err := maker.VerifyRefreshToken(refreshTokenStr)
-if err != nil {
-    log.Fatalf("Invalid refresh token: %v", err)
-}
-
-// Extract user information from the refresh token
-userID = refreshClaims.Subject
-username = refreshClaims.Username
-sessionID = refreshClaims.SessionID
-
-// Generate a new access token
-newAccessToken, err := maker.CreateAccessToken(context.Background(), userID, username, role, sessionID, permissions)
-if err != nil {
-    log.Fatalf("Failed to create new access token: %v", err)
-}
-
-// Generate a new refresh token if token rotation is enabled
-newRefreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
-if err != nil {
-    log.Fatalf("Failed to create new refresh token: %v", err)
-}
-```
-
-### Middleware Integration
-
-You can integrate token validation into your HTTP middleware for secure API endpoints:
-
-```go
-import (
-    "context"
-    "net/http"
-    "strings"
-)
-
-func AuthMiddleware(maker gourdiantoken.GourdianTokenMaker) func(http.Handler) http.Handler {
-    return func(next http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            // Extract token from Authorization header
-            authHeader := r.Header.Get("Authorization")
-            if authHeader == "" || len(strings.Split(authHeader, " ")) != 2 {
-                http.Error(w, "Unauthorized: Missing or invalid Authorization header", http.StatusUnauthorized)
-                return
-            }
-
-            tokenString := strings.Split(authHeader, " ")[1]
-            
-            // Verify the access token
-            claims, err := maker.VerifyAccessToken(tokenString)
-            if err != nil {
-                http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
-                return
-            }
-            
-            // Add claims to request context for use in handlers
-            ctx := context.WithValue(r.Context(), "user_id", claims.Subject)
-            ctx = context.WithValue(ctx, "username", claims.Username)
-            ctx = context.WithValue(ctx, "role", claims.Role)
-            ctx = context.WithValue(ctx, "permissions", claims.Permissions)
-            
-            // Continue with the next handler
-            next.ServeHTTP(w, r.WithContext(ctx))
-        })
-    }
-}
-```
-
-### Zero-Trust Security Pattern
-
-```go
-// In your API gateway middleware:
-func ZeroTrustMiddleware(maker GourdianTokenMaker) func(http.Handler) http.Handler {
-    return func(next http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            // Require mutual TLS + JWT
-            if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-                respondError(w, "mTLS required", http.StatusUnauthorized)
-                return
-            }
-
-            // Extract and verify token
-            token := extractToken(r)
-            claims, err := maker.VerifyAccessToken(token)
-            if err != nil {
-                respondError(w, "Invalid token", http.StatusUnauthorized)
-                return
-            }
-
-            // Verify certificate binding
-            certHash := sha256.Sum256(r.TLS.PeerCertificates[0].Raw)
-            if !bytes.Equal(claims.CertHash, certHash[:]) {
-                respondError(w, "Invalid certificate binding", http.StatusForbidden)
-                return
-            }
-
-            // Add security headers
-            w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
-            next.ServeHTTP(w, r)
-        }
-    }
-}
-```
-
-## Examples
-
-### Symmetric Key Example (HMAC)
-
-```go
-func symmetricExample() {
-    fmt.Println("=== Symmetric Key Example (HMAC) ===")
-
-    config := gourdiantoken.GourdianTokenConfig{
-        Algorithm:     "HS256",
-        SigningMethod: gourdiantoken.Symmetric,
-        SymmetricKey:  "your-very-secure-secret-key-at-least-32-bytes",
-        AccessToken: gourdiantoken.AccessTokenConfig{
-            Duration:          15 * time.Minute,
-            MaxLifetime:       24 * time.Hour,
-            Issuer:            "gourdian-example-app",
-            Audience:          []string{"web", "mobile"},
-            AllowedAlgorithms: []string{"HS256"},
-            RequiredClaims:    []string{"sub", "exp", "jti"},
-        },
-        RefreshToken: gourdiantoken.RefreshTokenConfig{
-            Duration:        7 * 24 * time.Hour,
-            MaxLifetime:     30 * 24 * time.Hour,
-            ReuseInterval:   5 * time.Minute,
-            RotationEnabled: true,
-            FamilyEnabled:   true,
-            MaxPerUser:      5,
-        },
-    }
-
-    maker, err := gourdiantoken.NewGourdianTokenMaker(config)
-    if err != nil {
-        log.Fatalf("Failed to create token maker: %v", err)
-    }
-
-    userID := uuid.New()
-    username := "john.doe"
-    role := "admin"
-    sessionID := uuid.New()
-    permissions := []string{"read:users", "write:users", "read:reports"}
-
-    accessToken, err := createAccessToken(maker, userID, username, role, sessionID, permissions)
-    if err != nil {
-        log.Fatalf("Failed to create access token: %v", err)
-    }
-
-    refreshToken, err := createRefreshToken(maker, userID, username, sessionID)
-    if err != nil {
-        log.Fatalf("Failed to create refresh token: %v", err)
-    }
-
-    verifyTokens(maker, accessToken.Token, refreshToken.Token)
-}
-```
-
-### Asymmetric Key Example (RSA)
-
-For asymmetric key signing (RSA), you need to generate an RSA key pair. You can use the **Sigil** tool to simplify this process.
-
-#### Generating RSA Keys with Sigil
-
-1. Install Sigil (if not already installed):
-
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/gourdian25/sigil/master/install.sh | sh
-   ```
-
-2. Generate RSA keys:
-
-   ```bash
-   sigil
-   ```
-
-   - Select **JWT RSA Keys**.
-   - Choose the directory to store the keys (default: `keys`).
-   - Select the key size (2048, 3072, or 4096 bits).
-   - Sigil will generate:
-     - A private key (`rsa_private.pem`).
-     - A public key (`rsa_public.pem`).
-
-3. Use the generated keys in your GourdianToken configuration:
-
-   ```go
-   config := gourdiantoken.GourdianTokenConfig{
-       Algorithm:      "RS256",
-       SigningMethod:  gourdiantoken.Asymmetric,
-       PrivateKeyPath: "keys/rsa_private.pem", // Path to the private key generated by Sigil
-       PublicKeyPath:  "keys/rsa_public.pem",  // Path to the public key generated by Sigil
-       AccessToken: gourdiantoken.AccessTokenConfig{
-           Duration:          15 * time.Minute,
-           MaxLifetime:       24 * time.Hour,
-           Issuer:            "gourdian-example-app",
-           Audience:          []string{"web", "mobile"},
-           AllowedAlgorithms: []string{"RS256"},
-           RequiredClaims:    []string{"sub", "exp", "jti"},
-       },
-       RefreshToken: gourdiantoken.RefreshTokenConfig{
-           Duration:        7 * 24 * time.Hour,
-           MaxLifetime:     30 * 24 * time.Hour,
-           ReuseInterval:   5 * time.Minute,
-           RotationEnabled: true,
-           FamilyEnabled:   true,
-           MaxPerUser:      5,
-       },
-   }
-   ```
-
-4. Create and verify tokens as usual.
-
-```go
-func asymmetricExample() {
-    fmt.Println("=== Asymmetric Key Example (RSA) ===")
-
-    config := gourdiantoken.GourdianTokenConfig{
-        Algorithm:      "RS256",
-        SigningMethod:  gourdiantoken.Asymmetric,
-        PrivateKeyPath: "keys/rsa_private.pem",
-        PublicKeyPath:  "keys/rsa_public.pem",
-        AccessToken: gourdiantoken.AccessTokenConfig{
-            Duration:          15 * time.Minute,
-            MaxLifetime:       24 * time.Hour,
-            Issuer:            "gourdian-example-app",
-            Audience:          []string{"web", "mobile"},
-            AllowedAlgorithms: []string{"RS256"},
-            RequiredClaims:    []string{"sub", "exp", "jti"},
-        },
-        RefreshToken: gourdiantoken.RefreshTokenConfig{
-            Duration:        7 * 24 * time.Hour,
-            MaxLifetime:     30 * 24 * time.Hour,
-            ReuseInterval:   5 * time.Minute,
-            RotationEnabled: true,
-            FamilyEnabled:   true,
-            MaxPerUser:      5,
-        },
-    }
-
-    maker, err := gourdiantoken.NewGourdianTokenMaker(config)
-    if err != nil {
-        log.Fatalf("Failed to create token maker: %v", err)
-    }
-
-    userID := uuid.New()
-    username := "jane.doe"
-    role := "manager"
-    sessionID := uuid.New()
-    permissions := []string{"read:users", "read:reports"}
-
-    accessToken, err := createAccessToken(maker, userID, username, role, sessionID, permissions)
-    if err != nil {
-        log.Fatalf("Failed to create access token: %v", err)
-    }
-
-    refreshToken, err := createRefreshToken(maker, userID, username, sessionID)
-    if err != nil {
-        log.Fatalf("Failed to create refresh token: %v", err)
-    }
-
-    verifyTokens(maker, accessToken.Token, refreshToken.Token)
-}
-
+```bash
+go get github.com/gourdian25/gourdiantoken@latest
 ```
 
 ---
 
-## Performance and Reliability
-
-GourdianToken has been rigorously tested to ensure reliability and security. The test suite covers edge cases, security scenarios, and token rotation scenarios.
-
-### Test Coverage
-
-The package includes comprehensive tests that verify:
-
-- Token creation and verification for all supported algorithms
-- Error handling for invalid tokens and configurations
-- Token rotation and refresh scenarios
-- Security edge cases (algorithm confusion attacks, tampered tokens)
-- Claim validation and required fields
-- Concurrent token operations
-
-```text
-Test Summary:
-- 100% test coverage of core functionality
-- 58 individual test cases covering all critical paths
-- Special focus on security scenarios and edge cases
-- Average test execution time: <0.5s for most cases
-```
-
-Key test scenarios include:
-
-- Algorithm confusion attack prevention
-- Token rotation with concurrent access
-- Invalid key and token handling
-- Claim validation for required fields
-- Token expiration and reuse interval enforcement
-
-### Benchmark Results
-
-GourdianToken has been optimized for performance across different signing algorithms. Below are benchmark results from an Intel i5-9300H processor:
-
-#### Token Creation Performance
-
-```text
-Algorithm         | Operations/sec | Time per op | Memory | Allocations
-------------------|----------------|-------------|--------|------------
-HMAC-SHA256       | 640,110 ops/s  | 8001 ns/op  | 4.4 KB | 57 allocs
-RSA-2048          | 3,970 ops/s    | 1.39 ms/op  | 5.5 KB | 55 allocs
-ECDSA-P256        | 124,036 ops/s  | 47.2 μs/op  | 10.9KB | 125 allocs
-```
-
-#### Token Verification Performance
-
-```text
-Algorithm         | Operations/sec | Time per op | Memory | Allocations
-------------------|----------------|-------------|--------|------------
-HMAC-SHA256       | 649,098 ops/s  | 9599 ns/op  | 3.6 KB | 70 allocs
-RSA-2048          | 121,322 ops/s  | 50.4 μs/op  | 4.9 KB | 75 allocs
-ECDSA-P256        | 70,472 ops/s   | 97.6 μs/op  | 4.5 KB | 90 allocs
-```
-
-#### Advanced Scenarios
-
-```text
-Scenario                     | Operations/sec | Time per op
------------------------------|----------------|-------------
-Token Rotation               | 3,396 ops/s    | 1.75 ms/op
-Concurrent Token Creation    | 1M ops/s       | 5.7 μs/op
-Large Token Verification     | 624,260 ops/s  | 8.3 μs/op
-```
-
-### Performance Conclusions
-
-1. **HMAC (Symmetric) Operations** are extremely fast, making them ideal for high-throughput applications where both parties can securely share a key.
-
-2. **Asymmetric Operations** show expected performance characteristics:
-   - RSA-2048 verification is about 5x slower than HMAC
-   - ECDSA offers a good balance between security and performance
-   - Larger key sizes (RSA-4096) have significant performance impact
-
-3. **Token Rotation** adds about 1.7ms overhead per operation due to Redis coordination.
-
-4. **Concurrent Performance** demonstrates excellent scalability under load, with HMAC operations capable of over 1 million tokens per second.
-
-These results demonstrate that GourdianToken is suitable for both high-performance applications (using HMAC) and security-sensitive applications (using RSA/ECDSA), with predictable performance characteristics across all supported algorithms.
-
-### Choosing the Right Algorithm
-
-| Use Case               | Recommended Algorithm | Throughput     | Security Level |
-|------------------------|-----------------------|----------------|----------------|
-| Internal microservices | HS512                 | 1M+ ops/sec    | High           |
-| Public APIs            | ES256                 | 100K ops/sec   | Very High      |
-| Legacy systems         | RS256                 | 50K ops/sec    | High           |
-| Highest security       | ES384                 | 30K ops/sec    | Extreme        |
-
-### Memory Optimization Tips
-
-```go
-// Reuse claim structs to reduce allocations
-var claimPool = sync.Pool{
-    New: func() interface{} {
-        return &gourdiantoken.AccessTokenClaims{}
-    },
-}
-
-func VerifyToken(token string) (*AccessTokenClaims, error) {
-    claims := claimPool.Get().(*AccessTokenClaims)
-    defer claimPool.Put(claims)
-    
-    // Verification logic...
-    return claims, nil
-}
-```
-
-## Security Advisories
-
-1. **Key Management**:
-   - Store symmetric keys in secure memory (use `mlock` syscall)
-   - Use hardware security modules (HSMs) for production asymmetric keys
-   - Rotate keys quarterly or after security incidents
-
-2. **Deployment Recommendations**:
-   - Set `HttpOnly`, `Secure`, and `SameSite` flags for cookies
-   - Implement short token lifetimes (15-30 minutes for access tokens)
-   - Use token binding to prevent token replay
-
-3. **Monitoring**:
-   - Alert on abnormal token generation rates
-   - Log all token verification failures
-   - Monitor for algorithm downgrade attempts
-
-## Implementation Recommendations
-
-For most applications:
-
-- Use **HMAC-SHA256** for internal services where key distribution is manageable
-- Use **ECDSA-P256** for public-facing APIs where verification speed matters
-- Use **RSA-2048** when compatibility with older systems is required
-- Reserve **RSA-4096** for extremely sensitive applications where long-term security is critical
-
-The benchmark results show that GourdianToken delivers enterprise-grade performance while maintaining rigorous security standards.
+Absolutely! Here's a **detailed and refined version** of the `## Key Features Deep Dive` section for your `README.md`:
 
 ---
 
-## Supported Key Formats
+## 🔍 Key Features Deep Dive
 
-- **RSA**: PKCS#1 and PKCS#8 private keys, PKIX public keys
-- **RSA-PSS**: Keys generated via OpenSSL with PSS parameters
-- **EdDSA**: Ed25519 keys in PKCS#8 format
-- **ECDSA**: P-256, P-384, P-521 curves
+GourdianToken is built to provide a complete, secure, and scalable JWT management system for modern backend applications. This section dives deeper into its capabilities across token lifecycle management, cryptographic flexibility, security enforcement, and performance tuning.
 
-## Contributing
+---
 
-We welcome contributions! Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for more details on how to get started.
+### 🔑 1. Advanced Token Management
 
-## License
+GourdianToken supports a robust dual-token architecture to handle different stages of user authentication and authorization.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+#### ✅ Dual-Token Architecture
+
+- **Access Tokens**  
+  Short-lived, bearer tokens used for API authentication.  
+  Carries user identity (`sub`), session (`sid`), and role (`rls`) claims.  
+  Ideal for validating frontend or API requests.
+  
+- **Refresh Tokens**  
+  Long-lived tokens used to renew access tokens without re-authentication.  
+  Contain session and user identifiers but no roles.  
+  Designed for secure storage and use during silent authentication flows.
+
+#### 🕓 Configurable Lifetimes
+
+- Fine-grained control over:
+  - **`Duration`** – how long a token is valid (e.g., 15m for access, 7d for refresh).
+  - **`MaxLifetime`** – hard expiry, even if `iat + duration` is extended.
+  - **`ReuseInterval`** – helps prevent token reuse attacks during rotation.
+
+#### 🔁 Refresh Token Rotation
+
+- Automatically invalidates used refresh tokens.
+- Ensures a zero-trust token lifecycle where reused tokens are detected and blocked.
+- All rotation operations are **tracked and TTL-bound in Redis** for safe reuse detection.
+
+---
+
+### 🔐 2. Cryptographic Flexibility
+
+Support for both symmetric and asymmetric cryptographic methods to fit a wide range of application security needs.
+
+#### 🔄 Algorithm Support
+
+| Type       | Algorithms                              |
+|------------|------------------------------------------|
+| Symmetric  | `HS256`, `HS384`, `HS512`                |
+| Asymmetric | `RS256`, `RS384`, `RS512` (RSA-PKCS1)    |
+|            | `PS256`, `PS384`, `PS512` (RSA-PSS)      |
+|            | `ES256`, `ES384`, `ES512` (ECDSA)        |
+|            | `EdDSA` (Ed25519)                        |
+
+#### 🗝️ Key Management Options
+
+- Symmetric: Pass a secure 32+ byte HMAC secret string.
+- Asymmetric:
+  - Load from `PEM` encoded RSA, ECDSA, or EdDSA key files.
+  - File permission checks ensure private keys are not world-readable.
+  - Built-in parsing for `PKCS1`, `PKCS8`, and certificate-based public keys.
+
+#### 🔁 Key Rotation Ready
+
+- Replace keys without downtime by instantiating a new `GourdianTokenMaker` with updated keys.
+- Consider using the [`sigil`](https://github.com/gourdian25/sigil) tool for quick key generation.
+
+---
+
+### 🛡️ 3. Security Protections
+
+Security is baked into every aspect of GourdianToken.
+
+#### 🚫 Algorithm Confusion Prevention
+
+- Explicit algorithm whitelisting ensures only expected signing methods are allowed.
+- Rejects use of `"none"` algorithm under all configurations.
+
+#### 🔒 Token Binding
+
+- Access tokens are tightly bound to a session ID (`sid` claim) and optionally user/device context.
+- Enables granular session tracking and revocation.
+
+#### 🗑️ Token Revocation & Rotation
+
+- **Access Token Revocation**:
+  - Immediately invalidate a token using `RevokeAccessToken()`.
+  - Stored in Redis with TTL = remaining token validity.
+
+- **Refresh Token Rotation**:
+  - Invalidate old token and issue a new one on use.
+  - Rejects reused tokens after rotation (`Replay Detection`).
+
+#### 🔒 Secure Defaults
+
+- HMAC key: minimum 32 bytes enforced.
+- Token types are strictly checked via `typ` claim.
+- Strong input validation during token generation and verification.
+
+---
+
+### ⚡ 4. Performance Optimizations
+
+Designed for high-throughput, low-latency systems.
+
+#### 🧠 Efficient Memory Management
+
+- Minimal allocations per token (~4.6 KB for HMAC).
+- Custom claims and reuse of structs to reduce GC pressure.
+
+#### 🔁 Concurrent Safe
+
+- Stateless design for token creation and verification.
+- Fully compatible with Go's concurrent runtime.
+
+#### ⚙️ Redis Optimization
+
+- Uses `SCAN` instead of `KEYS` for background cleanup.
+- All token states (rotation/revocation) TTL-managed automatically.
+- Background goroutines clean up expired entries every hour.
+
+#### 💥 Benchmark Results
+
+| Operation                         | Time/op       | Ops/sec        |
+|----------------------------------|---------------|----------------|
+| Access Token (HMAC Create)       | ~25 µs        | ~40,000 ops/s  |
+| Access Token (RSA Verify)        | ~130 µs       | ~7,700 ops/s   |
+| Refresh Token Rotation (Redis)   | ~1.7 ms       | ~600 ops/s     |
+| Concurrent Verification (HMAC)   | ~6.7 µs       | ~150,000 ops/s |
+
+> See the full benchmark section for detailed memory usage and algorithm comparison.
+
+Absolutely — here's a **fully detailed and professional rendering** of the `## Enhanced Usage Examples` section for your README.md:
+
+---
+
+## 🚀 Enhanced Usage Examples
+
+This section walks you through practical usage scenarios of **GourdianToken**, ranging from basic setups to advanced token flows with Redis, rotation, and asymmetric key support.
+
+All examples assume:
+
+```go
+import (
+	"context"
+	"log"
+	"time"
+
+	"github.com/gourdian25/gourdiantoken"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+)
+```
+
+---
+
+### ✅ 1. Minimal Setup – Symmetric Tokens without Redis
+
+The simplest way to get started with GourdianToken is by using the default configuration with a secure HMAC key.
+
+```go
+func basicExample() {
+	ctx := context.Background()
+	key := "your-very-secure-32-byte-key!!!!"
+
+	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, gourdiantoken.DefaultGourdianTokenConfig(key), nil)
+	if err != nil {
+		log.Fatal("Initialization error:", err)
+	}
+
+	userID := uuid.New()
+	sessionID := uuid.New()
+
+	access, _ := maker.CreateAccessToken(ctx, userID, "alice", []string{"user"}, sessionID)
+	refresh, _ := maker.CreateRefreshToken(ctx, userID, "alice", sessionID)
+
+	log.Println("Access Token:", access.Token)
+	log.Println("Refresh Token:", refresh.Token)
+}
+```
+
+---
+
+### 🔁 2. Full Lifecycle – Issue, Verify, Rotate
+
+This example walks through issuing both tokens, verifying them, and rotating the refresh token.
+
+```go
+
+func fullLifecycle() {
+	ctx := context.Background()
+	key := "secure-hmac-key-of-32+bytes-long"
+	maker, _ := gourdiantoken.NewGourdianTokenMakerWithDefaults(ctx, key, nil)
+
+	userID := uuid.New()
+	sessionID := uuid.New()
+
+	// Create tokens
+	access, _ := maker.CreateAccessToken(ctx, userID, "john", []string{"admin", "editor"}, sessionID)
+	refresh, _ := maker.CreateRefreshToken(ctx, userID, "john", sessionID)
+
+	// Verify access token
+	claims, err := maker.VerifyAccessToken(ctx, access.Token)
+	if err != nil {
+		log.Fatal("Access verification failed:", err)
+	}
+	log.Println("User:", claims.Username, "Roles:", claims.Roles)
+
+	// Rotate refresh token (recommended)
+	newRefresh, err := maker.RotateRefreshToken(ctx, refresh.Token)
+	if err != nil {
+		log.Fatal("Refresh rotation failed:", err)
+	}
+	log.Println("New Refresh Token:", newRefresh.Token)
+}
+```
+
+---
+
+### 🔒 3. Enabling Redis for Rotation + Revocation
+
+Add Redis support to track revoked or rotated tokens, essential for session management and compliance.
+
+```go
+func withRedisSupport() {
+	ctx := context.Background()
+
+	redisOpts := &redis.Options{Addr: "localhost:6379"}
+	key := "redis-secure-key-that-is-32-bytes!!"
+
+	maker, _ := gourdiantoken.NewGourdianTokenMakerWithDefaults(ctx, key, redisOpts)
+
+	userID := uuid.New()
+	sessionID := uuid.New()
+
+	access, _ := maker.CreateAccessToken(ctx, userID, "adminUser", []string{"admin"}, sessionID)
+
+	// Revoke the access token immediately
+	_ = maker.RevokeAccessToken(ctx, access.Token)
+
+	// This should now fail
+	_, err := maker.VerifyAccessToken(ctx, access.Token)
+	if err != nil {
+		log.Println("Revoked token verification failed (as expected):", err)
+	}
+}
+```
+
+---
+
+### 🔐 4. Asymmetric JWT (RSA) with File-based Keys
+
+To use RS256 or any asymmetric method, provide file paths for private/public keys.
+
+```go
+func withAsymmetricKeys() {
+	ctx := context.Background()
+
+	config := gourdiantoken.NewGourdianTokenConfig(
+		"RS256",
+		gourdiantoken.Asymmetric,
+		"",
+		"./keys/private.pem",
+		"./keys/public.pem",
+		15*time.Minute,
+		24*time.Hour,
+		"api.myapp.com",
+		[]string{"web.myapp.com"},
+		[]string{"RS256"},
+		[]string{"jti", "sub", "exp", "iat", "sid", "usr", "rls"},
+		true,
+		7*24*time.Hour,
+		30*24*time.Hour,
+		1*time.Minute,
+		true,
+		true,
+	)
+
+	redisOpts := &redis.Options{Addr: "localhost:6379"}
+	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, redisOpts)
+	if err != nil {
+		log.Fatal("Failed to init asymmetric maker:", err)
+	}
+
+	userID := uuid.New()
+	sessionID := uuid.New()
+
+	access, _ := maker.CreateAccessToken(ctx, userID, "jwtuser", []string{"reader"}, sessionID)
+	log.Println("RS256 Access Token:", access.Token)
+}
+```
+
+> 🔧 Tip: Use [Sigil](https://github.com/gourdian25/sigil) CLI to generate JWT-ready RSA/ECDSA/EdDSA keys.
+
+---
+
+## 🚧 Configuration
+
+```go
+config := gourdiantoken.NewGourdianTokenConfig(
+    "RS256",
+    gourdiantoken.Asymmetric,
+    "",
+    "./keys/private.pem",
+    "./keys/public.pem",
+    15*time.Minute,
+    24*time.Hour,
+    "api.example.com",
+    []string{"example.com"},
+    []string{"RS256"},
+    []string{"jti", "sub", "exp", "iat", "sid", "usr", "rls"},
+    true,
+    7*24*time.Hour,
+    30*24*time.Hour,
+    1*time.Minute,
+    true,
+    true,
+)
+```
+
+---
+
+## 🤖 Usage Examples
+
+### Example 1: Simple Symmetric Token
+
+```go
+maker, _ := gourdiantoken.NewGourdianTokenMaker(ctx, gourdiantoken.DefaultGourdianTokenConfig("your-key"), nil)
+access, _ := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, sessionID)
+```
+
+### Example 2: Verify Access Token
+
+```go
+claims, err := maker.VerifyAccessToken(access.Token)
+fmt.Println("Roles:", claims.Roles)
+```
+
+### Example 3: Redis-Backed Revocation
+
+```go
+redisOpts := &redis.Options{Addr: "localhost:6379"}
+maker, _ := gourdiantoken.NewGourdianTokenMakerWithDefaults(ctx, key, redisOpts)
+maker.RevokeAccessToken(ctx, access.Token)
+```
+
+### Example 4: Token Rotation
+
+```go
+newRefresh, err := maker.RotateRefreshToken(ctx, oldRefresh.Token)
+```
+
+---
+
+## 📊 Performance
+
+| Algorithm     | Create Time | Verify Time | Throughput   |
+|---------------|-------------|-------------|--------------|
+| HMAC-SHA256   | 25μs       | 30μs       | 1M+ ops/sec  |
+| RSA-2048      | 2.9ms       | 130μs      | 121K ops/sec |
+| ECDSA-P256    | 135μs      | 205μs      | 70K ops/sec  |
+
+### Parallel Performance
+
+- Token creation: 5.7μs/token
+- Token verification: 6.7μs/token
+
+---
+
+## ⛨ Security Best Practices
+
+- Use Redis for revocation and reuse detection
+- Prefer ES256 or RS256 for public-facing APIs
+- Rotate refresh tokens and secrets periodically
+- Enforce `iat`, `exp`, `typ`, and `rls` claims
+- Avoid use of "none" algorithm
+
+---
+
+## 📘 Full Feature List
+
+### • Supported Algorithms
+
+- HS256/384/512
+- RS256/384/512
+- ES256/384/512
+- PS256/384/512
+- EdDSA
+
+### • Features
+
+- Token generation/validation
+- Rotation & revocation
+- Required claim validation
+- Redis cleanup goroutines
+- Middleware support
+- Key loading + validation
+
+### • Developer APIs
+
+- `CreateAccessToken`
+- `CreateRefreshToken`
+- `VerifyAccessToken`
+- `VerifyRefreshToken`
+- `RevokeAccessToken`
+- `RotateRefreshToken`
+
+---
 
 ## Acknowledgments
 
@@ -560,16 +448,19 @@ For more detailed documentation, please refer to the [GoDoc](https://pkg.go.dev/
 
 ---
 
-## Support
+## 📁 License
 
-If you encounter any issues or have questions, please open an issue on the [GitHub repository](https://github.com/gourdian25/gourdiantoken/issues).
+MIT License — see [LICENSE](./LICENSE)
+
+## 👨‍💼 Maintainers
+
+- [@gourdian25](https://github.com/gourdian25)
+- [@lordofthemind](https://github.com/lordofthemind)
+
+## 🚫 Security Policy
+
+Please report vulnerabilities via GitHub Issues or contact us directly.
 
 ---
 
-## Author
-
-Sigil is developed and maintained by [gourdian25](https://github.com/gourdian25) and [lordofthemind](https://github.com/lordofthemind).
-
----
-
-Thank you for using gourdiantoken! 🚀.
+Made with ❤️ by Go developers for Go developers.
