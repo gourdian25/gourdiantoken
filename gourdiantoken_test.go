@@ -691,8 +691,11 @@ func TestHelpers(t *testing.T) {
 		})
 
 		t.Run("Invalid Type", func(t *testing.T) {
-			assert.Nil(t, toMapClaims("invalid type"))
+			assert.Panics(t, func() {
+				toMapClaims("invalid type")
+			}, "should panic on unsupported claims type")
 		})
+
 	})
 }
 
@@ -1131,6 +1134,94 @@ func TestTokenMakerInitialization(t *testing.T) {
 				assert.Contains(t, err.Error(), tc.expectedErr)
 			})
 		}
+	})
+}
+
+// TestEnhancedTokenRotation tests advanced token rotation scenarios
+func TestEnhancedTokenRotation(t *testing.T) {
+	client := redisTestClient(t)
+	defer client.Close()
+
+	t.Run("Concurrent Rotation Attempts", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		config.RefreshToken.ReuseInterval = time.Second
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+		results := make(chan error, 10)
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := maker.RotateRefreshToken(context.Background(), token.Token)
+				results <- err
+			}()
+		}
+
+		wg.Wait()
+		close(results)
+
+		var successCount, failureCount int
+		for err := range results {
+			if err == nil {
+				successCount++
+			} else {
+				failureCount++
+				assert.Contains(t, err.Error(), "token reused too soon")
+			}
+		}
+
+		assert.Equal(t, 1, successCount)
+		assert.Equal(t, 9, failureCount)
+	})
+
+	t.Run("Rotation with Different Sessions", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+
+		userID := uuid.New()
+		session1 := uuid.New()
+		token1, err := maker.CreateRefreshToken(context.Background(), userID, "user", session1)
+		require.NoError(t, err)
+
+		session2 := uuid.New()
+		token2, err := maker.CreateRefreshToken(context.Background(), userID, "user", session2)
+		require.NoError(t, err)
+
+		_, err = maker.RotateRefreshToken(context.Background(), token1.Token)
+		require.NoError(t, err)
+
+		_, err = maker.RotateRefreshToken(context.Background(), token2.Token)
+		require.NoError(t, err)
+	})
+
+	t.Run("Rotation Chain", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+
+		// Create initial token
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		// Rotate multiple times
+		for i := 0; i < 5; i++ {
+			token, err = maker.RotateRefreshToken(context.Background(), token.Token)
+			require.NoError(t, err)
+		}
+
+		// Verify the last rotated token
+		_, err = maker.VerifyRefreshToken(context.Background(), token.Token)
+		require.NoError(t, err)
 	})
 }
 
@@ -1639,94 +1730,6 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 		_, err = symmetricMaker.VerifyAccessToken(context.Background(), resp.Token)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid token type")
-	})
-}
-
-// TestEnhancedTokenRotation tests advanced token rotation scenarios
-func TestEnhancedTokenRotation(t *testing.T) {
-	client := redisTestClient(t)
-	defer client.Close()
-
-	t.Run("Concurrent Rotation Attempts", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		config.RefreshToken.ReuseInterval = time.Second
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		var wg sync.WaitGroup
-		results := make(chan error, 10)
-
-		for i := 0; i < 10; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_, err := maker.RotateRefreshToken(context.Background(), token.Token)
-				results <- err
-			}()
-		}
-
-		wg.Wait()
-		close(results)
-
-		var successCount, failureCount int
-		for err := range results {
-			if err == nil {
-				successCount++
-			} else {
-				failureCount++
-				assert.Contains(t, err.Error(), "token reused too soon")
-			}
-		}
-
-		assert.Equal(t, 1, successCount)
-		assert.Equal(t, 9, failureCount)
-	})
-
-	t.Run("Rotation with Different Sessions", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-
-		userID := uuid.New()
-		session1 := uuid.New()
-		token1, err := maker.CreateRefreshToken(context.Background(), userID, "user", session1)
-		require.NoError(t, err)
-
-		session2 := uuid.New()
-		token2, err := maker.CreateRefreshToken(context.Background(), userID, "user", session2)
-		require.NoError(t, err)
-
-		_, err = maker.RotateRefreshToken(context.Background(), token1.Token)
-		require.NoError(t, err)
-
-		_, err = maker.RotateRefreshToken(context.Background(), token2.Token)
-		require.NoError(t, err)
-	})
-
-	t.Run("Rotation Chain", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-
-		// Create initial token
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		// Rotate multiple times
-		for i := 0; i < 5; i++ {
-			token, err = maker.RotateRefreshToken(context.Background(), token.Token)
-			require.NoError(t, err)
-		}
-
-		// Verify the last rotated token
-		_, err = maker.VerifyRefreshToken(context.Background(), token.Token)
-		require.NoError(t, err)
 	})
 }
 

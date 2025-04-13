@@ -910,14 +910,30 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 		return nil, fmt.Errorf("invalid username type: expected string")
 	}
 
+	typ, ok := claims["typ"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid or missing token type")
+	}
+
+	if TokenType(typ) != RefreshToken {
+		return nil, fmt.Errorf("invalid token type: expected 'refresh'")
+	}
+
+	iat := getUnixTime(claims["iat"])
+	exp := getUnixTime(claims["exp"])
+
+	if iat == 0 || exp == 0 {
+		return nil, fmt.Errorf("invalid timestamp format")
+	}
+
 	return &RefreshTokenClaims{
 		ID:        tokenID,
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		IssuedAt:  time.Unix(getUnixTime(claims["iat"]), 0),
-		ExpiresAt: time.Unix(getUnixTime(claims["exp"]), 0),
-		TokenType: TokenType(claims["typ"].(string)),
+		IssuedAt:  time.Unix(iat, 0),
+		ExpiresAt: time.Unix(exp, 0),
+		TokenType: TokenType(typ),
 	}, nil
 }
 
