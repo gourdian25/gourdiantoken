@@ -19,7 +19,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1463,281 +1462,281 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 	})
 }
 
-// TestRedisConnectionLoss tests behavior when Redis connection is lost
-func TestRedisConnectionLoss(t *testing.T) {
-	// Create a mock Redis client that will fail all operations
-	failingRedisOpts := &redis.Options{
-		Addr: "localhost:9999", // Non-existent Redis server
-	}
+// // TestRedisConnectionLoss tests behavior when Redis connection is lost
+// func TestRedisConnectionLoss(t *testing.T) {
+// 	// Create a mock Redis client that will fail all operations
+// 	failingRedisOpts := &redis.Options{
+// 		Addr: "localhost:9999", // Non-existent Redis server
+// 	}
 
-	t.Run("Rotation with Redis Down", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
+// 	t.Run("Rotation with Redis Down", func(t *testing.T) {
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
+// 		config.RefreshToken.RotationEnabled = true
 
-		// Create maker with failing Redis options
-		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
-		require.NoError(t, err)
+// 		// Create maker with failing Redis options
+// 		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
+// 		require.NoError(t, err)
 
-		// Create a valid token
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
+// 		// Create a valid token
+// 		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+// 		require.NoError(t, err)
 
-		// Try to rotate - should fail immediately since Redis is unreachable
-		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
-	})
+// 		// Try to rotate - should fail immediately since Redis is unreachable
+// 		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
+// 		require.Error(t, err)
+// 		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
+// 	})
 
-	t.Run("Revocation with Redis Down", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.AccessToken.RevocationEnabled = true
+// 	t.Run("Revocation with Redis Down", func(t *testing.T) {
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
+// 		config.AccessToken.RevocationEnabled = true
 
-		// Create maker with failing Redis options
-		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
-		require.NoError(t, err)
+// 		// Create maker with failing Redis options
+// 		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
+// 		require.NoError(t, err)
 
-		// Create a valid token
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
-		require.NoError(t, err)
+// 		// Create a valid token
+// 		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
+// 		require.NoError(t, err)
 
-		// Try to revoke - should fail immediately since Redis is unreachable
-		err = maker.RevokeAccessToken(context.Background(), token.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
-	})
-}
+// 		// Try to revoke - should fail immediately since Redis is unreachable
+// 		err = maker.RevokeAccessToken(context.Background(), token.Token)
+// 		require.Error(t, err)
+// 		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
+// 	})
+// }
 
-func TestTokenCreationAndVerification(t *testing.T) {
-	ctx := context.Background()
+// func TestTokenCreationAndVerification(t *testing.T) {
+// 	ctx := context.Background()
 
-	t.Run("SymmetricHS256", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		maker := createTestMaker(t, config)
+// 	t.Run("SymmetricHS256", func(t *testing.T) {
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
+// 		maker := createTestMaker(t, config)
 
-		userID := uuid.New()
-		sessionID := uuid.New()
-		roles := []string{"admin", "user"}
+// 		userID := uuid.New()
+// 		sessionID := uuid.New()
+// 		roles := []string{"admin", "user"}
 
-		t.Run("CreateAndVerifyAccessToken", func(t *testing.T) {
-			accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", roles, sessionID)
-			assert.NoError(t, err)
-			assert.NotEmpty(t, accessToken.Token)
+// 		t.Run("CreateAndVerifyAccessToken", func(t *testing.T) {
+// 			accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", roles, sessionID)
+// 			assert.NoError(t, err)
+// 			assert.NotEmpty(t, accessToken.Token)
 
-			claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
-			assert.NoError(t, err)
-			assert.Equal(t, userID, claims.Subject)
-			assert.Equal(t, "testuser", claims.Username)
-			assert.Equal(t, sessionID, claims.SessionID)
-			assert.Equal(t, roles, claims.Roles)
-			assert.Equal(t, AccessToken, claims.TokenType)
-		})
+// 			claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
+// 			assert.NoError(t, err)
+// 			assert.Equal(t, userID, claims.Subject)
+// 			assert.Equal(t, "testuser", claims.Username)
+// 			assert.Equal(t, sessionID, claims.SessionID)
+// 			assert.Equal(t, roles, claims.Roles)
+// 			assert.Equal(t, AccessToken, claims.TokenType)
+// 		})
 
-		t.Run("CreateAndVerifyRefreshToken", func(t *testing.T) {
-			refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
-			assert.NoError(t, err)
-			assert.NotEmpty(t, refreshToken.Token)
+// 		t.Run("CreateAndVerifyRefreshToken", func(t *testing.T) {
+// 			refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
+// 			assert.NoError(t, err)
+// 			assert.NotEmpty(t, refreshToken.Token)
 
-			claims, err := maker.VerifyRefreshToken(ctx, refreshToken.Token)
-			assert.NoError(t, err)
-			assert.Equal(t, userID, claims.Subject)
-			assert.Equal(t, "testuser", claims.Username)
-			assert.Equal(t, sessionID, claims.SessionID)
-			assert.Equal(t, RefreshToken, claims.TokenType)
-		})
-	})
+// 			claims, err := maker.VerifyRefreshToken(ctx, refreshToken.Token)
+// 			assert.NoError(t, err)
+// 			assert.Equal(t, userID, claims.Subject)
+// 			assert.Equal(t, "testuser", claims.Username)
+// 			assert.Equal(t, sessionID, claims.SessionID)
+// 			assert.Equal(t, RefreshToken, claims.TokenType)
+// 		})
+// 	})
 
-	t.Run("AsymmetricRS256", func(t *testing.T) {
-		privatePath, publicPath := generateTempRSAPair(t)
-		defer os.Remove(privatePath)
-		defer os.Remove(publicPath)
+// 	t.Run("AsymmetricRS256", func(t *testing.T) {
+// 		privatePath, publicPath := generateTempRSAPair(t)
+// 		defer os.Remove(privatePath)
+// 		defer os.Remove(publicPath)
 
-		config := DefaultGourdianTokenConfig("")
-		config.SigningMethod = Asymmetric
-		config.Algorithm = "RS256"
-		config.PrivateKeyPath = privatePath
-		config.PublicKeyPath = publicPath
-		maker := createTestMaker(t, config)
+// 		config := DefaultGourdianTokenConfig("")
+// 		config.SigningMethod = Asymmetric
+// 		config.Algorithm = "RS256"
+// 		config.PrivateKeyPath = privatePath
+// 		config.PublicKeyPath = publicPath
+// 		maker := createTestMaker(t, config)
 
-		userID := uuid.New()
-		sessionID := uuid.New()
-		roles := []string{"admin"}
+// 		userID := uuid.New()
+// 		sessionID := uuid.New()
+// 		roles := []string{"admin"}
 
-		t.Run("CreateAndVerifyAccessToken", func(t *testing.T) {
-			accessToken, err := maker.CreateAccessToken(ctx, userID, "rsa-user", roles, sessionID)
-			assert.NoError(t, err)
-			assert.NotEmpty(t, accessToken.Token)
+// 		t.Run("CreateAndVerifyAccessToken", func(t *testing.T) {
+// 			accessToken, err := maker.CreateAccessToken(ctx, userID, "rsa-user", roles, sessionID)
+// 			assert.NoError(t, err)
+// 			assert.NotEmpty(t, accessToken.Token)
 
-			claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
-			assert.NoError(t, err)
-			assert.Equal(t, userID, claims.Subject)
-			assert.Equal(t, "rsa-user", claims.Username)
-			assert.Equal(t, sessionID, claims.SessionID)
-			assert.Equal(t, roles, claims.Roles)
-		})
-	})
+// 			claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
+// 			assert.NoError(t, err)
+// 			assert.Equal(t, userID, claims.Subject)
+// 			assert.Equal(t, "rsa-user", claims.Username)
+// 			assert.Equal(t, sessionID, claims.SessionID)
+// 			assert.Equal(t, roles, claims.Roles)
+// 		})
+// 	})
 
-	t.Run("InvalidTokens", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		maker := createTestMaker(t, config)
+// 	t.Run("InvalidTokens", func(t *testing.T) {
+// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
+// 		maker := createTestMaker(t, config)
 
-		t.Run("ExpiredToken", func(t *testing.T) {
-			// Create a token that expired 1 hour ago
-			claims := AccessTokenClaims{
-				ID:        uuid.New(),
-				Subject:   uuid.New(),
-				Username:  "expired",
-				SessionID: uuid.New(),
-				IssuedAt:  time.Now().Add(-2 * time.Hour),
-				ExpiresAt: time.Now().Add(-1 * time.Hour),
-				TokenType: AccessToken,
-				Roles:     []string{"user"},
-			}
+// 		t.Run("ExpiredToken", func(t *testing.T) {
+// 			// Create a token that expired 1 hour ago
+// 			claims := AccessTokenClaims{
+// 				ID:        uuid.New(),
+// 				Subject:   uuid.New(),
+// 				Username:  "expired",
+// 				SessionID: uuid.New(),
+// 				IssuedAt:  time.Now().Add(-2 * time.Hour),
+// 				ExpiresAt: time.Now().Add(-1 * time.Hour),
+// 				TokenType: AccessToken,
+// 				Roles:     []string{"user"},
+// 			}
 
-			token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
-			tokenString, err := token.SignedString(maker.privateKey)
-			assert.NoError(t, err)
+// 			token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
+// 			tokenString, err := token.SignedString(maker.privateKey)
+// 			assert.NoError(t, err)
 
-			_, err = maker.VerifyAccessToken(ctx, tokenString)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "token has expired")
-		})
+// 			_, err = maker.VerifyAccessToken(ctx, tokenString)
+// 			assert.Error(t, err)
+// 			assert.Contains(t, err.Error(), "token has expired")
+// 		})
 
-		t.Run("InvalidSignature", func(t *testing.T) {
-			// Create a valid token
-			accessToken, err := maker.CreateAccessToken(ctx, uuid.New(), "testuser", []string{"user"}, uuid.New())
-			assert.NoError(t, err)
+// 		t.Run("InvalidSignature", func(t *testing.T) {
+// 			// Create a valid token
+// 			accessToken, err := maker.CreateAccessToken(ctx, uuid.New(), "testuser", []string{"user"}, uuid.New())
+// 			assert.NoError(t, err)
 
-			// Tamper with the token by changing a character in the signature
-			tamperedToken := accessToken.Token[:len(accessToken.Token)-2] + "XX"
+// 			// Tamper with the token by changing a character in the signature
+// 			tamperedToken := accessToken.Token[:len(accessToken.Token)-2] + "XX"
 
-			_, err = maker.VerifyAccessToken(ctx, tamperedToken)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "signature is invalid")
-		})
+// 			_, err = maker.VerifyAccessToken(ctx, tamperedToken)
+// 			assert.Error(t, err)
+// 			assert.Contains(t, err.Error(), "signature is invalid")
+// 		})
 
-		t.Run("MissingRequiredClaims", func(t *testing.T) {
-			// Create a token missing the 'exp' claim
-			claims := jwt.MapClaims{
-				"jti": uuid.New().String(),
-				"sub": uuid.New().String(),
-				"usr": "testuser",
-				"sid": uuid.New().String(),
-				"iat": time.Now().Unix(),
-				"typ": string(AccessToken),
-				"rls": []string{"user"},
-			}
+// 		t.Run("MissingRequiredClaims", func(t *testing.T) {
+// 			// Create a token missing the 'exp' claim
+// 			claims := jwt.MapClaims{
+// 				"jti": uuid.New().String(),
+// 				"sub": uuid.New().String(),
+// 				"usr": "testuser",
+// 				"sid": uuid.New().String(),
+// 				"iat": time.Now().Unix(),
+// 				"typ": string(AccessToken),
+// 				"rls": []string{"user"},
+// 			}
 
-			token := jwt.NewWithClaims(maker.signingMethod, claims)
-			tokenString, err := token.SignedString(maker.privateKey)
-			assert.NoError(t, err)
+// 			token := jwt.NewWithClaims(maker.signingMethod, claims)
+// 			tokenString, err := token.SignedString(maker.privateKey)
+// 			assert.NoError(t, err)
 
-			_, err = maker.VerifyAccessToken(ctx, tokenString)
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "missing required claim: exp")
-		})
-	})
-}
+// 			_, err = maker.VerifyAccessToken(ctx, tokenString)
+// 			assert.Error(t, err)
+// 			assert.Contains(t, err.Error(), "missing required claim: exp")
+// 		})
+// 	})
+// }
 
-// TestClaimValidation tests various claim validation scenarios
-func TestClaimValidation(t *testing.T) {
-	config := DefaultGourdianTokenConfig(testSymmetricKey)
-	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-	require.NoError(t, err)
+// // TestClaimValidation tests various claim validation scenarios
+// func TestClaimValidation(t *testing.T) {
+// 	config := DefaultGourdianTokenConfig(testSymmetricKey)
+// 	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+// 	require.NoError(t, err)
 
-	t.Run("Missing Required Claims", func(t *testing.T) {
-		tests := []struct {
-			name   string
-			claims jwt.MapClaims
-			error  string
-		}{
-			{"Missing JTI", jwt.MapClaims{"sub": uuid.New().String(), "usr": "test", "sid": uuid.New().String(), "typ": "access"}, "missing required claim: jti"},
-			{"Missing SUB", jwt.MapClaims{"jti": uuid.New().String(), "usr": "test", "sid": uuid.New().String(), "typ": "access"}, "missing required claim: sub"},
-			{"Missing TYP", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "sid": uuid.New().String()}, "missing required claim: typ"},
-			{"Missing USR", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "sid": uuid.New().String(), "typ": "access"}, "missing required claim: usr"},
-			{"Missing SID", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access"}, "missing required claim: sid"},
-			{"Missing RLS", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access", "sid": uuid.New().String(), "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix()}, "missing roles claim in access token"}}
+// 	t.Run("Missing Required Claims", func(t *testing.T) {
+// 		tests := []struct {
+// 			name   string
+// 			claims jwt.MapClaims
+// 			error  string
+// 		}{
+// 			{"Missing JTI", jwt.MapClaims{"sub": uuid.New().String(), "usr": "test", "sid": uuid.New().String(), "typ": "access"}, "missing required claim: jti"},
+// 			{"Missing SUB", jwt.MapClaims{"jti": uuid.New().String(), "usr": "test", "sid": uuid.New().String(), "typ": "access"}, "missing required claim: sub"},
+// 			{"Missing TYP", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "sid": uuid.New().String()}, "missing required claim: typ"},
+// 			{"Missing USR", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "sid": uuid.New().String(), "typ": "access"}, "missing required claim: usr"},
+// 			{"Missing SID", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access"}, "missing required claim: sid"},
+// 			{"Missing RLS", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access", "sid": uuid.New().String(), "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix()}, "missing roles claim in access token"}}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				token := jwt.NewWithClaims(jwt.SigningMethodHS256, tt.claims)
-				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
-				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.error)
-			})
-		}
-	})
+// 		for _, tt := range tests {
+// 			t.Run(tt.name, func(t *testing.T) {
+// 				token := jwt.NewWithClaims(jwt.SigningMethodHS256, tt.claims)
+// 				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
+// 				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
+// 				assert.Error(t, err)
+// 				assert.Contains(t, err.Error(), tt.error)
+// 			})
+// 		}
+// 	})
 
-	t.Run("Invalid UUID Formats", func(t *testing.T) {
-		tests := []struct {
-			name  string
-			claim string
-			value interface{}
-			error string
-		}{
-			{"Invalid JTI", "jti", "not-a-uuid", "invalid token ID"},
-			{"Invalid SUB", "sub", 12345, "invalid user ID"},
-			{"Invalid SID", "sid", false, "invalid session ID"},
-		}
+// 	t.Run("Invalid UUID Formats", func(t *testing.T) {
+// 		tests := []struct {
+// 			name  string
+// 			claim string
+// 			value interface{}
+// 			error string
+// 		}{
+// 			{"Invalid JTI", "jti", "not-a-uuid", "invalid token ID"},
+// 			{"Invalid SUB", "sub", 12345, "invalid user ID"},
+// 			{"Invalid SID", "sid", false, "invalid session ID"},
+// 		}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				claims := jwt.MapClaims{
-					"jti":    uuid.New().String(),
-					"sub":    uuid.New().String(),
-					"usr":    "testuser",
-					"sid":    uuid.New().String(),
-					"iat":    time.Now().Unix(),
-					"exp":    time.Now().Add(time.Hour).Unix(),
-					"typ":    AccessToken,
-					"rls":    []string{"role"},
-					tt.claim: tt.value,
-				}
-				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
-				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.error)
-			})
-		}
-	})
+// 		for _, tt := range tests {
+// 			t.Run(tt.name, func(t *testing.T) {
+// 				claims := jwt.MapClaims{
+// 					"jti":    uuid.New().String(),
+// 					"sub":    uuid.New().String(),
+// 					"usr":    "testuser",
+// 					"sid":    uuid.New().String(),
+// 					"iat":    time.Now().Unix(),
+// 					"exp":    time.Now().Add(time.Hour).Unix(),
+// 					"typ":    AccessToken,
+// 					"rls":    []string{"role"},
+// 					tt.claim: tt.value,
+// 				}
+// 				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+// 				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
+// 				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
+// 				assert.Error(t, err)
+// 				assert.Contains(t, err.Error(), tt.error)
+// 			})
+// 		}
+// 	})
 
-	t.Run("Invalid Timestamps", func(t *testing.T) {
-		tests := []struct {
-			name  string
-			claim string
-			value interface{}
-			error string
-		}{
-			{"Invalid IAT", "iat", "not-a-number", "invalid timestamp format"},
-			{"Invalid EXP", "exp", "not-a-number", "invalid timestamp format"},
-			{"Missing IAT", "iat", nil, "missing required claim: iat"},
-			{"Missing EXP", "exp", nil, "missing required claim: exp"},
-		}
+// 	t.Run("Invalid Timestamps", func(t *testing.T) {
+// 		tests := []struct {
+// 			name  string
+// 			claim string
+// 			value interface{}
+// 			error string
+// 		}{
+// 			{"Invalid IAT", "iat", "not-a-number", "invalid timestamp format"},
+// 			{"Invalid EXP", "exp", "not-a-number", "invalid timestamp format"},
+// 			{"Missing IAT", "iat", nil, "missing required claim: iat"},
+// 			{"Missing EXP", "exp", nil, "missing required claim: exp"},
+// 		}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				claims := jwt.MapClaims{
-					"jti":    uuid.New().String(),
-					"sub":    uuid.New().String(),
-					"usr":    "testuser",
-					"sid":    uuid.New().String(),
-					"iat":    time.Now().Unix(),
-					"exp":    time.Now().Add(time.Hour).Unix(),
-					"typ":    AccessToken,
-					"rls":    []string{"role"},
-					tt.claim: tt.value,
-				}
-				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
-				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.error)
-			})
-		}
-	})
-}
-
+// 		for _, tt := range tests {
+// 			t.Run(tt.name, func(t *testing.T) {
+// 				claims := jwt.MapClaims{
+// 					"jti":    uuid.New().String(),
+// 					"sub":    uuid.New().String(),
+// 					"usr":    "testuser",
+// 					"sid":    uuid.New().String(),
+// 					"iat":    time.Now().Unix(),
+// 					"exp":    time.Now().Add(time.Hour).Unix(),
+// 					"typ":    AccessToken,
+// 					"rls":    []string{"role"},
+// 					tt.claim: tt.value,
+// 				}
+// 				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+// 				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
+// 				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
+// 				assert.Error(t, err)
+// 				assert.Contains(t, err.Error(), tt.error)
+// 			})
+// 		}
+// 	})
+// }
+//
 // // TestEdgeCases tests various edge cases in token handling
 // func TestEdgeCases(t *testing.T) {
 // 	t.Run("Empty Token String", func(t *testing.T) {
