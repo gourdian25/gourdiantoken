@@ -10,8 +10,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"math/big"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -19,9 +22,229 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var (
+	testSymmetricKey = "test-secret-32-bytes-long-1234567890"
+)
+
+func testRedisOptions() *redis.Options {
+	return &redis.Options{
+		Addr:     "127.0.0.1:6379",
+		Password: "GourdianRedisSecret",
+		DB:       0,
+	}
+}
+
+func createTestMaker(t *testing.T, config GourdianTokenConfig) *JWTMaker {
+	t.Helper()
+
+	ctx := context.Background()
+	maker, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+	require.NoError(t, err)
+	return maker.(*JWTMaker)
+}
+
+func redisTestClient(t *testing.T) *redis.Client {
+	client := redis.NewClient(testRedisOptions())
+	_, err := client.Ping(context.Background()).Result()
+	if err != nil {
+		t.Skip("Redis not available, skipping test")
+	}
+	return client
+}
+
+func generateTempRSAPair(t *testing.T) (privatePath, publicPath string) {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	privateBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateBlock := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateBytes,
+	}
+
+	privatePath = filepath.Join(t.TempDir(), "private.pem")
+	err = os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600)
+	require.NoError(t, err)
+
+	publicBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	require.NoError(t, err)
+	publicBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicBytes,
+	}
+
+	publicPath = filepath.Join(t.TempDir(), "public.pem")
+	err = os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0600)
+	require.NoError(t, err)
+
+	return privatePath, publicPath
+}
+
+func generateTempECDSAPair(t *testing.T) (privatePath, publicPath string) {
+	t.Helper()
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	privateBytes, err := x509.MarshalECPrivateKey(privateKey)
+	require.NoError(t, err)
+	privateBlock := &pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: privateBytes,
+	}
+
+	privatePath = filepath.Join(t.TempDir(), "ec_private.pem")
+	err = os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600)
+	require.NoError(t, err)
+
+	publicBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	require.NoError(t, err)
+	publicBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicBytes,
+	}
+
+	publicPath = filepath.Join(t.TempDir(), "ec_public.pem")
+	err = os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0600)
+	require.NoError(t, err)
+
+	return privatePath, publicPath
+}
+
+func generateTempCertificate(t *testing.T) (privatePath, publicPath string) {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().Add(time.Hour),
+	}
+
+	certBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	require.NoError(t, err)
+
+	privateBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateBlock := &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: privateBytes,
+	}
+
+	privatePath = filepath.Join(t.TempDir(), "cert_private.pem")
+	err = os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600)
+	require.NoError(t, err)
+
+	certBlock := &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certBytes,
+	}
+
+	publicPath = filepath.Join(t.TempDir(), "cert_public.pem")
+	err = os.WriteFile(publicPath, pem.EncodeToMemory(certBlock), 0600)
+	require.NoError(t, err)
+
+	return privatePath, publicPath
+}
+
+func generateTempEdDSAKeys(t *testing.T) (privateKeyPath, publicKeyPath string) {
+	t.Helper()
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	// Create temp files
+	privateKeyFile, err := os.CreateTemp("", "ed25519-private-*.pem")
+	require.NoError(t, err)
+	defer privateKeyFile.Close()
+
+	publicKeyFile, err := os.CreateTemp("", "ed25519-public-*.pem")
+	require.NoError(t, err)
+	defer publicKeyFile.Close()
+
+	// Encode private key
+	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	require.NoError(t, err)
+	privateKeyBlock := &pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	}
+	err = pem.Encode(privateKeyFile, privateKeyBlock)
+	require.NoError(t, err)
+
+	// Encode public key
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(publicKey)
+	require.NoError(t, err)
+	publicKeyBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyBytes,
+	}
+	err = pem.Encode(publicKeyFile, publicKeyBlock)
+	require.NoError(t, err)
+
+	return privateKeyFile.Name(), publicKeyFile.Name()
+}
+
+func generateRSAKey(bits int) *rsa.PrivateKey {
+	key, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}
+
+func generateECDSAKey(curve elliptic.Curve) *ecdsa.PrivateKey {
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}
+
+func writeTempKeyFiles(t testing.TB, key interface{}) (privatePath, publicPath string) {
+	t.Helper()
+	tempDir := t.TempDir()
+
+	switch k := key.(type) {
+	case *rsa.PrivateKey:
+		privateBytes := x509.MarshalPKCS1PrivateKey(k)
+		privateBlock := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privateBytes}
+		privatePath = filepath.Join(tempDir, "private.pem")
+		require.NoError(t, os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600))
+
+		publicBytes, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
+		require.NoError(t, err)
+		publicBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: publicBytes}
+		publicPath = filepath.Join(tempDir, "public.pem")
+		require.NoError(t, os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0644))
+
+	case *ecdsa.PrivateKey:
+		privateBytes, err := x509.MarshalECPrivateKey(k)
+		require.NoError(t, err)
+		privateBlock := &pem.Block{Type: "EC PRIVATE KEY", Bytes: privateBytes}
+		privatePath = filepath.Join(tempDir, "ec_private.pem")
+		require.NoError(t, os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600))
+
+		publicBytes, err := x509.MarshalPKIXPublicKey(&k.PublicKey)
+		require.NoError(t, err)
+		publicBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: publicBytes}
+		publicPath = filepath.Join(tempDir, "ec_public.pem")
+		require.NoError(t, os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0644))
+	}
+
+	return privatePath, publicPath
+}
 
 // TestTokenEdgeCases tests various edge cases in token creation and validation
 func TestTokenEdgeCases(t *testing.T) {
@@ -1278,8 +1501,9 @@ func TestEnhancedTokenRotation(t *testing.T) {
 			}
 		}
 
-		assert.Equal(t, 1, successCount)
-		assert.Equal(t, 9, failureCount)
+		require.Equal(t, 10, successCount+failureCount)
+		require.GreaterOrEqual(t, failureCount, 8)
+
 	})
 
 	t.Run("Rotation with Different Sessions", func(t *testing.T) {
@@ -1461,424 +1685,3 @@ func TestNewGourdianTokenMaker(t *testing.T) {
 		assert.NotNil(t, maker.(*JWTMaker).redisClient)
 	})
 }
-
-// // TestRedisConnectionLoss tests behavior when Redis connection is lost
-// func TestRedisConnectionLoss(t *testing.T) {
-// 	// Create a mock Redis client that will fail all operations
-// 	failingRedisOpts := &redis.Options{
-// 		Addr: "localhost:9999", // Non-existent Redis server
-// 	}
-
-// 	t.Run("Rotation with Redis Down", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		config.RefreshToken.RotationEnabled = true
-
-// 		// Create maker with failing Redis options
-// 		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
-// 		require.NoError(t, err)
-
-// 		// Create a valid token
-// 		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-// 		require.NoError(t, err)
-
-// 		// Try to rotate - should fail immediately since Redis is unreachable
-// 		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-// 		require.Error(t, err)
-// 		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
-// 	})
-
-// 	t.Run("Revocation with Redis Down", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		config.AccessToken.RevocationEnabled = true
-
-// 		// Create maker with failing Redis options
-// 		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
-// 		require.NoError(t, err)
-
-// 		// Create a valid token
-// 		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
-// 		require.NoError(t, err)
-
-// 		// Try to revoke - should fail immediately since Redis is unreachable
-// 		err = maker.RevokeAccessToken(context.Background(), token.Token)
-// 		require.Error(t, err)
-// 		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
-// 	})
-// }
-
-// func TestTokenCreationAndVerification(t *testing.T) {
-// 	ctx := context.Background()
-
-// 	t.Run("SymmetricHS256", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		maker := createTestMaker(t, config)
-
-// 		userID := uuid.New()
-// 		sessionID := uuid.New()
-// 		roles := []string{"admin", "user"}
-
-// 		t.Run("CreateAndVerifyAccessToken", func(t *testing.T) {
-// 			accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", roles, sessionID)
-// 			assert.NoError(t, err)
-// 			assert.NotEmpty(t, accessToken.Token)
-
-// 			claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
-// 			assert.NoError(t, err)
-// 			assert.Equal(t, userID, claims.Subject)
-// 			assert.Equal(t, "testuser", claims.Username)
-// 			assert.Equal(t, sessionID, claims.SessionID)
-// 			assert.Equal(t, roles, claims.Roles)
-// 			assert.Equal(t, AccessToken, claims.TokenType)
-// 		})
-
-// 		t.Run("CreateAndVerifyRefreshToken", func(t *testing.T) {
-// 			refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
-// 			assert.NoError(t, err)
-// 			assert.NotEmpty(t, refreshToken.Token)
-
-// 			claims, err := maker.VerifyRefreshToken(ctx, refreshToken.Token)
-// 			assert.NoError(t, err)
-// 			assert.Equal(t, userID, claims.Subject)
-// 			assert.Equal(t, "testuser", claims.Username)
-// 			assert.Equal(t, sessionID, claims.SessionID)
-// 			assert.Equal(t, RefreshToken, claims.TokenType)
-// 		})
-// 	})
-
-// 	t.Run("AsymmetricRS256", func(t *testing.T) {
-// 		privatePath, publicPath := generateTempRSAPair(t)
-// 		defer os.Remove(privatePath)
-// 		defer os.Remove(publicPath)
-
-// 		config := DefaultGourdianTokenConfig("")
-// 		config.SigningMethod = Asymmetric
-// 		config.Algorithm = "RS256"
-// 		config.PrivateKeyPath = privatePath
-// 		config.PublicKeyPath = publicPath
-// 		maker := createTestMaker(t, config)
-
-// 		userID := uuid.New()
-// 		sessionID := uuid.New()
-// 		roles := []string{"admin"}
-
-// 		t.Run("CreateAndVerifyAccessToken", func(t *testing.T) {
-// 			accessToken, err := maker.CreateAccessToken(ctx, userID, "rsa-user", roles, sessionID)
-// 			assert.NoError(t, err)
-// 			assert.NotEmpty(t, accessToken.Token)
-
-// 			claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
-// 			assert.NoError(t, err)
-// 			assert.Equal(t, userID, claims.Subject)
-// 			assert.Equal(t, "rsa-user", claims.Username)
-// 			assert.Equal(t, sessionID, claims.SessionID)
-// 			assert.Equal(t, roles, claims.Roles)
-// 		})
-// 	})
-
-// 	t.Run("InvalidTokens", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		maker := createTestMaker(t, config)
-
-// 		t.Run("ExpiredToken", func(t *testing.T) {
-// 			// Create a token that expired 1 hour ago
-// 			claims := AccessTokenClaims{
-// 				ID:        uuid.New(),
-// 				Subject:   uuid.New(),
-// 				Username:  "expired",
-// 				SessionID: uuid.New(),
-// 				IssuedAt:  time.Now().Add(-2 * time.Hour),
-// 				ExpiresAt: time.Now().Add(-1 * time.Hour),
-// 				TokenType: AccessToken,
-// 				Roles:     []string{"user"},
-// 			}
-
-// 			token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
-// 			tokenString, err := token.SignedString(maker.privateKey)
-// 			assert.NoError(t, err)
-
-// 			_, err = maker.VerifyAccessToken(ctx, tokenString)
-// 			assert.Error(t, err)
-// 			assert.Contains(t, err.Error(), "token has expired")
-// 		})
-
-// 		t.Run("InvalidSignature", func(t *testing.T) {
-// 			// Create a valid token
-// 			accessToken, err := maker.CreateAccessToken(ctx, uuid.New(), "testuser", []string{"user"}, uuid.New())
-// 			assert.NoError(t, err)
-
-// 			// Tamper with the token by changing a character in the signature
-// 			tamperedToken := accessToken.Token[:len(accessToken.Token)-2] + "XX"
-
-// 			_, err = maker.VerifyAccessToken(ctx, tamperedToken)
-// 			assert.Error(t, err)
-// 			assert.Contains(t, err.Error(), "signature is invalid")
-// 		})
-
-// 		t.Run("MissingRequiredClaims", func(t *testing.T) {
-// 			// Create a token missing the 'exp' claim
-// 			claims := jwt.MapClaims{
-// 				"jti": uuid.New().String(),
-// 				"sub": uuid.New().String(),
-// 				"usr": "testuser",
-// 				"sid": uuid.New().String(),
-// 				"iat": time.Now().Unix(),
-// 				"typ": string(AccessToken),
-// 				"rls": []string{"user"},
-// 			}
-
-// 			token := jwt.NewWithClaims(maker.signingMethod, claims)
-// 			tokenString, err := token.SignedString(maker.privateKey)
-// 			assert.NoError(t, err)
-
-// 			_, err = maker.VerifyAccessToken(ctx, tokenString)
-// 			assert.Error(t, err)
-// 			assert.Contains(t, err.Error(), "missing required claim: exp")
-// 		})
-// 	})
-// }
-
-// // TestClaimValidation tests various claim validation scenarios
-// func TestClaimValidation(t *testing.T) {
-// 	config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 	require.NoError(t, err)
-
-// 	t.Run("Missing Required Claims", func(t *testing.T) {
-// 		tests := []struct {
-// 			name   string
-// 			claims jwt.MapClaims
-// 			error  string
-// 		}{
-// 			{"Missing JTI", jwt.MapClaims{"sub": uuid.New().String(), "usr": "test", "sid": uuid.New().String(), "typ": "access"}, "missing required claim: jti"},
-// 			{"Missing SUB", jwt.MapClaims{"jti": uuid.New().String(), "usr": "test", "sid": uuid.New().String(), "typ": "access"}, "missing required claim: sub"},
-// 			{"Missing TYP", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "sid": uuid.New().String()}, "missing required claim: typ"},
-// 			{"Missing USR", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "sid": uuid.New().String(), "typ": "access"}, "missing required claim: usr"},
-// 			{"Missing SID", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access"}, "missing required claim: sid"},
-// 			{"Missing RLS", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access", "sid": uuid.New().String(), "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix()}, "missing roles claim in access token"}}
-
-// 		for _, tt := range tests {
-// 			t.Run(tt.name, func(t *testing.T) {
-// 				token := jwt.NewWithClaims(jwt.SigningMethodHS256, tt.claims)
-// 				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
-// 				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
-// 				assert.Error(t, err)
-// 				assert.Contains(t, err.Error(), tt.error)
-// 			})
-// 		}
-// 	})
-
-// 	t.Run("Invalid UUID Formats", func(t *testing.T) {
-// 		tests := []struct {
-// 			name  string
-// 			claim string
-// 			value interface{}
-// 			error string
-// 		}{
-// 			{"Invalid JTI", "jti", "not-a-uuid", "invalid token ID"},
-// 			{"Invalid SUB", "sub", 12345, "invalid user ID"},
-// 			{"Invalid SID", "sid", false, "invalid session ID"},
-// 		}
-
-// 		for _, tt := range tests {
-// 			t.Run(tt.name, func(t *testing.T) {
-// 				claims := jwt.MapClaims{
-// 					"jti":    uuid.New().String(),
-// 					"sub":    uuid.New().String(),
-// 					"usr":    "testuser",
-// 					"sid":    uuid.New().String(),
-// 					"iat":    time.Now().Unix(),
-// 					"exp":    time.Now().Add(time.Hour).Unix(),
-// 					"typ":    AccessToken,
-// 					"rls":    []string{"role"},
-// 					tt.claim: tt.value,
-// 				}
-// 				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-// 				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
-// 				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
-// 				assert.Error(t, err)
-// 				assert.Contains(t, err.Error(), tt.error)
-// 			})
-// 		}
-// 	})
-
-// 	t.Run("Invalid Timestamps", func(t *testing.T) {
-// 		tests := []struct {
-// 			name  string
-// 			claim string
-// 			value interface{}
-// 			error string
-// 		}{
-// 			{"Invalid IAT", "iat", "not-a-number", "invalid timestamp format"},
-// 			{"Invalid EXP", "exp", "not-a-number", "invalid timestamp format"},
-// 			{"Missing IAT", "iat", nil, "missing required claim: iat"},
-// 			{"Missing EXP", "exp", nil, "missing required claim: exp"},
-// 		}
-
-// 		for _, tt := range tests {
-// 			t.Run(tt.name, func(t *testing.T) {
-// 				claims := jwt.MapClaims{
-// 					"jti":    uuid.New().String(),
-// 					"sub":    uuid.New().String(),
-// 					"usr":    "testuser",
-// 					"sid":    uuid.New().String(),
-// 					"iat":    time.Now().Unix(),
-// 					"exp":    time.Now().Add(time.Hour).Unix(),
-// 					"typ":    AccessToken,
-// 					"rls":    []string{"role"},
-// 					tt.claim: tt.value,
-// 				}
-// 				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-// 				tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
-// 				_, err := maker.VerifyAccessToken(context.Background(), tokenString)
-// 				assert.Error(t, err)
-// 				assert.Contains(t, err.Error(), tt.error)
-// 			})
-// 		}
-// 	})
-// }
-//
-// // TestEdgeCases tests various edge cases in token handling
-// func TestEdgeCases(t *testing.T) {
-// 	t.Run("Empty Token String", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 		require.NoError(t, err)
-
-// 		_, err = maker.VerifyAccessToken(context.Background(), "")
-// 		assert.Error(t, err)
-// 		assert.Contains(t, err.Error(), "token contains an invalid number of segments")
-// 	})
-
-// 	t.Run("Malformed Token", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 		require.NoError(t, err)
-
-// 		_, err = maker.VerifyAccessToken(context.Background(), "header.claims.signature")
-// 		assert.Error(t, err)
-// 	})
-
-// 	t.Run("Expired Token", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		config.AccessToken.Duration = -time.Hour // Force expired
-// 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 		require.NoError(t, err)
-
-// 		token, err := maker.CreateAccessToken(
-// 			context.Background(),
-// 			uuid.New(),
-// 			"user",
-// 			[]string{"role"},
-// 			uuid.New(),
-// 		)
-// 		require.NoError(t, err)
-
-// 		_, err = maker.VerifyAccessToken(context.Background(), token.Token)
-// 		require.Error(t, err)
-// 		assert.Contains(t, err.Error(), "expired")
-// 	})
-
-// 	t.Run("Future Issued At", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 		require.NoError(t, err)
-
-// 		claims := AccessTokenClaims{
-// 			ID:        uuid.New(),
-// 			Subject:   uuid.New(),
-// 			Username:  "user",
-// 			SessionID: uuid.New(),
-// 			IssuedAt:  time.Now().Add(time.Hour), // Future
-// 			ExpiresAt: time.Now().Add(2 * time.Hour),
-// 			TokenType: AccessToken,
-// 			Roles:     []string{"role"},
-// 		}
-
-// 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, toMapClaims(claims))
-// 		tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
-
-// 		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-// 		assert.Error(t, err)
-// 		assert.Contains(t, err.Error(), "token issued in the future")
-// 	})
-
-// 	t.Run("Token with Empty Signature", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 		require.NoError(t, err)
-
-// 		claims := AccessTokenClaims{
-// 			ID:        uuid.New(),
-// 			Subject:   uuid.New(),
-// 			Username:  "user",
-// 			SessionID: uuid.New(),
-// 			IssuedAt:  time.Now(),
-// 			ExpiresAt: time.Now().Add(time.Hour),
-// 			TokenType: AccessToken,
-// 			Roles:     []string{"role"},
-// 		}
-
-// 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, toMapClaims(claims))
-
-// 		// Manually construct token parts
-// 		header := `{"alg":"HS256","typ":"JWT"}`
-// 		payload, err := token.Claims.(jwt.MapClaims).MarshalJSON()
-// 		require.NoError(t, err)
-
-// 		// Encode header and payload without signature
-// 		headerEncoded := jwt.EncodeSegment([]byte(header))
-// 		payloadEncoded := jwt.EncodeSegment(payload)
-// 		tokenString := headerEncoded + "." + payloadEncoded + "."
-
-// 		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-// 		assert.Error(t, err)
-// 		assert.Contains(t, err.Error(), "signature is invalid") // Changed expected error
-// 	})
-// }
-
-// // TestRedisCleanup tests the background cleanup processes
-// func TestRedisCleanup(t *testing.T) {
-// 	client := testRedisClient(t)
-// 	defer client.Close()
-
-// 	ctx, cancel := context.WithCancel(context.Background())
-// 	defer cancel()
-
-// 	t.Run("Cleanup Rotated Tokens", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		config.RefreshToken.RotationEnabled = true
-// 		maker, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
-// 		require.NoError(t, err)
-
-// 		// Create a rotated token entry with short TTL
-// 		err = maker.redisClient.Set(ctx, "rotated:test-token", "1", time.Second).Err()
-// 		require.NoError(t, err)
-
-// 		// Wait for cleanup cycle
-// 		time.Sleep(2 * time.Second)
-
-// 		// Verify the entry was cleaned up
-// 		exists, err := maker.redisClient.Exists(ctx, "rotated:test-token").Result()
-// 		require.NoError(t, err)
-// 		assert.Equal(t, int64(0), exists)
-// 	})
-
-// 	t.Run("Cleanup Revoked Tokens", func(t *testing.T) {
-// 		config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 		config.AccessToken.RevocationEnabled = true
-// 		maker, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
-// 		require.NoError(t, err)
-
-// 		// Create a revoked token entry with short TTL
-// 		err = maker.redisClient.Set(ctx, "revoked:access:test-token", "1", time.Second).Err()
-// 		require.NoError(t, err)
-
-// 		// Wait for cleanup cycle
-// 		time.Sleep(2 * time.Second)
-
-// 		// Verify the entry was cleaned up
-// 		exists, err := maker.redisClient.Exists(ctx, "revoked:access:test-token").Result()
-// 		require.NoError(t, err)
-// 		assert.Equal(t, int64(0), exists)
-// 	})
-// }

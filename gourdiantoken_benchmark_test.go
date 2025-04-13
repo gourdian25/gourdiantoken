@@ -477,3 +477,105 @@ func BenchmarkWithMultipleRoles(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkVerifyAccessTokenParallel(b *testing.B) {
+	ctx := context.Background()
+	maker, err := NewGourdianTokenMaker(ctx, DefaultGourdianTokenConfig(testSymmetricKey), nil)
+	require.NoError(b, err)
+
+	userID := uuid.New()
+	username := "benchmark-user"
+	sessionID := uuid.New()
+	roles := []string{"admin", "editor"}
+
+	accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+	require.NoError(b, err)
+	token := accessToken.Token
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, err := maker.VerifyAccessToken(ctx, token)
+			if err != nil {
+				b.Errorf("verification failed: %v", err)
+			}
+		}
+	})
+}
+
+func BenchmarkCreateAccessTokenParallel(b *testing.B) {
+	ctx := context.Background()
+	maker, _ := NewGourdianTokenMaker(ctx, DefaultGourdianTokenConfig(testSymmetricKey), nil)
+	userID := uuid.New()
+	sessionID := uuid.New()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = maker.CreateAccessToken(ctx, userID, "testuser", []string{"admin"}, sessionID)
+		}
+	})
+}
+
+func BenchmarkCreateRefreshTokenParallel(b *testing.B) {
+	ctx := context.Background()
+	maker, _ := NewGourdianTokenMaker(ctx, DefaultGourdianTokenConfig(testSymmetricKey), nil)
+	userID := uuid.New()
+	sessionID := uuid.New()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
+		}
+	})
+}
+
+func BenchmarkVerifyRefreshTokenParallel(b *testing.B) {
+	ctx := context.Background()
+	maker, _ := NewGourdianTokenMaker(ctx, DefaultGourdianTokenConfig(testSymmetricKey), nil)
+	userID := uuid.New()
+	sessionID := uuid.New()
+	tokenResp, _ := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
+	token := tokenResp.Token
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = maker.VerifyRefreshToken(ctx, token)
+		}
+	})
+}
+
+func BenchmarkRotateRefreshTokenParallel(b *testing.B) {
+	ctx := context.Background()
+	config := DefaultGourdianTokenConfig(testSymmetricKey)
+	config.RefreshToken.RotationEnabled = true
+	maker, _ := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+
+	userID := uuid.New()
+	sessionID := uuid.New()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			tokenResp, _ := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
+			_, _ = maker.RotateRefreshToken(ctx, tokenResp.Token)
+		}
+	})
+}
+
+func BenchmarkTokenRevocationParallel(b *testing.B) {
+	ctx := context.Background()
+	config := DefaultGourdianTokenConfig(testSymmetricKey)
+	config.AccessToken.RevocationEnabled = true
+	maker, _ := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+
+	userID := uuid.New()
+	sessionID := uuid.New()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			tokenResp, _ := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, sessionID)
+			_ = maker.RevokeAccessToken(ctx, tokenResp.Token)
+			_, _ = maker.VerifyAccessToken(ctx, tokenResp.Token)
+		}
+	})
+}
