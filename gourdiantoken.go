@@ -938,6 +938,12 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 }
 
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
+
+	tokenType, ok := claims["typ"].(string)
+	if !ok || TokenType(tokenType) != expectedType {
+		return fmt.Errorf("invalid token type: expected %s", expectedType)
+	}
+
 	requiredClaims := []string{"jti", "sub", "typ", "usr", "sid", "iat", "exp"}
 	if expectedType == AccessToken {
 		requiredClaims = append(requiredClaims, "rls")
@@ -947,11 +953,6 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
 		if _, ok := claims[claim]; !ok {
 			return fmt.Errorf("missing required claim: %s", claim)
 		}
-	}
-
-	tokenType, ok := claims["typ"].(string)
-	if !ok || TokenType(tokenType) != expectedType {
-		return fmt.Errorf("invalid token type: expected %s", expectedType)
 	}
 
 	exp, ok := claims["exp"].(float64)

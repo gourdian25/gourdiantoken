@@ -1137,6 +1137,108 @@ func TestTokenMakerInitialization(t *testing.T) {
 	})
 }
 
+// TestCreateAndVerifyAccessToken tests access token creation and verification
+func TestCreateAndVerifyAccessToken(t *testing.T) {
+	// Setup symmetric maker
+	symmetricConfig := DefaultGourdianTokenConfig(testSymmetricKey)
+	symmetricMaker, err := NewGourdianTokenMaker(context.Background(), symmetricConfig, testRedisOptions())
+	require.NoError(t, err)
+
+	// Setup asymmetric maker
+	privatePath, publicPath := generateTempRSAPair(t)
+	asymmetricConfig := GourdianTokenConfig{
+		Algorithm:      "RS256",
+		SigningMethod:  Asymmetric,
+		PrivateKeyPath: privatePath,
+		PublicKeyPath:  publicPath,
+		AccessToken: AccessTokenConfig{
+			Duration:    time.Hour,
+			MaxLifetime: 24 * time.Hour,
+		},
+	}
+	asymmetricMaker, err := NewGourdianTokenMaker(context.Background(), asymmetricConfig, testRedisOptions())
+	require.NoError(t, err)
+
+	testCases := []struct {
+		name  string
+		maker GourdianTokenMaker
+	}{
+		{"Symmetric", symmetricMaker},
+		{"Asymmetric", asymmetricMaker},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			userID := uuid.New()
+			username := "testuser"
+			roles := []string{"admin"}
+			sessionID := uuid.New()
+
+			// Test CreateAccessToken
+			resp, err := tc.maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+			require.NoError(t, err)
+			assert.NotEmpty(t, resp.Token)
+			assert.Equal(t, userID, resp.Subject)
+			assert.Equal(t, username, resp.Username)
+			assert.Equal(t, sessionID, resp.SessionID)
+			assert.Equal(t, roles, resp.Roles)
+			assert.True(t, time.Now().Before(resp.ExpiresAt))
+			assert.True(t, time.Now().After(resp.IssuedAt))
+
+			// Test VerifyAccessToken
+			claims, err := tc.maker.VerifyAccessToken(context.Background(), resp.Token)
+			require.NoError(t, err)
+			assert.Equal(t, userID, claims.Subject)
+			assert.Equal(t, username, claims.Username)
+			assert.Equal(t, sessionID, claims.SessionID)
+			assert.Equal(t, roles, claims.Roles)
+			assert.Equal(t, AccessToken, claims.TokenType)
+			assert.True(t, time.Now().Before(claims.ExpiresAt))
+			assert.True(t, time.Now().After(claims.IssuedAt))
+		})
+	}
+
+	t.Run("Invalid Token - Tampered", func(t *testing.T) {
+		resp, err := symmetricMaker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
+		require.NoError(t, err)
+
+		// Tamper with the token
+		tamperedToken := resp.Token[:len(resp.Token)-4] + "abcd"
+
+		_, err = symmetricMaker.VerifyAccessToken(context.Background(), tamperedToken)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid token")
+	})
+
+	t.Run("Invalid Token - Expired", func(t *testing.T) {
+		// Create a token with very short lifetime
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.AccessToken.Duration = time.Millisecond
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+
+		resp, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
+		require.NoError(t, err)
+
+		// Wait for it to expire
+		time.Sleep(10 * time.Millisecond)
+
+		_, err = maker.VerifyAccessToken(context.Background(), resp.Token)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expired")
+	})
+
+	t.Run("Invalid Token - Wrong Type", func(t *testing.T) {
+		// Create a refresh token but try to verify as access token
+		resp, err := symmetricMaker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		_, err = symmetricMaker.VerifyAccessToken(context.Background(), resp.Token)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid token type")
+	})
+}
+
 // TestEnhancedTokenRotation tests advanced token rotation scenarios
 func TestEnhancedTokenRotation(t *testing.T) {
 	client := redisTestClient(t)
@@ -1222,6 +1324,142 @@ func TestEnhancedTokenRotation(t *testing.T) {
 		// Verify the last rotated token
 		_, err = maker.VerifyRefreshToken(context.Background(), token.Token)
 		require.NoError(t, err)
+	})
+}
+
+// TestNewGourdianTokenMaker tests the token maker initialization
+func TestNewGourdianTokenMaker(t *testing.T) {
+	t.Run("Symmetric HS256", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+		assert.NotNil(t, maker)
+	})
+
+	t.Run("Asymmetric RSA", func(t *testing.T) {
+		privatePath, publicPath := generateTempRSAPair(t)
+		config := GourdianTokenConfig{
+			Algorithm:      "RS256",
+			SigningMethod:  Asymmetric,
+			PrivateKeyPath: privatePath,
+			PublicKeyPath:  publicPath,
+			AccessToken: AccessTokenConfig{
+				Duration:    time.Hour,
+				MaxLifetime: 24 * time.Hour,
+			},
+		}
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+		assert.NotNil(t, maker)
+	})
+
+	t.Run("Asymmetric ECDSA", func(t *testing.T) {
+		privatePath, publicPath := generateTempECDSAPair(t)
+		config := GourdianTokenConfig{
+			Algorithm:      "ES256",
+			SigningMethod:  Asymmetric,
+			PrivateKeyPath: privatePath,
+			PublicKeyPath:  publicPath,
+			AccessToken: AccessTokenConfig{
+				Duration:    time.Hour,
+				MaxLifetime: 24 * time.Hour,
+			},
+		}
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+		assert.NotNil(t, maker)
+	})
+
+	t.Run("Invalid Config - Symmetric Key Too Short", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig("short")
+		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "symmetric key must be at least 32 bytes")
+	})
+
+	t.Run("Invalid Config - Missing Key Paths", func(t *testing.T) {
+		config := GourdianTokenConfig{
+			Algorithm:     "RS256",
+			SigningMethod: Asymmetric,
+		}
+		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "private and public key paths are required")
+	})
+
+	t.Run("Invalid Config - Unsupported Algorithm", func(t *testing.T) {
+		config := GourdianTokenConfig{
+			Algorithm:     "FOO256",
+			SigningMethod: Symmetric,
+			SymmetricKey:  testSymmetricKey,
+		}
+		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not compatible with symmetric signing")
+	})
+
+	t.Run("Invalid Config - Insecure Key Permissions", func(t *testing.T) {
+		privatePath, publicPath := generateTempRSAPair(t)
+
+		// Make the private key too permissive (world-writable)
+		require.NoError(t, os.Chmod(privatePath, 0777))
+
+		config := GourdianTokenConfig{
+			Algorithm:      "RS256",
+			SigningMethod:  Asymmetric,
+			PrivateKeyPath: privatePath,
+			PublicKeyPath:  publicPath,
+			AccessToken: AccessTokenConfig{
+				Duration:    time.Hour,
+				MaxLifetime: 24 * time.Hour,
+			},
+		}
+
+		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "insecure private key file permissions")
+	})
+
+	t.Run("Invalid Config - Mixed Key Configuration", func(t *testing.T) {
+		privatePath, publicPath := generateTempRSAPair(t)
+		config := GourdianTokenConfig{
+			Algorithm:      "HS256",
+			SigningMethod:  Symmetric,
+			SymmetricKey:   testSymmetricKey,
+			PrivateKeyPath: privatePath, // Should cause error for symmetric
+			PublicKeyPath:  publicPath,  // Should cause error for symmetric
+		}
+		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "private and public key paths must be empty for symmetric signing")
+	})
+
+	t.Run("Invalid Config - Algorithm/Signing Method Mismatch", func(t *testing.T) {
+		config := GourdianTokenConfig{
+			Algorithm:     "RS256", // RSA algorithm
+			SigningMethod: Symmetric,
+			SymmetricKey:  testSymmetricKey,
+		}
+		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "algorithm RS256 not compatible with symmetric signing")
+	})
+
+	t.Run("Rotation Enabled Without Redis", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "redis options required for token rotation/revocation")
+	})
+
+	t.Run("Valid Rotation Configuration", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+		assert.NotNil(t, maker)
+		assert.NotNil(t, maker.(*JWTMaker).redisClient)
 	})
 }
 
@@ -1497,239 +1735,6 @@ func TestClaimValidation(t *testing.T) {
 				assert.Contains(t, err.Error(), tt.error)
 			})
 		}
-	})
-}
-
-// TestNewGourdianTokenMaker tests the token maker initialization
-func TestNewGourdianTokenMaker(t *testing.T) {
-	t.Run("Symmetric HS256", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-		assert.NotNil(t, maker)
-	})
-
-	t.Run("Asymmetric RSA", func(t *testing.T) {
-		privatePath, publicPath := generateTempRSAPair(t)
-		config := GourdianTokenConfig{
-			Algorithm:      "RS256",
-			SigningMethod:  Asymmetric,
-			PrivateKeyPath: privatePath,
-			PublicKeyPath:  publicPath,
-			AccessToken: AccessTokenConfig{
-				Duration:    time.Hour,
-				MaxLifetime: 24 * time.Hour,
-			},
-		}
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-		assert.NotNil(t, maker)
-	})
-
-	t.Run("Asymmetric ECDSA", func(t *testing.T) {
-		privatePath, publicPath := generateTempECDSAPair(t)
-		config := GourdianTokenConfig{
-			Algorithm:      "ES256",
-			SigningMethod:  Asymmetric,
-			PrivateKeyPath: privatePath,
-			PublicKeyPath:  publicPath,
-			AccessToken: AccessTokenConfig{
-				Duration:    time.Hour,
-				MaxLifetime: 24 * time.Hour,
-			},
-		}
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-		assert.NotNil(t, maker)
-	})
-
-	t.Run("Invalid Config - Symmetric Key Too Short", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("short")
-		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "symmetric key must be at least 32 bytes")
-	})
-
-	t.Run("Invalid Config - Missing Key Paths", func(t *testing.T) {
-		config := GourdianTokenConfig{
-			Algorithm:     "RS256",
-			SigningMethod: Asymmetric,
-		}
-		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "private and public key paths are required")
-	})
-
-	t.Run("Invalid Config - Unsupported Algorithm", func(t *testing.T) {
-		config := GourdianTokenConfig{
-			Algorithm:     "FOO256",
-			SigningMethod: Symmetric,
-			SymmetricKey:  testSymmetricKey,
-		}
-		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported algorithm")
-	})
-
-	t.Run("Invalid Config - Insecure Key Permissions", func(t *testing.T) {
-		privatePath, publicPath := generateTempRSAPair(t)
-		// Make the private key world-readable
-		err := os.Chmod(privatePath, 0644)
-		require.NoError(t, err)
-
-		config := GourdianTokenConfig{
-			Algorithm:      "RS256",
-			SigningMethod:  Asymmetric,
-			PrivateKeyPath: privatePath,
-			PublicKeyPath:  publicPath,
-		}
-		_, err = NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "insecure private key file permissions")
-	})
-
-	t.Run("Invalid Config - Mixed Key Configuration", func(t *testing.T) {
-		privatePath, publicPath := generateTempRSAPair(t)
-		config := GourdianTokenConfig{
-			Algorithm:      "HS256",
-			SigningMethod:  Symmetric,
-			SymmetricKey:   testSymmetricKey,
-			PrivateKeyPath: privatePath, // Should cause error for symmetric
-			PublicKeyPath:  publicPath,  // Should cause error for symmetric
-		}
-		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "private and public key paths must be empty for symmetric signing")
-	})
-
-	t.Run("Invalid Config - Algorithm/Signing Method Mismatch", func(t *testing.T) {
-		config := GourdianTokenConfig{
-			Algorithm:     "RS256", // RSA algorithm
-			SigningMethod: Symmetric,
-			SymmetricKey:  testSymmetricKey,
-		}
-		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "algorithm RS256 not compatible with symmetric signing")
-	})
-
-	t.Run("Rotation Enabled Without Redis", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "redis options required for token rotation/revocation")
-	})
-
-	t.Run("Valid Rotation Configuration", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-		assert.NotNil(t, maker)
-		assert.NotNil(t, maker.(*JWTMaker).redisClient)
-	})
-}
-
-// TestCreateAndVerifyAccessToken tests access token creation and verification
-func TestCreateAndVerifyAccessToken(t *testing.T) {
-	// Setup symmetric maker
-	symmetricConfig := DefaultGourdianTokenConfig(testSymmetricKey)
-	symmetricMaker, err := NewGourdianTokenMaker(context.Background(), symmetricConfig, testRedisOptions())
-	require.NoError(t, err)
-
-	// Setup asymmetric maker
-	privatePath, publicPath := generateTempRSAPair(t)
-	asymmetricConfig := GourdianTokenConfig{
-		Algorithm:      "RS256",
-		SigningMethod:  Asymmetric,
-		PrivateKeyPath: privatePath,
-		PublicKeyPath:  publicPath,
-		AccessToken: AccessTokenConfig{
-			Duration:    time.Hour,
-			MaxLifetime: 24 * time.Hour,
-		},
-	}
-	asymmetricMaker, err := NewGourdianTokenMaker(context.Background(), asymmetricConfig, testRedisOptions())
-	require.NoError(t, err)
-
-	testCases := []struct {
-		name  string
-		maker GourdianTokenMaker
-	}{
-		{"Symmetric", symmetricMaker},
-		{"Asymmetric", asymmetricMaker},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			userID := uuid.New()
-			username := "testuser"
-			roles := []string{"admin"}
-			sessionID := uuid.New()
-
-			// Test CreateAccessToken
-			resp, err := tc.maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
-			require.NoError(t, err)
-			assert.NotEmpty(t, resp.Token)
-			assert.Equal(t, userID, resp.Subject)
-			assert.Equal(t, username, resp.Username)
-			assert.Equal(t, sessionID, resp.SessionID)
-			assert.Equal(t, roles, resp.Roles)
-			assert.True(t, time.Now().Before(resp.ExpiresAt))
-			assert.True(t, time.Now().After(resp.IssuedAt))
-
-			// Test VerifyAccessToken
-			claims, err := tc.maker.VerifyAccessToken(context.Background(), resp.Token)
-			require.NoError(t, err)
-			assert.Equal(t, userID, claims.Subject)
-			assert.Equal(t, username, claims.Username)
-			assert.Equal(t, sessionID, claims.SessionID)
-			assert.Equal(t, roles, claims.Roles)
-			assert.Equal(t, AccessToken, claims.TokenType)
-			assert.True(t, time.Now().Before(claims.ExpiresAt))
-			assert.True(t, time.Now().After(claims.IssuedAt))
-		})
-	}
-
-	t.Run("Invalid Token - Tampered", func(t *testing.T) {
-		resp, err := symmetricMaker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
-		require.NoError(t, err)
-
-		// Tamper with the token
-		tamperedToken := resp.Token[:len(resp.Token)-4] + "abcd"
-
-		_, err = symmetricMaker.VerifyAccessToken(context.Background(), tamperedToken)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid token")
-	})
-
-	t.Run("Invalid Token - Expired", func(t *testing.T) {
-		// Create a token with very short lifetime
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.AccessToken.Duration = time.Millisecond
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-
-		resp, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
-		require.NoError(t, err)
-
-		// Wait for it to expire
-		time.Sleep(10 * time.Millisecond)
-
-		_, err = maker.VerifyAccessToken(context.Background(), resp.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expired")
-	})
-
-	t.Run("Invalid Token - Wrong Type", func(t *testing.T) {
-		// Create a refresh token but try to verify as access token
-		resp, err := symmetricMaker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		_, err = symmetricMaker.VerifyAccessToken(context.Background(), resp.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid token type")
 	})
 }
 
