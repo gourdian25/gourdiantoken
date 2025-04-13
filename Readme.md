@@ -1,12 +1,12 @@
-# GourdianToken – Secure & Scalable JWT Management for Golang Backend
+# Gourdiantoken – Secure & Scalable JWT Management for Golang Backend
 
 ![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Coverage](https://img.shields.io/badge/Coverage-69.5%25-yellow)](coverage.html)
 
-**GourdianToken** is a robust, battle-tested JWT token management system for modern Go applications. Designed with performance, flexibility, and enterprise-grade security in mind, it provides an all-in-one solution for managing access and refresh tokens across both monolithic and microservice architectures.
+**gourdiantoken** is a robust, battle-tested JWT token management system for modern Go applications. Designed with performance, flexibility, and enterprise-grade security in mind, it provides an all-in-one solution for managing access and refresh tokens across both monolithic and microservice architectures.
 
-Whether you're building a high-throughput API gateway, securing a distributed system, or managing session integrity across devices, **GourdianToken** ensures:
+Whether you're building a high-throughput API gateway, securing a distributed system, or managing session integrity across devices, **gourdiantoken** ensures:
 
 - 🔐 **Secure Token Issuance** with strict claim validation and cryptographic guarantees  
 - 🔄 **Token Rotation & Revocation** powered by Redis  
@@ -16,7 +16,7 @@ Whether you're building a high-throughput API gateway, securing a distributed sy
 - 📊 **Benchmark-Driven** with transparent performance metrics and memory profiling  
 - 🔎 **69.5%+ Test Coverage**, covering critical logic paths and edge cases  
 
-From rapid prototyping to production-grade authorization pipelines, **GourdianToken** adapts to your security requirements while maintaining best-in-class performance.
+From rapid prototyping to production-grade authorization pipelines, **gourdiantoken** adapts to your security requirements while maintaining best-in-class performance.
 
 ---
 
@@ -45,7 +45,7 @@ From rapid prototyping to production-grade authorization pipelines, **GourdianTo
 
 ## 🚀 Features
 
-GourdianToken provides a complete JWT-based authentication system with a focus on security, flexibility, and performance. Here's a comprehensive look at its core features:
+gourdiantoken provides a complete JWT-based authentication system with a focus on security, flexibility, and performance. Here's a comprehensive look at its core features:
 
 ### 🔐 Advanced Token Types
 
@@ -126,7 +126,7 @@ GourdianToken provides a complete JWT-based authentication system with a focus o
 
 ### 🧠 Developer-Focused API
 
-- Clean interface: `GourdianTokenMaker`
+- Clean interface: `gourdiantokenMaker`
 - Explicit configuration with safe defaults
 - Modular & composable design
 - Easy to integrate into REST or gRPC services
@@ -182,10 +182,6 @@ GourdianToken provides a complete JWT-based authentication system with a focus o
 
 ---
 
-Here’s a **detailed and enhanced rewrite** of the **`## Installation`** and **`## Quick Start`** sections for your GourdianToken `README.md`, including extra clarity, context, inline comments, and guidance for both basic and advanced usage.
-
----
-
 ## 📦 Installation
 
 To get started, install the package using `go get`:
@@ -200,13 +196,13 @@ Make sure your Go version is **1.18+** to ensure full compatibility with generic
 
 ## 🚀 Quick Start
 
-GourdianToken supports both **HMAC (symmetric)** and **RSA/ECDSA/EdDSA (asymmetric)** token signing methods. Here's how to get started with each setup:
+gourdiantoken supports both **HMAC (symmetric)** and **RSA/ECDSA/EdDSA (asymmetric)** token signing methods. Here's how to get started with each setup:
 
 ---
 
 ### 🧱 Basic HMAC Example (No Redis)
 
-This example demonstrates how to use GourdianToken with a **secure 32-byte symmetric key**. No Redis setup is required. Ideal for fast local development or lightweight services.
+This example demonstrates how to use gourdiantoken with a **secure 32-byte symmetric key**. No Redis setup is required. Ideal for fast local development or lightweight services.
 
 ```go
 package main
@@ -225,10 +221,10 @@ func main() {
 	key := "your-32-byte-secret-key-must-be-secure"
 
 	// 1. Load default HMAC-based configuration
-	config := gourdiantoken.DefaultGourdianTokenConfig(key)
+	config := gourdiantoken.DefaultgourdiantokenConfig(key)
 
 	// 2. Create the token manager (Redis is nil here, so revocation/rotation are disabled)
-	maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, nil)
+	maker, err := gourdiantoken.NewgourdiantokenMaker(context.Background(), config, nil)
 	if err != nil {
 		panic(fmt.Errorf("token maker initialization failed: %w", err))
 	}
@@ -287,7 +283,7 @@ func main() {
 	}
 
 	// 2. Define a complete asymmetric token configuration
-	config := gourdiantoken.GourdianTokenConfig{
+	config := gourdiantoken.gourdiantokenConfig{
 		Algorithm:      "RS256",
 		SigningMethod:  gourdiantoken.Asymmetric,
 		PrivateKeyPath: "/path/to/private.pem",  // Replace with real path
@@ -313,7 +309,7 @@ func main() {
 	}
 
 	// 3. Initialize the token maker with Redis-enabled features
-	maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, redisOpts)
+	maker, err := gourdiantoken.NewgourdiantokenMaker(context.Background(), config, redisOpts)
 	if err != nil {
 		panic(fmt.Errorf("failed to initialize token maker: %w", err))
 	}
@@ -353,12 +349,12 @@ func main() {
 
 ## ⚙️ Configuration
 
-GourdianToken offers a **flexible, explicit, and secure configuration system** that allows you to tailor token behavior for different environments — from local development to enterprise-grade production.
+gourdiantoken offers a **flexible, explicit, and secure configuration system** that allows you to tailor token behavior for different environments — from local development to enterprise-grade production.
 
 ### 🧩 Core Configuration Struct
 
 ```go
-type GourdianTokenConfig struct {
+type gourdiantokenConfig struct {
 	Algorithm      string
 	SigningMethod  SigningMethod
 	SymmetricKey   string
@@ -417,17 +413,17 @@ Manages the long-lived refresh token lifecycle. Typical recommendations:
 
 ## 🧪 Configuration Options
 
-GourdianToken offers multiple entry-points to configure your system depending on your needs.
+gourdiantoken offers multiple entry-points to configure your system depending on your needs.
 
 ---
 
-### ✅ 1. `DefaultGourdianTokenConfig(key string)`
+### ✅ 1. `DefaultgourdiantokenConfig(key string)`
 
 A plug-and-play method to get started quickly with **HMAC (HS256)**.
 
 ```go
 key := "your-32-byte-secure-hmac-key"
-config := gourdiantoken.DefaultGourdianTokenConfig(key)
+config := gourdiantoken.DefaultgourdiantokenConfig(key)
 ```
 
 #### 🛡️ Defaults:
@@ -445,12 +441,12 @@ config := gourdiantoken.DefaultGourdianTokenConfig(key)
 
 ---
 
-### 🧰 2. `NewGourdianTokenConfig(...)`
+### 🧰 2. `NewgourdiantokenConfig(...)`
 
 For full control — use this when building **custom configurations** with asymmetric keys or complex claims.
 
 ```go
-config := gourdiantoken.NewGourdianTokenConfig(
+config := gourdiantoken.NewgourdiantokenConfig(
 	"RS256",                          // Algorithm
 	gourdiantoken.Asymmetric,         // Signing method
 	"",                               // Symmetric key (ignored for asymmetric)
@@ -482,14 +478,14 @@ Use this method when you want to:
 
 ### ⚙️ 3. Creating the Token Maker
 
-You can create the token manager instance (implementing `GourdianTokenMaker`) using two factory methods:
+You can create the token manager instance (implementing `gourdiantokenMaker`) using two factory methods:
 
 ---
 
-#### 🔹 `NewGourdianTokenMaker(ctx, config, redisOpts)`
+#### 🔹 `NewgourdiantokenMaker(ctx, config, redisOpts)`
 
 ```go
-maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, redisOpts)
+maker, err := gourdiantoken.NewgourdiantokenMaker(context.Background(), config, redisOpts)
 ```
 
 - Uses a custom config
@@ -505,16 +501,16 @@ Use this if:
 
 ---
 
-#### 🔹 `NewGourdianTokenMakerWithDefaults(ctx, key, redisOpts)`
+#### 🔹 `NewgourdiantokenMakerWithDefaults(ctx, key, redisOpts)`
 
 ```go
 key := "your-32-byte-key"
 redisOpts := &redis.Options{Addr: "localhost:6379"}
 
-maker, err := gourdiantoken.NewGourdianTokenMakerWithDefaults(context.Background(), key, redisOpts)
+maker, err := gourdiantoken.NewgourdiantokenMakerWithDefaults(context.Background(), key, redisOpts)
 ```
 
-- Uses `DefaultGourdianTokenConfig`
+- Uses `DefaultgourdiantokenConfig`
 - Automatically enables rotation/revocation if Redis is provided
 - Ideal for dev/staging with Redis support
 
@@ -526,21 +522,21 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithDefaults(context.Background
 
 ```go
 key := "this-is-a-32-byte-secure-hmac-key"
-config := gourdiantoken.DefaultGourdianTokenConfig(key)
-maker, _ := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, nil)
+config := gourdiantoken.DefaultgourdiantokenConfig(key)
+maker, _ := gourdiantoken.NewgourdiantokenMaker(context.Background(), config, nil)
 ```
 
 #### 🔒 Production (RSA + Redis)
 
 ```go
-config := gourdiantoken.NewGourdianTokenConfig(
+config := gourdiantoken.NewgourdiantokenConfig(
 	"RS256", gourdiantoken.Asymmetric, "", "private.pem", "public.pem",
 	30*time.Minute, 24*time.Hour, "auth.app", []string{"api.app"},
 	[]string{"RS256"}, []string{"jti", "sub", "exp", "rls"},
 	true, 7*24*time.Hour, 30*24*time.Hour, 5*time.Minute, true, true,
 )
 redisOpts := &redis.Options{Addr: "localhost:6379"}
-maker, _ := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, redisOpts)
+maker, _ := gourdiantoken.NewgourdiantokenMaker(context.Background(), config, redisOpts)
 ```
 
 ---
@@ -559,7 +555,7 @@ All configuration methods automatically:
 
 ## 🔑 Token Types
 
-GourdianToken supports two primary types of JSON Web Tokens (JWTs), each serving a distinct purpose in modern authentication flows:
+gourdiantoken supports two primary types of JSON Web Tokens (JWTs), each serving a distinct purpose in modern authentication flows:
 
 ---
 
@@ -678,7 +674,7 @@ Refresh tokens are **long-lived credentials** designed to help obtain new access
 
 ## 🔐 Security Features
 
-GourdianToken is designed with **security-first principles**, enabling you to protect user sessions, enforce access boundaries, and mitigate common JWT threats in distributed systems. Below is a breakdown of its security capabilities and cryptographic options.
+gourdiantoken is designed with **security-first principles**, enabling you to protect user sessions, enforce access boundaries, and mitigate common JWT threats in distributed systems. Below is a breakdown of its security capabilities and cryptographic options.
 
 ---
 
@@ -748,7 +744,7 @@ if err != nil {
 
 ### 🧬 Algorithm Support & Best Practices
 
-GourdianToken supports a wide variety of industry-standard cryptographic algorithms. Each has different performance and security characteristics, making the system flexible for both dev and production use.
+gourdiantoken supports a wide variety of industry-standard cryptographic algorithms. Each has different performance and security characteristics, making the system flexible for both dev and production use.
 
 | Algorithm | Type       | Use Case      | Key/Curve        | Recommended |
 |-----------|------------|---------------|------------------|-------------|
@@ -776,7 +772,7 @@ GourdianToken supports a wide variety of industry-standard cryptographic algorit
 
 ### ✅ Claim Enforcement
 
-GourdianToken verifies that **all essential claims** are present and valid before considering a token trustworthy.
+gourdiantoken verifies that **all essential claims** are present and valid before considering a token trustworthy.
 
 #### Required claims per token type:
 
@@ -808,7 +804,7 @@ GourdianToken verifies that **all essential claims** are present and valid befor
 
 ## ⚡ Performance
 
-GourdianToken is engineered for high throughput and minimal latency across a wide range of cryptographic algorithms. Its design is optimized for both **API-heavy workloads** and **secure session management**, making it ideal for production-grade systems with demanding auth needs.
+gourdiantoken is engineered for high throughput and minimal latency across a wide range of cryptographic algorithms. Its design is optimized for both **API-heavy workloads** and **secure session management**, making it ideal for production-grade systems with demanding auth needs.
 
 ---
 
@@ -875,7 +871,7 @@ These benchmarks were conducted on an **Intel i5-9300H @ 2.40GHz** system using 
 
 5. **Parallel Environments**
    - Batch JWT creation/validation using goroutines.
-   - Use `NewGourdianTokenMakerWithDefaults()` with Redis pooling for scalability.
+   - Use `NewgourdiantokenMakerWithDefaults()` with Redis pooling for scalability.
 
 ---
 
@@ -895,25 +891,23 @@ These benchmarks were conducted on an **Intel i5-9300H @ 2.40GHz** system using 
 
 | Use Case             | Recommendation                        |
 |----------------------|----------------------------------------|
-| Dev/Testing          | HMAC + `DefaultGourdianTokenConfig()` |
+| Dev/Testing          | HMAC + `DefaultgourdiantokenConfig()` |
 | Production APIs      | ECDSA (ES256) or RSA (RS256)          |
-| Federated Auth       | EdDSA with `NewGourdianTokenConfig()` |
+| Federated Auth       | EdDSA with `NewgourdiantokenConfig()` |
 | Session Protection   | Redis + Rotation + Revocation         |
 | High-Concurrency     | HMAC + Parallel Maker/Verifier        |
-
----Absolutely! Here's a **fully detailed and enriched rewrite** of the `## Examples` section — designed to showcase advanced and practical real-world usages of GourdianToken.
 
 ---
 
 ## ✨ Examples
 
-GourdianToken is highly extensible and production-ready out of the box. Below are advanced examples that demonstrate how to extend token functionality, handle multi-tenant systems, and enforce dynamic security logic.
+gourdiantoken is highly extensible and production-ready out of the box. Below are advanced examples that demonstrate how to extend token functionality, handle multi-tenant systems, and enforce dynamic security logic.
 
 ---
 
 ### 🧬 Custom Claims Extension
 
-Want to include more fields in your tokens (e.g., organization ID, locale, tier)? GourdianToken supports easy extension of JWT payloads by embedding the built-in claim structs.
+Want to include more fields in your tokens (e.g., organization ID, locale, tier)? gourdiantoken supports easy extension of JWT payloads by embedding the built-in claim structs.
 
 #### ✅ Why Extend?
 
@@ -979,11 +973,11 @@ Running a **multi-tenant SaaS** or federated identity system? You might need to:
 
 ```go
 // Config for issuer 1
-configForIssuer1 := gourdiantoken.DefaultGourdianTokenConfig("secret-key-issuer1")
-issuer1Maker, _ := gourdiantoken.NewGourdianTokenMaker(ctx, configForIssuer1, nil)
+configForIssuer1 := gourdiantoken.DefaultgourdiantokenConfig("secret-key-issuer1")
+issuer1Maker, _ := gourdiantoken.NewgourdiantokenMaker(ctx, configForIssuer1, nil)
 
 // Config for issuer 2 (different signing key)
-configForIssuer2 := gourdiantoken.NewGourdianTokenConfig(
+configForIssuer2 := gourdiantoken.NewgourdiantokenConfig(
 	"RS256",
 	gourdiantoken.Asymmetric,
 	"", "issuer2-private.pem", "issuer2-public.pem",
@@ -996,7 +990,7 @@ configForIssuer2 := gourdiantoken.NewGourdianTokenConfig(
 	7*24*time.Hour, 30*24*time.Hour,
 	5*time.Minute, true, true,
 )
-issuer2Maker, _ := gourdiantoken.NewGourdianTokenMaker(ctx, configForIssuer2, redisOpts)
+issuer2Maker, _ := gourdiantoken.NewgourdiantokenMaker(ctx, configForIssuer2, redisOpts)
 ```
 
 #### 🔍 Verify Token with Issuer Filtering
@@ -1039,7 +1033,7 @@ if err != nil {
 ### 🧩 Use with Custom Middleware (Gin Example)
 
 ```go
-func TokenMiddleware(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
+func TokenMiddleware(maker gourdiantoken.gourdiantokenMaker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractBearerToken(c.Request)
 		claims, err := maker.VerifyAccessToken(c, token)
@@ -1071,7 +1065,7 @@ func TokenMiddleware(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
 
 ## ✅ Best Practices
 
-To get the most out of **GourdianToken** in production environments, follow these best practices in key management, token lifecycle configuration, and runtime security hardening.
+To get the most out of **gourdiantoken** in production environments, follow these best practices in key management, token lifecycle configuration, and runtime security hardening.
 
 ---
 
@@ -1149,7 +1143,7 @@ Protect your system from token abuse, data leaks, and unintended access through 
   - Logout
   - Password change
   - Suspicious activity detection
-- Use GourdianToken’s `RevokeAccessToken` and `RevokeRefreshToken`
+- Use gourdiantoken’s `RevokeAccessToken` and `RevokeRefreshToken`
 
 #### ✅ Rate-Limiting & Abuse Detection
 
@@ -1186,18 +1180,18 @@ Protect your system from token abuse, data leaks, and unintended access through 
 
 ---
 
-Absolutely! Here's a **detailed and developer-friendly** expansion of the `## API Reference` section, including parameter descriptions, return values, use cases, and implementation notes for each method of the `GourdianTokenMaker` interface:
+Absolutely! Here's a **detailed and developer-friendly** expansion of the `## API Reference` section, including parameter descriptions, return values, use cases, and implementation notes for each method of the `gourdiantokenMaker` interface:
 
 ---
 
 ## 🧩 API Reference
 
-### 🔧 `GourdianTokenMaker` Interface
+### 🔧 `gourdiantokenMaker` Interface
 
-The `GourdianTokenMaker` interface defines a complete contract for secure, extensible JWT management in Go applications. It is designed to be easily mocked, tested, and swapped in larger systems.
+The `gourdiantokenMaker` interface defines a complete contract for secure, extensible JWT management in Go applications. It is designed to be easily mocked, tested, and swapped in larger systems.
 
 ```go
-type GourdianTokenMaker interface {
+type gourdiantokenMaker interface {
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
 	VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
@@ -1333,7 +1327,7 @@ Implements **refresh token rotation**. Generates a new refresh token and invalid
 ### 🧪 Interface Usage Example
 
 ```go
-func AuthFlowExample(maker gourdiantoken.GourdianTokenMaker) {
+func AuthFlowExample(maker gourdiantoken.gourdiantokenMaker) {
 	userID := uuid.New()
 	sessionID := uuid.New()
 
@@ -1371,7 +1365,7 @@ We welcome contributions from the community! Whether it's fixing bugs, improving
 2. **Clone** your fork:
 
    ```bash
-   git clone https://github.com/your-username/gourdiantoken.git
+   git clone https://github.com/gourdian25/gourdiantoken.git
    cd gourdiantoken
    ```
 
@@ -1436,10 +1430,55 @@ Benchmark results include:
 Sample output:
 
 ```text
-BenchmarkCreateAccessToken/Symmetric-8         87836         25839 ns/op
-BenchmarkVerifyAccessToken/Asymmetric-8         8967        127188 ns/op
-BenchmarkRotateRefreshTokenParallel-8           4773        220562 ns/op
-...
+go test -bench=. -benchmem .
+goos: linux
+goarch: amd64
+pkg: github.com/gourdian25/gourdiantoken
+cpu: Intel(R) Core(TM) i5-9300H CPU @ 2.40GHz
+BenchmarkCreateAccessToken/Symmetric-8                    159226              7370 ns/op            4682 B/op         58 allocs/op
+BenchmarkCreateAccessToken/Asymmetric-8                      987           1262067 ns/op            5771 B/op         56 allocs/op
+BenchmarkVerifyAccessToken/Symmetric-8                    136762              8861 ns/op            3944 B/op         75 allocs/op
+BenchmarkVerifyAccessToken/Asymmetric-8                    28353             46053 ns/op            5192 B/op         80 allocs/op
+BenchmarkTokenOperations/HMAC-256/Create-8                147465              7514 ns/op            4682 B/op         58 allocs/op
+BenchmarkTokenOperations/HMAC-256/Verify-8                135084              8982 ns/op            3944 B/op         75 allocs/op
+BenchmarkTokenOperations/HMAC-384/Create-8                138393              7758 ns/op            5083 B/op         58 allocs/op
+BenchmarkTokenOperations/HMAC-384/Verify-8                135860             10505 ns/op            4296 B/op         75 allocs/op
+BenchmarkTokenOperations/HMAC-512/Create-8                147939              7744 ns/op            5163 B/op         58 allocs/op
+BenchmarkTokenOperations/HMAC-512/Verify-8                132926             10265 ns/op            4328 B/op         75 allocs/op
+BenchmarkTokenOperations/RSA-2048/Create-8                   970           1318594 ns/op            5773 B/op         56 allocs/op
+BenchmarkTokenOperations/RSA-2048/Verify-8                 24148             43825 ns/op            5192 B/op         80 allocs/op
+BenchmarkTokenOperations/RSA-4096/Create-8                   175           6996740 ns/op           44196 B/op        107 allocs/op
+BenchmarkTokenOperations/RSA-4096/Verify-8                  3459            381105 ns/op           66633 B/op        172 allocs/op
+BenchmarkTokenOperations/ECDSA-P256/Create-8               28281             47819 ns/op           11079 B/op        126 allocs/op
+BenchmarkTokenOperations/ECDSA-P256/Verify-8               13358             80034 ns/op            4840 B/op         95 allocs/op
+BenchmarkTokenOperations/ECDSA-P384/Create-8                4261            256259 ns/op           11623 B/op        130 allocs/op
+BenchmarkTokenOperations/ECDSA-P384/Verify-8                1712            705207 ns/op            5328 B/op        102 allocs/op
+BenchmarkRedisTokenRotation/LocalRedis-8                    1724            683310 ns/op            8880 B/op        142 allocs/op
+BenchmarkTokenRevocation-8                                  4998            248625 ns/op            4224 B/op         81 allocs/op
+BenchmarkConcurrentTokenCreation-8                        206032              5595 ns/op            4687 B/op         58 allocs/op
+BenchmarkTokenSizeImpact/Small-8                          140714              8620 ns/op            4619 B/op         58 allocs/op
+BenchmarkTokenSizeImpact/Medium-8                         156982              7608 ns/op            4731 B/op         58 allocs/op
+BenchmarkTokenSizeImpact/Large-8                          152390              7825 ns/op            5068 B/op         58 allocs/op
+BenchmarkVerificationWithKeySizes/RSA-1024-8               57046             20771 ns/op            4680 B/op         80 allocs/op
+BenchmarkVerificationWithKeySizes/RSA-2048-8               28603             42473 ns/op            5192 B/op         80 allocs/op
+BenchmarkVerificationWithKeySizes/RSA-4096-8                3384            342528 ns/op           66633 B/op        172 allocs/op
+BenchmarkVerificationWithKeySizes/ECDSA-P256-8             15271             79583 ns/op            4840 B/op         95 allocs/op
+BenchmarkVerificationWithKeySizes/ECDSA-P384-8              1744            709966 ns/op            5328 B/op        102 allocs/op
+BenchmarkVerificationWithKeySizes/ECDSA-P521-8               558           2239444 ns/op            5984 B/op        103 allocs/op
+BenchmarkCreateRefreshToken/Symmetric-8                   127687              8028 ns/op            4387 B/op         55 allocs/op
+BenchmarkCreateRefreshToken/Asymmetric-8                     964           1220863 ns/op            5477 B/op         53 allocs/op
+BenchmarkVerifyRefreshToken-8                             139417              8236 ns/op            3488 B/op         66 allocs/op
+BenchmarkRotateRefreshToken_RedisReuseInterval-8               1        2002112529 ns/op            8968 B/op        143 allocs/op
+BenchmarkRevokeAndVerifyToken_Redis-8                       2446            476761 ns/op            4867 B/op         90 allocs/op
+BenchmarkWithMultipleRoles-8                               25526             44118 ns/op           38668 B/op         58 allocs/op
+BenchmarkVerifyAccessTokenParallel-8                      229293              4735 ns/op            4024 B/op         78 allocs/op
+BenchmarkCreateAccessTokenParallel-8                      225867              4919 ns/op            4703 B/op         59 allocs/op
+BenchmarkCreateRefreshTokenParallel-8                     253236              4345 ns/op            4358 B/op         55 allocs/op
+BenchmarkVerifyRefreshTokenParallel-8                     302210              4009 ns/op            3488 B/op         66 allocs/op
+BenchmarkRotateRefreshTokenParallel-8                       7461            167292 ns/op           13223 B/op        197 allocs/op
+BenchmarkTokenRevocationParallel-8                         11308            110240 ns/op            9447 B/op        149 allocs/op
+PASS
+ok      github.com/gourdian25/gourdiantoken     82.284s
 ```
 
 > 🧠 See the [Performance] (#-performance) section for detailed metrics and recommendations.
@@ -1448,7 +1487,7 @@ BenchmarkRotateRefreshTokenParallel-8           4773        220562 ns/op
 
 ## 📑 License
 
-GourdianToken is licensed under the **MIT License**.  
+gourdiantoken is licensed under the **MIT License**.  
 You are free to use, modify, distribute, and adapt the code for both personal and commercial use.
 
 See the full license [here](./LICENSE).
@@ -1500,4 +1539,4 @@ Includes:
 ---
 
 Made with ❤️ by Go developers — for Go developers.  
-Secure authentication shouldn't be hard. GourdianToken makes it elegant, efficient, and production-ready.
+Secure authentication shouldn't be hard. gourdiantoken makes it elegant, efficient, and production-ready.
