@@ -69,94 +69,6 @@ func TestTokenEdgeCases(t *testing.T) {
 	})
 }
 
-// TestEnhancedTokenRotation tests advanced token rotation scenarios
-func TestEnhancedTokenRotation(t *testing.T) {
-	client := redisTestClient(t)
-	defer client.Close()
-
-	t.Run("Concurrent Rotation Attempts", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		config.RefreshToken.ReuseInterval = time.Second
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		var wg sync.WaitGroup
-		results := make(chan error, 10)
-
-		for i := 0; i < 10; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_, err := maker.RotateRefreshToken(context.Background(), token.Token)
-				results <- err
-			}()
-		}
-
-		wg.Wait()
-		close(results)
-
-		var successCount, failureCount int
-		for err := range results {
-			if err == nil {
-				successCount++
-			} else {
-				failureCount++
-				assert.Contains(t, err.Error(), "token reused too soon")
-			}
-		}
-
-		assert.Equal(t, 1, successCount)
-		assert.Equal(t, 9, failureCount)
-	})
-
-	t.Run("Rotation with Different Sessions", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-
-		userID := uuid.New()
-		session1 := uuid.New()
-		token1, err := maker.CreateRefreshToken(context.Background(), userID, "user", session1)
-		require.NoError(t, err)
-
-		session2 := uuid.New()
-		token2, err := maker.CreateRefreshToken(context.Background(), userID, "user", session2)
-		require.NoError(t, err)
-
-		_, err = maker.RotateRefreshToken(context.Background(), token1.Token)
-		require.NoError(t, err)
-
-		_, err = maker.RotateRefreshToken(context.Background(), token2.Token)
-		require.NoError(t, err)
-	})
-
-	t.Run("Rotation Chain", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.NoError(t, err)
-
-		// Create initial token
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		// Rotate multiple times
-		for i := 0; i < 5; i++ {
-			token, err = maker.RotateRefreshToken(context.Background(), token.Token)
-			require.NoError(t, err)
-		}
-
-		// Verify the last rotated token
-		_, err = maker.VerifyRefreshToken(context.Background(), token.Token)
-		require.NoError(t, err)
-	})
-}
-
 // TestSecurityScenarios tests various security-related scenarios
 func TestSecurityScenarios(t *testing.T) {
 	t.Run("Algorithm Confusion Attack", func(t *testing.T) {
@@ -932,6 +844,135 @@ func TestTokenValidation(t *testing.T) {
 	})
 }
 
+func TestTokenRevocation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("AccessTokenRevocation", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.AccessToken.RevocationEnabled = true
+		maker := createTestMaker(t, config)
+
+		accessToken, err := maker.CreateAccessToken(ctx, uuid.New(), "revoke-test", []string{"user"}, uuid.New())
+		assert.NoError(t, err)
+
+		// Verify token works before revocation
+		_, err = maker.VerifyAccessToken(ctx, accessToken.Token)
+		assert.NoError(t, err)
+
+		// Revoke the token
+		err = maker.RevokeAccessToken(ctx, accessToken.Token)
+		assert.NoError(t, err)
+
+		// Verify token is now rejected
+		_, err = maker.VerifyAccessToken(ctx, accessToken.Token)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "token has been revoked")
+	})
+
+	t.Run("RefreshTokenRevocation", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RevocationEnabled = true
+		maker := createTestMaker(t, config)
+
+		refreshToken, err := maker.CreateRefreshToken(ctx, uuid.New(), "revoke-test", uuid.New())
+		assert.NoError(t, err)
+
+		// Verify token works before revocation
+		_, err = maker.VerifyRefreshToken(ctx, refreshToken.Token)
+		assert.NoError(t, err)
+
+		// Revoke the token
+		err = maker.RevokeRefreshToken(ctx, refreshToken.Token)
+		assert.NoError(t, err)
+
+		// Verify token is now rejected
+		_, err = maker.VerifyRefreshToken(ctx, refreshToken.Token)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "token has been revoked")
+	})
+
+	t.Run("RevocationDisabled", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.AccessToken.RevocationEnabled = false
+		maker := createTestMaker(t, config)
+
+		accessToken, err := maker.CreateAccessToken(ctx, uuid.New(), "revoke-test", []string{"user"}, uuid.New())
+		assert.NoError(t, err)
+
+		err = maker.RevokeAccessToken(ctx, accessToken.Token)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "access token revocation is not enabled")
+	})
+}
+
+func TestRefreshTokenRotation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("SuccessfulRotation", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		maker := createTestMaker(t, config)
+
+		userID := uuid.New()
+		sessionID := uuid.New()
+
+		// Create initial refresh token
+		oldToken, err := maker.CreateRefreshToken(ctx, userID, "rotation-test", sessionID)
+		assert.NoError(t, err)
+
+		// Rotate the token
+		newToken, err := maker.RotateRefreshToken(ctx, oldToken.Token)
+		assert.NoError(t, err)
+		assert.NotEqual(t, oldToken.Token, newToken.Token)
+		assert.Equal(t, userID, newToken.Subject)
+		assert.Equal(t, sessionID, newToken.SessionID)
+
+		// Verify the new token works
+		_, err = maker.VerifyRefreshToken(ctx, newToken.Token)
+		assert.NoError(t, err)
+
+		// Old token should be marked as rotated and rejected if used again
+		_, err = maker.RotateRefreshToken(ctx, oldToken.Token)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "token reused too soon")
+	})
+
+	t.Run("RotationDisabled", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = false
+		maker := createTestMaker(t, config)
+
+		refreshToken, err := maker.CreateRefreshToken(ctx, uuid.New(), "rotation-test", uuid.New())
+		assert.NoError(t, err)
+
+		_, err = maker.RotateRefreshToken(ctx, refreshToken.Token)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "token rotation not enabled")
+	})
+
+	t.Run("ReuseProtection", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		config.RefreshToken.ReuseInterval = time.Minute
+		maker := createTestMaker(t, config)
+
+		userID := uuid.New()
+		sessionID := uuid.New()
+
+		// Create and rotate token
+		oldToken, err := maker.CreateRefreshToken(ctx, userID, "reuse-test", sessionID)
+		assert.NoError(t, err)
+
+		_, err = maker.RotateRefreshToken(ctx, oldToken.Token)
+		assert.NoError(t, err)
+
+		// Immediate reuse attempt should fail
+		_, err = maker.RotateRefreshToken(ctx, oldToken.Token)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "token reused too soon")
+	})
+}
+
 func TestTokenMakerInitialization(t *testing.T) {
 	t.Run("DefaultSymmetricConfig", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig(testSymmetricKey)
@@ -1078,7 +1119,7 @@ func TestTokenMakerInitialization(t *testing.T) {
 					Algorithm:     "UNSUPPORTED",
 					SymmetricKey:  testSymmetricKey,
 				},
-				expectedErr: "unsupported algorithm",
+				expectedErr: "algorithm UNSUPPORTED not compatible with symmetric signing",
 			},
 		}
 
@@ -1090,6 +1131,50 @@ func TestTokenMakerInitialization(t *testing.T) {
 				assert.Contains(t, err.Error(), tc.expectedErr)
 			})
 		}
+	})
+}
+
+// TestRedisConnectionLoss tests behavior when Redis connection is lost
+func TestRedisConnectionLoss(t *testing.T) {
+	// Create a mock Redis client that will fail all operations
+	failingRedisOpts := &redis.Options{
+		Addr: "localhost:9999", // Non-existent Redis server
+	}
+
+	t.Run("Rotation with Redis Down", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+
+		// Create maker with failing Redis options
+		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
+		require.NoError(t, err)
+
+		// Create a valid token
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		// Try to rotate - should fail immediately since Redis is unreachable
+		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
+	})
+
+	t.Run("Revocation with Redis Down", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.AccessToken.RevocationEnabled = true
+
+		// Create maker with failing Redis options
+		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
+		require.NoError(t, err)
+
+		// Create a valid token
+		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
+		require.NoError(t, err)
+
+		// Try to revoke - should fail immediately since Redis is unreachable
+		err = maker.RevokeAccessToken(context.Background(), token.Token)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
 	})
 }
 
@@ -1224,179 +1309,6 @@ func TestTokenCreationAndVerification(t *testing.T) {
 	})
 }
 
-func TestTokenRevocation(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("AccessTokenRevocation", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.AccessToken.RevocationEnabled = true
-		maker := createTestMaker(t, config)
-
-		accessToken, err := maker.CreateAccessToken(ctx, uuid.New(), "revoke-test", []string{"user"}, uuid.New())
-		assert.NoError(t, err)
-
-		// Verify token works before revocation
-		_, err = maker.VerifyAccessToken(ctx, accessToken.Token)
-		assert.NoError(t, err)
-
-		// Revoke the token
-		err = maker.RevokeAccessToken(ctx, accessToken.Token)
-		assert.NoError(t, err)
-
-		// Verify token is now rejected
-		_, err = maker.VerifyAccessToken(ctx, accessToken.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token has been revoked")
-	})
-
-	t.Run("RefreshTokenRevocation", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RevocationEnabled = true
-		maker := createTestMaker(t, config)
-
-		refreshToken, err := maker.CreateRefreshToken(ctx, uuid.New(), "revoke-test", uuid.New())
-		assert.NoError(t, err)
-
-		// Verify token works before revocation
-		_, err = maker.VerifyRefreshToken(ctx, refreshToken.Token)
-		assert.NoError(t, err)
-
-		// Revoke the token
-		err = maker.RevokeRefreshToken(ctx, refreshToken.Token)
-		assert.NoError(t, err)
-
-		// Verify token is now rejected
-		_, err = maker.VerifyRefreshToken(ctx, refreshToken.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token has been revoked")
-	})
-
-	t.Run("RevocationDisabled", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.AccessToken.RevocationEnabled = false
-		maker := createTestMaker(t, config)
-
-		accessToken, err := maker.CreateAccessToken(ctx, uuid.New(), "revoke-test", []string{"user"}, uuid.New())
-		assert.NoError(t, err)
-
-		err = maker.RevokeAccessToken(ctx, accessToken.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "access token revocation is not enabled")
-	})
-}
-
-func TestRefreshTokenRotation(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("SuccessfulRotation", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		maker := createTestMaker(t, config)
-
-		userID := uuid.New()
-		sessionID := uuid.New()
-
-		// Create initial refresh token
-		oldToken, err := maker.CreateRefreshToken(ctx, userID, "rotation-test", sessionID)
-		assert.NoError(t, err)
-
-		// Rotate the token
-		newToken, err := maker.RotateRefreshToken(ctx, oldToken.Token)
-		assert.NoError(t, err)
-		assert.NotEqual(t, oldToken.Token, newToken.Token)
-		assert.Equal(t, userID, newToken.Subject)
-		assert.Equal(t, sessionID, newToken.SessionID)
-
-		// Verify the new token works
-		_, err = maker.VerifyRefreshToken(ctx, newToken.Token)
-		assert.NoError(t, err)
-
-		// Old token should be marked as rotated and rejected if used again
-		_, err = maker.RotateRefreshToken(ctx, oldToken.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token reused too soon")
-	})
-
-	t.Run("RotationDisabled", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = false
-		maker := createTestMaker(t, config)
-
-		refreshToken, err := maker.CreateRefreshToken(ctx, uuid.New(), "rotation-test", uuid.New())
-		assert.NoError(t, err)
-
-		_, err = maker.RotateRefreshToken(ctx, refreshToken.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token rotation not enabled")
-	})
-
-	t.Run("ReuseProtection", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-		config.RefreshToken.ReuseInterval = time.Minute
-		maker := createTestMaker(t, config)
-
-		userID := uuid.New()
-		sessionID := uuid.New()
-
-		// Create and rotate token
-		oldToken, err := maker.CreateRefreshToken(ctx, userID, "reuse-test", sessionID)
-		assert.NoError(t, err)
-
-		_, err = maker.RotateRefreshToken(ctx, oldToken.Token)
-		assert.NoError(t, err)
-
-		// Immediate reuse attempt should fail
-		_, err = maker.RotateRefreshToken(ctx, oldToken.Token)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "token reused too soon")
-	})
-}
-
-// TestRedisConnectionLoss tests behavior when Redis connection is lost
-func TestRedisConnectionLoss(t *testing.T) {
-	// Create a mock Redis client that will fail all operations
-	failingRedisOpts := &redis.Options{
-		Addr: "localhost:9999", // Non-existent Redis server
-	}
-
-	t.Run("Rotation with Redis Down", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.RefreshToken.RotationEnabled = true
-
-		// Create maker with failing Redis options
-		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
-		require.NoError(t, err)
-
-		// Create a valid token
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-		require.NoError(t, err)
-
-		// Try to rotate - should fail immediately since Redis is unreachable
-		_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
-	})
-
-	t.Run("Revocation with Redis Down", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig(testSymmetricKey)
-		config.AccessToken.RevocationEnabled = true
-
-		// Create maker with failing Redis options
-		maker, err := NewGourdianTokenMaker(context.Background(), config, failingRedisOpts)
-		require.NoError(t, err)
-
-		// Create a valid token
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
-		require.NoError(t, err)
-
-		// Try to revoke - should fail immediately since Redis is unreachable
-		err = maker.RevokeAccessToken(context.Background(), token.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "connection refused") // Or other connection error
-	})
-}
-
 // TestClaimValidation tests various claim validation scenarios
 func TestClaimValidation(t *testing.T) {
 	config := DefaultGourdianTokenConfig(testSymmetricKey)
@@ -1414,8 +1326,7 @@ func TestClaimValidation(t *testing.T) {
 			{"Missing TYP", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "sid": uuid.New().String()}, "missing required claim: typ"},
 			{"Missing USR", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "sid": uuid.New().String(), "typ": "access"}, "missing required claim: usr"},
 			{"Missing SID", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access"}, "missing required claim: sid"},
-			{"Missing RLS", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access", "sid": uuid.New().String()}, "missing roles claim in access token"},
-		}
+			{"Missing RLS", jwt.MapClaims{"jti": uuid.New().String(), "sub": uuid.New().String(), "usr": "test", "typ": "access", "sid": uuid.New().String(), "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix()}, "missing roles claim in access token"}}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -1728,6 +1639,94 @@ func TestCreateAndVerifyAccessToken(t *testing.T) {
 		_, err = symmetricMaker.VerifyAccessToken(context.Background(), resp.Token)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid token type")
+	})
+}
+
+// TestEnhancedTokenRotation tests advanced token rotation scenarios
+func TestEnhancedTokenRotation(t *testing.T) {
+	client := redisTestClient(t)
+	defer client.Close()
+
+	t.Run("Concurrent Rotation Attempts", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		config.RefreshToken.ReuseInterval = time.Second
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+		results := make(chan error, 10)
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := maker.RotateRefreshToken(context.Background(), token.Token)
+				results <- err
+			}()
+		}
+
+		wg.Wait()
+		close(results)
+
+		var successCount, failureCount int
+		for err := range results {
+			if err == nil {
+				successCount++
+			} else {
+				failureCount++
+				assert.Contains(t, err.Error(), "token reused too soon")
+			}
+		}
+
+		assert.Equal(t, 1, successCount)
+		assert.Equal(t, 9, failureCount)
+	})
+
+	t.Run("Rotation with Different Sessions", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+
+		userID := uuid.New()
+		session1 := uuid.New()
+		token1, err := maker.CreateRefreshToken(context.Background(), userID, "user", session1)
+		require.NoError(t, err)
+
+		session2 := uuid.New()
+		token2, err := maker.CreateRefreshToken(context.Background(), userID, "user", session2)
+		require.NoError(t, err)
+
+		_, err = maker.RotateRefreshToken(context.Background(), token1.Token)
+		require.NoError(t, err)
+
+		_, err = maker.RotateRefreshToken(context.Background(), token2.Token)
+		require.NoError(t, err)
+	})
+
+	t.Run("Rotation Chain", func(t *testing.T) {
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
+		config.RefreshToken.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+
+		// Create initial token
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		require.NoError(t, err)
+
+		// Rotate multiple times
+		for i := 0; i < 5; i++ {
+			token, err = maker.RotateRefreshToken(context.Background(), token.Token)
+			require.NoError(t, err)
+		}
+
+		// Verify the last rotated token
+		_, err = maker.VerifyRefreshToken(context.Background(), token.Token)
+		require.NoError(t, err)
 	})
 }
 

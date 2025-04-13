@@ -1,12 +1,10 @@
 // gourdiantoken_error_test.go
-
 package gourdiantoken
 
 import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"errors"
 	"os"
 	"testing"
 	"time"
@@ -18,398 +16,467 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestErrorCases(t *testing.T) {
-	t.Run("Invalid Token String", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.NoError(t, err)
+func TestRevocationErrors(t *testing.T) {
+	// Setup Redis if available
+	client := redis.NewClient(testRedisOptions())
+	_, err := client.Ping(context.Background()).Result()
+	if err != nil {
+		t.Skip("Redis not available, skipping revocation tests")
+	}
 
-		_, err = maker.VerifyAccessToken(context.Background(), "invalid.token.string")
-		require.Error(t, err)
-		assert.True(t, errors.Is(err, jwt.ErrTokenMalformed))
-	})
+	tests := []struct {
+		name        string
+		setupFn     func(*JWTMaker) string
+		revokeFn    func(*JWTMaker, string) error
+		expectedErr string
+	}{
+		{
+			name: "Revoke token without exp claim",
+			setupFn: func(m *JWTMaker) string {
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+					"jti": uuid.New().String(),
+					"sub": uuid.New().String(),
+					"usr": "user",
+					"sid": uuid.New().String(),
+					"iat": time.Now().Unix(),
+					"typ": AccessToken,
+					"rls": []string{"admin"},
+				})
+				tokenString, _ := token.SignedString([]byte(m.config.SymmetricKey))
+				return tokenString
+			},
+			revokeFn:    func(m *JWTMaker, s string) error { return m.RevokeAccessToken(context.Background(), s) },
+			expectedErr: "token missing exp claim",
+		},
+		{
+			name: "Revoke invalid token string",
+			setupFn: func(m *JWTMaker) string {
+				return "invalid.token.string"
+			},
+			revokeFn:    func(m *JWTMaker, s string) error { return m.RevokeAccessToken(context.Background(), s) },
+			expectedErr: "invalid token",
+		},
+		{
+			name: "Revoke when revocation disabled",
+			setupFn: func(m *JWTMaker) string {
+				m.config.AccessToken.RevocationEnabled = false
+				token, _ := m.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+				return token.Token
+			},
+			revokeFn:    func(m *JWTMaker, s string) error { return m.RevokeAccessToken(context.Background(), s) },
+			expectedErr: "access token revocation is not enabled",
+		},
+	}
 
-	t.Run("Expired Token", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.AccessToken.Duration = -time.Hour // Set to expire immediately
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.NoError(t, err)
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config.AccessToken.RevocationEnabled = true
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	require.NoError(t, err)
 
-		token, err := maker.CreateAccessToken(
-			context.Background(),
-			uuid.New(),
-			"user",
-			[]string{"role"},
-			uuid.New(),
-		)
-		require.NoError(t, err)
-
-		_, err = maker.VerifyAccessToken(context.Background(), token.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "expired")
-	})
-
-	t.Run("Wrong Algorithm", func(t *testing.T) {
-		// Create token with HS256
-		config1 := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker1, err := NewGourdianTokenMaker(context.Background(), config1, nil)
-		require.NoError(t, err)
-
-		token, err := maker1.CreateAccessToken(
-			context.Background(),
-			uuid.New(),
-			"user",
-			[]string{"role"},
-			uuid.New(),
-		)
-		require.NoError(t, err)
-
-		// Try to verify with RS256
-		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-		config2 := GourdianTokenConfig{
-			Algorithm:     "RS256",
-			SigningMethod: Asymmetric,
-		}
-		maker2 := &JWTMaker{
-			config:        config2,
-			signingMethod: jwt.SigningMethodRS256,
-			privateKey:    privateKey,
-			publicKey:     &privateKey.PublicKey,
-		}
-
-		_, err = maker2.VerifyAccessToken(context.Background(), token.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unexpected signing method")
-	})
-
-	t.Run("Invalid UUID in Claims", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.NoError(t, err)
-
-		// Create a token with invalid UUID format
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"jti": "invalid-uuid",
-			"sub": uuid.New().String(),
-			"usr": "user",
-			"sid": uuid.New().String(),
-			"iat": time.Now().Unix(),
-			"exp": time.Now().Add(time.Hour).Unix(),
-			"typ": AccessToken,
-			"rls": []string{"role"},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokenString := tt.setupFn(maker.(*JWTMaker))
+			err := tt.revokeFn(maker.(*JWTMaker), tokenString)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErr)
 		})
+	}
+}
 
-		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-		require.NoError(t, err)
+func TestRotationErrors(t *testing.T) {
+	// Setup Redis if available
+	client := redis.NewClient(testRedisOptions())
+	_, err := client.Ping(context.Background()).Result()
+	if err != nil {
+		t.Skip("Redis not available, skipping rotation tests")
+	}
 
-		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
+	tests := []struct {
+		name        string
+		setupFn     func(*JWTMaker) string
+		expectedErr string
+	}{
+		{
+			name: "Rotation with invalid token",
+			setupFn: func(m *JWTMaker) string {
+				return "invalid.token.string"
+			},
+			expectedErr: "invalid token",
+		},
+		{
+			name: "Rotation reuse too soon",
+			setupFn: func(m *JWTMaker) string {
+				token, _ := m.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+				_, _ = m.RotateRefreshToken(context.Background(), token.Token) // First rotation succeeds
+				return token.Token                                             // Try to rotate same token again
+			},
+			expectedErr: "token reused too soon",
+		},
+		{
+			name: "Rotation when disabled",
+			setupFn: func(m *JWTMaker) string {
+				m.config.RefreshToken.RotationEnabled = false
+				token, _ := m.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+				return token.Token
+			},
+			expectedErr: "token rotation not enabled",
+		},
+	}
+
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	config.RefreshToken.RotationEnabled = true
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	require.NoError(t, err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokenString := tt.setupFn(maker.(*JWTMaker))
+			_, err := maker.RotateRefreshToken(context.Background(), tokenString)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErr)
+		})
+	}
+}
+
+func TestRedisConnectionErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      GourdianTokenConfig
+		redisOpts   *redis.Options
+		expectedErr string
+	}{
+		{
+			name: "Redis required but not provided",
+			config: GourdianTokenConfig{
+				Algorithm:     "HS256",
+				SigningMethod: Symmetric,
+				SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+				RefreshToken: RefreshTokenConfig{
+					RotationEnabled: true,
+				},
+			},
+			redisOpts:   nil,
+			expectedErr: "redis options required",
+		},
+		{
+			name: "Invalid Redis connection",
+			config: GourdianTokenConfig{
+				Algorithm:     "HS256",
+				SigningMethod: Symmetric,
+				SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+				RefreshToken: RefreshTokenConfig{
+					RotationEnabled: true,
+				},
+			},
+			redisOpts:   &redis.Options{Addr: "invalid-redis-url:9999"},
+			expectedErr: "redis connection failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewGourdianTokenMaker(context.Background(), tt.config, tt.redisOpts)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErr)
+		})
+	}
+}
+
+func TestTokenCreationErrors(t *testing.T) {
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
+	require.NoError(t, err)
+
+	t.Run("Create access token with empty user ID", func(t *testing.T) {
+		_, err := maker.CreateAccessToken(context.Background(), uuid.Nil, "user", []string{"admin"}, uuid.New())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid token ID")
+		assert.Contains(t, err.Error(), "invalid user ID")
 	})
 
-	t.Run("Missing Required Claims", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.NoError(t, err)
-
-		// Create token missing required claims
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			// Missing "usr", "sid", "rls" claims
-			"iat": time.Now().Unix(),
-			"exp": time.Now().Add(time.Hour).Unix(),
-			"typ": AccessToken,
-		})
-
-		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-		require.NoError(t, err)
-
-		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing required claim")
-	})
-
-	t.Run("Invalid Token Type", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.NoError(t, err)
-
-		// Create token with wrong type
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"usr": "user",
-			"sid": uuid.New().String(),
-			"iat": time.Now().Unix(),
-			"exp": time.Now().Add(time.Hour).Unix(),
-			"typ": "invalid-type",
-			"rls": []string{"role"},
-		})
-
-		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-		require.NoError(t, err)
-
-		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid token type")
-	})
-
-	t.Run("Empty Roles", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.NoError(t, err)
-
-		// Create token with empty roles
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"usr": "user",
-			"sid": uuid.New().String(),
-			"iat": time.Now().Unix(),
-			"exp": time.Now().Add(time.Hour).Unix(),
-			"typ": AccessToken,
-			"rls": []string{},
-		})
-
-		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-		require.NoError(t, err)
-
-		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
+	t.Run("Create access token with empty roles", func(t *testing.T) {
+		_, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{}, uuid.New())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "at least one role must be provided")
 	})
 
-	t.Run("Revoked Token", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.AccessToken.RevocationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, &redis.Options{
-			Addr: "localhost:6379",
-		})
-		if err != nil {
-			t.Skip("Redis not available, skipping test")
+	t.Run("Create access token with empty role string", func(t *testing.T) {
+		_, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{""}, uuid.New())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "roles cannot contain empty strings")
+	})
+
+	t.Run("Create refresh token with empty user ID", func(t *testing.T) {
+		_, err := maker.CreateRefreshToken(context.Background(), uuid.Nil, "user", uuid.New())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid user ID")
+	})
+
+	t.Run("Create token with long username", func(t *testing.T) {
+		longUsername := make([]byte, 1025)
+		for i := range longUsername {
+			longUsername[i] = 'a'
 		}
-
-		token, err := maker.CreateAccessToken(
-			context.Background(),
-			uuid.New(),
-			"user",
-			[]string{"role"},
-			uuid.New(),
-		)
-		require.NoError(t, err)
-
-		// Verify token works initially
-		_, err = maker.VerifyAccessToken(context.Background(), token.Token)
-		require.NoError(t, err)
-
-		// Revoke the token
-		err = maker.RevokeAccessToken(context.Background(), token.Token)
-		require.NoError(t, err)
-
-		// Verify token is now revoked
-		_, err = maker.VerifyAccessToken(context.Background(), token.Token)
+		_, err := maker.CreateAccessToken(context.Background(), uuid.New(), string(longUsername), []string{"admin"}, uuid.New())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "token has been revoked")
+		assert.Contains(t, err.Error(), "username too long")
 	})
+}
 
-	t.Run("Future Issued At", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.NoError(t, err)
+func TestAlgorithmMismatchErrors(t *testing.T) {
+	// Create token with HS256
+	config1 := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker1, err := NewGourdianTokenMaker(context.Background(), config1, nil)
+	require.NoError(t, err)
 
-		// Create token with iat in the future
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"usr": "user",
-			"sid": uuid.New().String(),
-			"iat": time.Now().Add(time.Hour).Unix(),
-			"exp": time.Now().Add(2 * time.Hour).Unix(),
-			"typ": AccessToken,
-			"rls": []string{"role"},
+	token, err := maker1.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+	require.NoError(t, err)
+
+	// Try to verify with RS256
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	config2 := GourdianTokenConfig{
+		Algorithm:     "RS256",
+		SigningMethod: Asymmetric,
+	}
+	maker2 := &JWTMaker{
+		config:        config2,
+		signingMethod: jwt.SigningMethodRS256,
+		privateKey:    privateKey,
+		publicKey:     &privateKey.PublicKey,
+	}
+
+	_, err = maker2.VerifyAccessToken(context.Background(), token.Token)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected signing method")
+}
+
+func TestFilePermissionErrors(t *testing.T) {
+	// Create test files with restrictive permissions
+	privPath := "test_private_restricted.pem"
+	pubPath := "test_public_restricted.pem"
+	_ = os.WriteFile(privPath, []byte("test"), 0000) // No permissions
+	_ = os.WriteFile(pubPath, []byte("test"), 0000)
+	defer os.Remove(privPath)
+	defer os.Remove(pubPath)
+
+	config := GourdianTokenConfig{
+		Algorithm:      "RS256",
+		SigningMethod:  Asymmetric,
+		PrivateKeyPath: privPath,
+		PublicKeyPath:  pubPath,
+	}
+
+	_, err := NewGourdianTokenMaker(context.Background(), config, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to stat file")
+}
+
+func TestKeyParsingErrors(t *testing.T) {
+	// Setup test files
+	privPath := "test_invalid_priv.pem"
+	pubPath := "test_invalid_pub.pem"
+	_ = os.WriteFile(privPath, []byte("invalid private pem"), 0644)
+	_ = os.WriteFile(pubPath, []byte("invalid public pem"), 0644)
+	defer os.Remove(privPath)
+	defer os.Remove(pubPath)
+
+	tests := []struct {
+		name        string
+		config      GourdianTokenConfig
+		expectedErr string
+	}{
+		{
+			name: "Invalid private key format",
+			config: GourdianTokenConfig{
+				Algorithm:      "RS256",
+				SigningMethod:  Asymmetric,
+				PrivateKeyPath: privPath,
+				PublicKeyPath:  pubPath,
+			},
+			expectedErr: "failed to parse RSA private key",
+		},
+		{
+			name: "Invalid public key format",
+			config: GourdianTokenConfig{
+				Algorithm:      "RS256",
+				SigningMethod:  Asymmetric,
+				PrivateKeyPath: "testdata/private.pem", // Valid private key
+				PublicKeyPath:  pubPath,                // Invalid public key
+			},
+			expectedErr: "failed to parse RSA public key",
+		},
+		{
+			name: "Key algorithm mismatch",
+			config: GourdianTokenConfig{
+				Algorithm:      "ES256",
+				SigningMethod:  Asymmetric,
+				PrivateKeyPath: "testdata/private.pem", // RSA key but ES256 algorithm
+				PublicKeyPath:  "testdata/public.pem",
+			},
+			expectedErr: "failed to parse ECDSA private key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewGourdianTokenMaker(context.Background(), tt.config, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErr)
 		})
+	}
+}
+func TestTokenValidationErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		tokenModFn  func(*jwt.Token)
+		expectedErr string
+	}{
+		{
+			name: "Malformed token string",
+			tokenModFn: func(t *jwt.Token) {
+				// No modification needed - we'll pass invalid string directly
+			},
+			expectedErr: "token contains an invalid number of segments",
+		},
+		{
+			name: "Missing required claim: jti",
+			tokenModFn: func(t *jwt.Token) {
+				delete(t.Claims.(jwt.MapClaims), "jti")
+			},
+			expectedErr: "missing required claim: jti",
+		},
+		{
+			name: "Invalid UUID format in jti",
+			tokenModFn: func(t *jwt.Token) {
+				t.Claims.(jwt.MapClaims)["jti"] = "invalid-uuid"
+			},
+			expectedErr: "invalid token ID",
+		},
+		{
+			name: "Token issued in future",
+			tokenModFn: func(t *jwt.Token) {
+				t.Claims.(jwt.MapClaims)["iat"] = time.Now().Add(time.Hour).Unix()
+			},
+			expectedErr: "token issued in the future",
+		},
+		{
+			name: "Expired token",
+			tokenModFn: func(t *jwt.Token) {
+				t.Claims.(jwt.MapClaims)["exp"] = time.Now().Add(-time.Hour).Unix()
+			},
+			expectedErr: "token has expired",
+		},
+		{
+			name: "Wrong token type",
+			tokenModFn: func(t *jwt.Token) {
+				t.Claims.(jwt.MapClaims)["typ"] = "invalid-type"
+			},
+			expectedErr: "invalid token type",
+		},
+		{
+			name: "Missing roles in access token",
+			tokenModFn: func(t *jwt.Token) {
+				delete(t.Claims.(jwt.MapClaims), "rls")
+			},
+			expectedErr: "missing roles claim",
+		},
+		{
+			name: "Empty roles in access token",
+			tokenModFn: func(t *jwt.Token) {
+				t.Claims.(jwt.MapClaims)["rls"] = []string{}
+			},
+			expectedErr: "at least one role must be provided",
+		},
+	}
 
-		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-		require.NoError(t, err)
+	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
+	require.NoError(t, err)
 
-		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "token issued in the future")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+				"jti": uuid.New().String(),
+				"sub": uuid.New().String(),
+				"usr": "user",
+				"sid": uuid.New().String(),
+				"iat": time.Now().Unix(),
+				"exp": time.Now().Add(time.Hour).Unix(),
+				"typ": AccessToken,
+				"rls": []string{"admin"},
+			})
 
-	t.Run("Malformed Redis URL", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.AccessToken.RevocationEnabled = true
-		_, err := NewGourdianTokenMaker(context.Background(), config, &redis.Options{
-			Addr: "invalid-redis-url",
+			if tt.tokenModFn != nil {
+				tt.tokenModFn(token)
+			}
+
+			tokenString, err := token.SignedString([]byte(config.SymmetricKey))
+			require.NoError(t, err)
+
+			_, err = maker.VerifyAccessToken(context.Background(), tokenString)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErr)
 		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "redis connection failed")
-	})
+	}
+}
 
-	t.Run("Rotation Reuse Too Soon", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, &redis.Options{
-			Addr: "localhost:6379",
+func TestConfigurationErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      GourdianTokenConfig
+		expectedErr string
+	}{
+		{
+			name: "Unsupported algorithm",
+			config: GourdianTokenConfig{
+				Algorithm:     "XYZ999",
+				SigningMethod: Symmetric,
+				SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+			},
+			expectedErr: "unsupported algorithm",
+		},
+		{
+			name: "Algorithm/signing method mismatch",
+			config: GourdianTokenConfig{
+				Algorithm:     "RS256",
+				SigningMethod: Symmetric,
+				SymmetricKey:  "test-secret-32-bytes-long-1234567890",
+			},
+			expectedErr: "algorithm not compatible",
+		},
+		{
+			name: "Symmetric key too short",
+			config: GourdianTokenConfig{
+				Algorithm:     "HS256",
+				SigningMethod: Symmetric,
+				SymmetricKey:  "too-short",
+			},
+			expectedErr: "symmetric key must be at least 32 bytes",
+		},
+		{
+			name: "Missing private key for asymmetric",
+			config: GourdianTokenConfig{
+				Algorithm:      "RS256",
+				SigningMethod:  Asymmetric,
+				PublicKeyPath:  "testdata/public.pem",
+				PrivateKeyPath: "",
+			},
+			expectedErr: "private and public key paths are required",
+		},
+		{
+			name: "None algorithm disabled",
+			config: GourdianTokenConfig{
+				Algorithm:     "none",
+				SigningMethod: Symmetric,
+			},
+			expectedErr: "unsecured tokens are disabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewGourdianTokenMaker(context.Background(), tt.config, nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErr)
 		})
-		if err != nil {
-			t.Skip("Redis not available, skipping test")
-		}
-
-		refreshToken, err := maker.CreateRefreshToken(
-			context.Background(),
-			uuid.New(),
-			"user",
-			uuid.New(),
-		)
-		require.NoError(t, err)
-
-		_, err = maker.RotateRefreshToken(context.Background(), refreshToken.Token)
-		require.NoError(t, err)
-
-		_, err = maker.RotateRefreshToken(context.Background(), refreshToken.Token)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "token reused too soon")
-	})
-
-	t.Run("Invalid Signing Method Config", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.Algorithm = "none" // Disallowed
-		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsecured tokens are disabled")
-	})
-
-	t.Run("Missing Role Claim in Access Token", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.NoError(t, err)
-
-		// Role claim omitted
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"usr": "user",
-			"sid": uuid.New().String(),
-			"iat": time.Now().Unix(),
-			"exp": time.Now().Add(time.Hour).Unix(),
-			"typ": AccessToken,
-		})
-
-		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-		require.NoError(t, err)
-
-		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing roles claim")
-	})
-
-	t.Run("Unsupported Signing Algorithm", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.Algorithm = "XYZ999"
-		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported algorithm")
-	})
-
-	t.Run("Invalid Private Key File Path", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("")
-		config.Algorithm = "RS256"
-		config.SigningMethod = Asymmetric
-		config.PrivateKeyPath = "nonexistent-private.pem"
-		config.PublicKeyPath = "nonexistent-public.pem"
-
-		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read private key file")
-	})
-
-	t.Run("Invalid Public Key Format", func(t *testing.T) {
-		// Create temp private and public key files
-		privPath := "test_invalid_priv.pem"
-		pubPath := "test_invalid_pub.pem"
-		_ = os.WriteFile(privPath, []byte("invalid private pem"), 0644)
-		_ = os.WriteFile(pubPath, []byte("invalid public pem"), 0644)
-		defer os.Remove(privPath)
-		defer os.Remove(pubPath)
-
-		config := DefaultGourdianTokenConfig("")
-		config.Algorithm = "RS256"
-		config.SigningMethod = Asymmetric
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
-
-		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to parse RSA private key")
-	})
-
-	t.Run("Revoke Token Without Exp Claim", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.AccessToken.RevocationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, &redis.Options{
-			Addr: "localhost:6379",
-		})
-		if err != nil {
-			t.Skip("Redis not available")
-		}
-
-		// Create malformed token (no exp)
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"usr": "user",
-			"sid": uuid.New().String(),
-			"iat": time.Now().Unix(),
-			"typ": AccessToken,
-			"rls": []string{"admin"},
-		})
-		tokenString, _ := token.SignedString([]byte(config.SymmetricKey))
-
-		err = maker.RevokeAccessToken(context.Background(), tokenString)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "token missing exp claim")
-	})
-
-	t.Run("Revoke Token With Invalid Format", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.AccessToken.RevocationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, &redis.Options{
-			Addr: "localhost:6379",
-		})
-		if err != nil {
-			t.Skip("Redis not available")
-		}
-
-		err = maker.RevokeAccessToken(context.Background(), "not.a.valid.token")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid token")
-	})
-
-	t.Run("Rotate With Invalid Refresh Token", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.RefreshToken.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, &redis.Options{
-			Addr: "localhost:6379",
-		})
-		if err != nil {
-			t.Skip("Redis not available")
-		}
-
-		_, err = maker.RotateRefreshToken(context.Background(), "invalid.token.string")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid token")
-	})
-
-	t.Run("Rotation Without Redis Client", func(t *testing.T) {
-		config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-		config.RefreshToken.RotationEnabled = true
-
-		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "redis options required")
-	})
-
+	}
 }
