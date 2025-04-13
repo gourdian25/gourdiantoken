@@ -1481,7 +1481,7 @@ PASS
 ok      github.com/gourdian25/gourdiantoken     82.284s
 ```
 
-> 🧠 See the [Performance] (#-performance) section for detailed metrics and recommendations.
+> 🧠 See the [⚡ Performance](#-performance) section for detailed metrics and recommendations.
 
 ---
 
