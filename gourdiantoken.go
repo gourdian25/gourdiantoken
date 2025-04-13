@@ -37,6 +37,16 @@ const (
 	Asymmetric SigningMethod = "asymmetric"
 )
 
+// GourdianTokenConfig defines the complete configuration needed to initialize the token system.
+//
+// This struct holds all essential options related to JWT signing, token durations, revocation,
+// audience, and algorithm preferences. Use this when creating a token maker.
+//
+// Example:
+//
+//	cfg := DefaultGourdianTokenConfig("your-secret-key")
+//	cfg.AccessToken.RevocationEnabled = true
+//	cfg.RefreshToken.RotationEnabled = true
 type GourdianTokenConfig struct {
 	Algorithm      string             // JWT signing algorithm (e.g., "HS256", "RS256", "ES256", "EdDSA")
 	SigningMethod  SigningMethod      // Cryptographic method (symmetric or asymmetric)
@@ -109,6 +119,14 @@ func NewGourdianTokenConfig(
 	}
 }
 
+// DefaultGourdianTokenConfig returns a default configuration suitable for most use cases.
+//
+// This config uses symmetric HS256 signing, 30-minute access tokens, 7-day refresh tokens,
+// and does not enable Redis-based revocation or rotation by default.
+//
+// Example:
+//
+//	config := DefaultGourdianTokenConfig("your-super-secret-32-byte-key")
 func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 	return GourdianTokenConfig{
 		Algorithm:      "HS256",
@@ -135,6 +153,23 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 	}
 }
 
+// AccessTokenClaims holds the structured payload for access tokens.
+//
+// This includes standard claims plus session, role, and token-type details.
+// It is used internally during signing and verification of access tokens.
+//
+// Example token payload (decoded):
+//
+//	{
+//	    "jti": "uuid-token-id",
+//	    "sub": "uuid-user-id",
+//	    "usr": "username",
+//	    "sid": "uuid-session-id",
+//	    "iat": 1688888888,
+//	    "exp": 1688892488,
+//	    "typ": "access",
+//	    "rls": ["admin", "moderator"]
+//	}
 type AccessTokenClaims struct {
 	ID        uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
 	Subject   uuid.UUID `json:"sub"` // Subject (user ID as UUID)
@@ -146,6 +181,21 @@ type AccessTokenClaims struct {
 	Roles     []string  `json:"rls"` // User roles/privilege levels
 }
 
+// RefreshTokenClaims holds the payload for refresh tokens.
+//
+// It represents long-lived token sessions and contains information used for refreshing access tokens.
+//
+// Example decoded token:
+//
+//	{
+//	    "jti": "uuid-token-id",
+//	    "sub": "uuid-user-id",
+//	    "usr": "username",
+//	    "sid": "uuid-session-id",
+//	    "iat": 1688888888,
+//	    "exp": 1690000000,
+//	    "typ": "refresh"
+//	}
 type RefreshTokenClaims struct {
 	ID        uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
 	Subject   uuid.UUID `json:"sub"` // Subject (user ID as UUID)
@@ -156,6 +206,22 @@ type RefreshTokenClaims struct {
 	TokenType TokenType `json:"typ"` // Token type ("refresh")
 }
 
+// AccessTokenResponse represents the output of a successful access token creation.
+//
+// This struct is returned to the caller after a token is signed and includes the raw JWT,
+// expiry metadata, user ID, and roles.
+//
+// Example:
+//
+//	resp := &AccessTokenResponse{
+//	    Token:     "eyJhbGciOi...",
+//	    Subject:   userID,
+//	    Username:  "johndoe",
+//	    SessionID: sessionID,
+//	    ExpiresAt: time.Now().Add(30 * time.Minute),
+//	    IssuedAt:  time.Now(),
+//	    Roles:     []string{"admin"},
+//	}
 type AccessTokenResponse struct {
 	Token     string    `json:"tok"` // The signed JWT string
 	Subject   uuid.UUID `json:"sub"` // User ID (UUID)
@@ -166,6 +232,13 @@ type AccessTokenResponse struct {
 	Roles     []string  `json:"rls"` // User roles
 }
 
+// RefreshTokenResponse is the result of creating or rotating a refresh token.
+//
+// It contains the raw JWT token string, metadata for expiration, and identifying user/session info.
+//
+// Example:
+//
+//	refreshResp, err := maker.CreateRefreshToken(ctx, userID, "user", sessionID)
 type RefreshTokenResponse struct {
 	Token     string    `json:"tok"` // The signed JWT string
 	Subject   uuid.UUID `json:"sub"` // User ID (UUID)
@@ -175,6 +248,15 @@ type RefreshTokenResponse struct {
 	IssuedAt  time.Time `json:"iat"` // Issuance timestamp
 }
 
+// GourdianTokenMaker defines the interface for generating and verifying secure access and refresh tokens.
+//
+// Any implementation (e.g., JWTMaker) must satisfy this interface to provide
+// token creation, verification, revocation, and rotation capabilities.
+//
+// Example usage:
+//
+//	access, err := maker.CreateAccessToken(ctx, userID, "username", []string{"admin"}, sessionID)
+//	refresh, err := maker.CreateRefreshToken(ctx, userID, "username", sessionID)
 type GourdianTokenMaker interface {
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
@@ -193,6 +275,26 @@ type JWTMaker struct {
 	redisClient   *redis.Client       // Redis client for token rotation (nil if rotation disabled)
 }
 
+// NewGourdianTokenMaker creates a new token maker instance with the provided configuration.
+//
+// This is the primary initialization function that:
+// 1. Validates the configuration
+// 2. Initializes cryptographic keys
+// 3. Sets up Redis connection if rotation/revocation is enabled
+// 4. Returns a ready-to-use token maker
+//
+// Parameters:
+//   - config: Complete token configuration
+//   - redisOpts: Redis options (required if Redis-based features like rotation/revocation are enabled)
+//
+// Returns:
+// A fully initialized GourdianTokenMaker or error.
+//
+// Example:
+//
+//	config := DefaultGourdianTokenConfig("your-secret-key")
+//	redisOpts := &redis.Options{ Addr: "localhost:6379" }
+//	maker, err := NewGourdianTokenMaker(ctx, config, redisOpts)
 func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) {
 	// Validate configuration
 	if err := validateConfig(&config); err != nil {
@@ -241,6 +343,37 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	return maker, nil
 }
 
+// CreateAccessToken generates a new JWT access token containing the user's identity and authorization claims.
+// The token is signed using the maker's private key and includes standard JWT claims along with custom claims
+// for roles and session management. The token expiration is determined by the maker's configuration.
+//
+// Parameters:
+//   - ctx: Context for request-scoped values, cancellations, and deadlines
+//   - userID: Unique identifier for the user (UUID)
+//   - username: Human-readable user identifier
+//   - roles: List of authorization roles granted to the user (cannot be empty)
+//   - sessionID: Unique identifier for the user's session
+//
+// Returns:
+//   - AccessTokenResponse containing the signed token string and metadata
+//   - Error if input validation fails, cryptographic operations fail, or token generation fails
+//
+// Example:
+//
+//	maker, _ := NewGourdianTokenMaker(ctx, config, redisOpts)
+//	userID := uuid.MustParse("a1b2c3d4-e5f6-7890-g1h2-i3j4k5l6m7n8")
+//	sessionID := uuid.New()
+//	token, err := maker.CreateAccessToken(
+//	    ctx,
+//	    userID,
+//	    "john_doe",
+//	    []string{"admin", "editor"},
+//	    sessionID,
+//	)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	fmt.Printf("Generated access token: %s\n", token.Token)
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
 	if userID == uuid.Nil {
 		return nil, fmt.Errorf("invalid user ID: cannot be empty")
@@ -296,6 +429,36 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 	return response, nil
 }
 
+// CreateRefreshToken generates a long-lived refresh token used to obtain new access tokens without
+// requiring re-authentication. Refresh tokens have different security characteristics than access tokens
+// and are typically stored more securely. The token includes the user's identity and session information
+// but no role claims.
+//
+// Parameters:
+//   - ctx: Context for request-scoped values, cancellations, and deadlines
+//   - userID: Unique identifier for the user (UUID)
+//   - username: Human-readable user identifier
+//   - sessionID: Unique identifier for the user's session
+//
+// Returns:
+//   - RefreshTokenResponse containing the signed token string and metadata
+//   - Error if input validation fails or token generation fails
+//
+// Example:
+//
+//	maker, _ := NewGourdianTokenMaker(ctx, config, redisOpts)
+//	userID := uuid.MustParse("a1b2c3d4-e5f6-7890-g1h2-i3j4k5l6m7n8")
+//	sessionID := uuid.New()
+//	token, err := maker.CreateRefreshToken(
+//	    ctx,
+//	    userID,
+//	    "john_doe",
+//	    sessionID,
+//	)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	fmt.Printf("Generated refresh token: %s (expires %v)\n", token.Token, token.ExpiresAt)
 func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) {
 	if userID == uuid.Nil {
 		return nil, fmt.Errorf("invalid user ID: cannot be empty")
@@ -339,6 +502,25 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 	return response, nil
 }
 
+// VerifyAccessToken validates an access token's signature, checks for revocation (if enabled),
+// and verifies all standard and custom claims. Returns the decoded claims if valid.
+//
+// Parameters:
+//   - ctx: Context for request-scoped values, cancellations, and deadlines
+//   - tokenString: The JWT access token string to verify
+//
+// Returns:
+//   - AccessTokenClaims containing all verified claims from the token
+//   - Error if token is invalid, expired, revoked, or malformed
+//
+// Example:
+//
+//	maker, _ := NewGourdianTokenMaker(ctx, config, redisOpts)
+//	claims, err := maker.VerifyAccessToken(ctx, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    log.Fatal("Token verification failed:", err)
+//	}
+//	fmt.Printf("Valid token for user %s with roles %v\n", claims.Username, claims.Roles)
 func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
 
 	if maker.config.AccessToken.RevocationEnabled && maker.redisClient != nil {
@@ -392,6 +574,25 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 	return accessClaims, nil
 }
 
+// VerifyRefreshToken validates a refresh token's signature, checks for revocation (if enabled),
+// and verifies all standard claims. Returns the decoded claims if valid.
+//
+// Parameters:
+//   - ctx: Context for request-scoped values, cancellations, and deadlines
+//   - tokenString: The JWT refresh token string to verify
+//
+// Returns:
+//   - RefreshTokenClaims containing all verified claims from the token
+//   - Error if token is invalid, expired, revoked, or malformed
+//
+// Example:
+//
+//	maker, _ := NewGourdianTokenMaker(ctx, config, redisOpts)
+//	claims, err := maker.VerifyRefreshToken(ctx, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    log.Fatal("Token verification failed:", err)
+//	}
+//	fmt.Printf("Valid refresh token for user %s (session %v)\n", claims.Username, claims.SessionID)
 func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error) {
 
 	if maker.config.RefreshToken.RevocationEnabled && maker.redisClient != nil {
@@ -432,6 +633,25 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 	return mapToRefreshClaims(claims)
 }
 
+// RevokeAccessToken invalidates an access token before its natural expiration,
+// preventing its future use. Requires Redis-based revocation to be enabled in configuration.
+// The revocation is stored in Redis with a TTL matching the token's remaining lifetime.
+//
+// Parameters:
+//   - ctx: Context for request-scoped values, cancellations, and deadlines
+//   - token: The access token string to revoke
+//
+// Returns:
+//   - Error if revocation is disabled, token is invalid, or Redis operation fails
+//
+// Example:
+//
+//	maker, _ := NewGourdianTokenMaker(ctx, config, redisOpts)
+//	err := maker.RevokeAccessToken(ctx, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    log.Fatal("Failed to revoke token:", err)
+//	}
+//	fmt.Println("Access token successfully revoked")
 func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) error {
 	if !maker.config.AccessToken.RevocationEnabled || maker.redisClient == nil {
 		return fmt.Errorf("access token revocation is not enabled")
@@ -460,6 +680,25 @@ func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) erro
 	return maker.redisClient.Set(ctx, "revoked:access:"+token, "1", ttl).Err()
 }
 
+// RevokeRefreshToken invalidates a refresh token before its natural expiration,
+// preventing its future use for obtaining new access tokens. Requires Redis-based
+// revocation to be enabled in configuration.
+//
+// Parameters:
+//   - ctx: Context for request-scoped values, cancellations, and deadlines
+//   - token: The refresh token string to revoke
+//
+// Returns:
+//   - Error if revocation is disabled, token is invalid, or Redis operation fails
+//
+// Example:
+//
+//	maker, _ := NewGourdianTokenMaker(ctx, config, redisOpts)
+//	err := maker.RevokeRefreshToken(ctx, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    log.Fatal("Failed to revoke token:", err)
+//	}
+//	fmt.Println("Refresh token successfully revoked")
 func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) error {
 	if !maker.config.RefreshToken.RevocationEnabled || maker.redisClient == nil {
 		return fmt.Errorf("refresh token revocation is not enabled")
@@ -488,6 +727,27 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 	return maker.redisClient.Set(ctx, "revoked:refresh:"+token, "1", ttl).Err()
 }
 
+// RotateRefreshToken generates a new refresh token while invalidating the previous one,
+// implementing the refresh token rotation security practice. The old token is recorded
+// in Redis to prevent immediate reuse (detection of token replay attacks). Requires
+// rotation to be enabled in configuration.
+//
+// Parameters:
+//   - ctx: Context for request-scoped values, cancellations, and deadlines
+//   - oldToken: The refresh token to rotate out
+//
+// Returns:
+//   - RefreshTokenResponse containing the new refresh token and metadata
+//   - Error if rotation is disabled, old token is invalid, or Redis operation fails
+//
+// Example:
+//
+//	maker, _ := NewGourdianTokenMaker(ctx, config, redisOpts)
+//	newToken, err := maker.RotateRefreshToken(ctx, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    log.Fatal("Failed to rotate token:", err)
+//	}
+//	fmt.Printf("Issued new refresh token: %s (expires %v)\n", newToken.Token, newToken.ExpiresAt)
 func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) {
 	if !maker.config.RefreshToken.RotationEnabled {
 		return nil, fmt.Errorf("token rotation not enabled")
