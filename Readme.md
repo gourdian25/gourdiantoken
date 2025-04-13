@@ -1,4 +1,4 @@
-# GourdianToken – Secure & Scalable JWT Management for Golang backend
+# GourdianToken – Secure & Scalable JWT Management for Golang Backend
 
 ![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
@@ -1442,7 +1442,7 @@ BenchmarkRotateRefreshTokenParallel-8           4773        220562 ns/op
 ...
 ```
 
-> 🧠 See the [Performance](#performance) section for detailed metrics and recommendations.
+> 🧠 See the [Performance] (#-performance) section for detailed metrics and recommendations.
 
 ---
 
@@ -1501,4 +1501,3 @@ Includes:
 
 Made with ❤️ by Go developers — for Go developers.  
 Secure authentication shouldn't be hard. GourdianToken makes it elegant, efficient, and production-ready.
-
