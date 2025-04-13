@@ -1,0 +1,46 @@
+logan@WarHammer ~/gourdiantoken (master)> make release
+git tag v1.0.1
+git push origin v1.0.1
+Total 0 (delta 0), reused 0 (delta 0), pack-reused 0
+To github.com:gourdian25/gourdiantoken.git
+ * [new tag]         v1.0.1 -> v1.0.1
+goreleaser release --clean
+  • starting release...
+  • loading                                          path=.goreleaser.yml
+  • loading environment variables
+    • using token from  $GITHUB_TOKEN 
+  • getting and validating git state
+    • git state                                      commit=9c6bcc8e3f9b84d46fc2711748ee8a60cab5bda1 branch=master current_tag=v1.0.1 previous_tag=v0.0.5 dirty=false
+  • parsing tag
+  • setting defaults
+  • running before hooks
+    • running                                        hook=go mod tidy
+  • checking distribution directory
+    • cleaning dist
+  • setting up metadata
+  • storing release metadata
+    • writing                                        file=dist/metadata.json
+  • loading go mod information
+  • build prerequisites
+  • writing effective config file
+    • writing                                        config=dist/config.yaml
+  • building binaries
+    • skip is set                                    id=library
+  • generating changelog
+    • writing                                        changelog=dist/CHANGELOG.md
+  • archives
+  • calculating checksums
+  • publishing
+    • scm releases
+      • creating or updating release                 tag=v1.0.1 repo=gourdian25/gourdiantoken
+      • release created                              name=v1.0.1 release-id=208323473 request-id=F404:2F483D:3D60BF:51651A:67E3AEC0
+      • release updated                              name= release-id=208323473 request-id=F404:2F483D:3D6147:5165A9:67E3AEC1
+      • release created/updated                      url=https://github.com/gourdian25/gourdiantoken/releases/tag/v1.0.1 published=true
+      • took: 2s
+  • took: 2s
+  • storing artifacts metadata
+    • writing                                        file=dist/artifacts.json
+  • announcing
+  • release succeeded after 2s
+  • thanks for using goreleaser!
+logan@WarHammer ~/gourdiantoken (master)> 

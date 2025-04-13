@@ -1,4 +1,4 @@
-VERSION := v1.0.1
+VERSION := v1.0.2
 
 .PHONY: build
 build:
@@ -6,7 +6,23 @@ build:
 
 .PHONY: test
 test:
-	go test -v ./...
+	go test -v .
+
+.PHONY: coverage
+coverage:
+	go test -coverprofile=coverage.out .
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "HTML coverage report saved as coverage.html"
+
+.PHONY: coverage-summary
+coverage-summary:
+	go test -coverprofile=coverage.out .
+	go tool cover -func=coverage.out
+
+.PHONY: bench
+bench:
+	go test -bench=. -benchmem .
+
 
 .PHONY: release
 release:
