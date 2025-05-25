@@ -229,7 +229,7 @@ func DefaultGourdianTokenMaker(
 		PublicKeyPath:            "",
 		Issuer:                   "gourdian.com",
 		Audience:                 nil,
-		AllowedAlgorithms:        []string{"HS256", "RS256", "ES256"},
+		AllowedAlgorithms:        []string{"HS256", "RS256", "ES256", "PS256"},
 		RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
 		SigningMethod:            Symmetric,
 		AccessExpiryDuration:     30 * time.Minute,
@@ -846,14 +846,21 @@ func validateConfig(config *GourdianTokenConfig) error {
 		return fmt.Errorf("algorithm %s is too weak for production use", config.Algorithm)
 	}
 
-	// // Validate allowed algorithms if specified
-	// if len(config.AllowedAlgorithms) > 0 {
-	// 	for _, alg := range config.AllowedAlgorithms {
-	// 		if !isSupportedAlgorithm(alg) {
-	// 			return fmt.Errorf("unsupported algorithm in allowed list: %s", alg)
-	// 		}
-	// 	}
-	// }
+	if len(config.AllowedAlgorithms) > 0 {
+		supportedAlgs := map[string]bool{
+			"HS256": true, "HS384": true, "HS512": true,
+			"RS256": true, "RS384": true, "RS512": true,
+			"ES256": true, "ES384": true, "ES512": true,
+			"PS256": true, "PS384": true, "PS512": true,
+			"EdDSA": true,
+		}
+
+		for _, alg := range config.AllowedAlgorithms {
+			if !supportedAlgs[alg] {
+				return fmt.Errorf("unsupported algorithm in AllowedAlgorithms: %s", alg)
+			}
+		}
+	}
 
 	return nil
 }
