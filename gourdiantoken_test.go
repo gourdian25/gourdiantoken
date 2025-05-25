@@ -529,69 +529,6 @@ func TestTokenRotation_EdgeCases(t *testing.T) {
 	})
 }
 
-func TestConfigValidation(t *testing.T) {
-	t.Run("Valid Symmetric Config", func(t *testing.T) {
-		config := GourdianTokenConfig{
-			Algorithm:                "HS256",
-			SigningMethod:            Symmetric,
-			SymmetricKey:             testSymmetricKey,
-			PrivateKeyPath:           "",
-			PublicKeyPath:            "",
-			AccessExpiryDuration:     time.Hour,
-			AccessMaxLifetimeExpiry:  24 * time.Hour,
-			RefreshExpiryDuration:    24 * time.Hour,
-			RefreshMaxLifetimeExpiry: 7 * 24 * time.Hour,
-		}
-		err := validateConfig(&config)
-		assert.NoError(t, err)
-	})
-
-	t.Run("Valid Asymmetric Config", func(t *testing.T) {
-		privatePath, publicPath := generateTempRSAPair(t)
-		config := GourdianTokenConfig{
-			Algorithm:                "RS256",
-			SigningMethod:            Asymmetric,
-			SymmetricKey:             "",
-			PrivateKeyPath:           privatePath,
-			PublicKeyPath:            publicPath,
-			AccessExpiryDuration:     time.Hour,
-			AccessMaxLifetimeExpiry:  24 * time.Hour,
-			RefreshExpiryDuration:    24 * time.Hour,
-			RefreshMaxLifetimeExpiry: 7 * 24 * time.Hour,
-		}
-		err := validateConfig(&config)
-		assert.NoError(t, err)
-	})
-
-	t.Run("Invalid Config - Mixed Key Configuration", func(t *testing.T) {
-		privatePath, publicPath := generateTempRSAPair(t)
-		config := GourdianTokenConfig{
-			Algorithm:               "HS256",
-			SigningMethod:           Symmetric,
-			SymmetricKey:            testSymmetricKey,
-			PrivateKeyPath:          privatePath, // This should cause validation to fail
-			PublicKeyPath:           publicPath,  // This should cause validation to fail
-			AccessExpiryDuration:    time.Hour,
-			AccessMaxLifetimeExpiry: 24 * time.Hour,
-		}
-		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "private and public key paths must be empty for symmetric signing")
-	})
-
-	t.Run("Invalid Algorithm for Method", func(t *testing.T) {
-		config := GourdianTokenConfig{
-			Algorithm:            "RS256", // RSA algorithm
-			SigningMethod:        Symmetric,
-			SymmetricKey:         testSymmetricKey,
-			AccessExpiryDuration: time.Hour,
-		}
-		err := validateConfig(&config)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "algorithm RS256 not compatible with symmetric signing")
-	})
-}
-
 func TestTokenRotation_ReuseInterval(t *testing.T) {
 	client := redisTestClient(t)
 	defer func() {

@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (66.0%)</option>
+				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (68.8%)</option>
 				
 				</select>
 			</div>
@@ -794,7 +794,7 @@ func (maker *JWTMaker) initializeSigningMethod() error <span class="cov8" title=
                                 break</span>
                         }
                 }
-                <span class="cov8" title="1">if !allowed </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if !allowed </span><span class="cov8" title="1">{
                         return fmt.Errorf("configured algorithm %s not in allowed algorithms list",
                                 maker.config.Algorithm)
                 }</span>
@@ -813,23 +813,23 @@ func (maker *JWTMaker) initializeSigningMethod() error <span class="cov8" title=
                 maker.signingMethod = jwt.SigningMethodRS384</span>
         case "RS512":<span class="cov0" title="0">
                 maker.signingMethod = jwt.SigningMethodRS512</span>
-        case "PS256":<span class="cov0" title="0">
+        case "PS256":<span class="cov8" title="1">
                 maker.signingMethod = jwt.SigningMethodPS256</span>
         case "PS384":<span class="cov0" title="0">
                 maker.signingMethod = jwt.SigningMethodPS384</span>
         case "PS512":<span class="cov0" title="0">
                 maker.signingMethod = jwt.SigningMethodPS512</span>
-        case "ES256":<span class="cov0" title="0">
+        case "ES256":<span class="cov8" title="1">
                 maker.signingMethod = jwt.SigningMethodES256</span>
         case "ES384":<span class="cov0" title="0">
                 maker.signingMethod = jwt.SigningMethodES384</span>
         case "ES512":<span class="cov0" title="0">
                 maker.signingMethod = jwt.SigningMethodES512</span>
-        case "EdDSA":<span class="cov0" title="0">
+        case "EdDSA":<span class="cov8" title="1">
                 maker.signingMethod = jwt.SigningMethodEdDSA</span>
-        case "none":<span class="cov0" title="0">
+        case "none":<span class="cov8" title="1">
                 return fmt.Errorf("unsecured tokens are disabled for security reasons")</span>
-        default:<span class="cov0" title="0">
+        default:<span class="cov8" title="1">
                 return fmt.Errorf("unsupported algorithm: %s", maker.config.Algorithm)</span>
         }
 
@@ -851,7 +851,7 @@ func (maker *JWTMaker) initializeKeys() error <span class="cov8" title="1">{
 
 func (maker *JWTMaker) parseKeyPair() error <span class="cov8" title="1">{
         privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
-        if err != nil </span><span class="cov0" title="0">{
+        if err != nil </span><span class="cov8" title="1">{
                 return fmt.Errorf("failed to read private key file: %w", err)
         }</span>
 
@@ -907,7 +907,7 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title=
                 <span class="cov8" title="1">if len(config.SymmetricKey) &lt; 32 </span><span class="cov8" title="1">{
                         return fmt.Errorf("symmetric key must be at least 32 bytes")
                 }</span>
-                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov8" title="1">{
+                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov0" title="0">{
                         return fmt.Errorf("private and public key paths must be empty for symmetric signing")
                 }</span>
         case Asymmetric:<span class="cov8" title="1">
@@ -935,11 +935,11 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title=
         }
 
         // Validate token durations make sense
-        <span class="cov8" title="1">if config.AccessExpiryDuration &lt;= 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.AccessExpiryDuration &lt;= 0 </span><span class="cov8" title="1">{
                 return fmt.Errorf("access token duration must be positive")
         }</span>
         <span class="cov8" title="1">if config.AccessMaxLifetimeExpiry &gt; 0 &amp;&amp;
-                config.AccessExpiryDuration &gt; config.AccessMaxLifetimeExpiry </span><span class="cov0" title="0">{
+                config.AccessExpiryDuration &gt; config.AccessMaxLifetimeExpiry </span><span class="cov8" title="1">{
                 return fmt.Errorf("access token duration exceeds max lifetime")
         }</span>
 
@@ -1095,10 +1095,10 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) <span c
                 switch v := aud.(type) </span>{
                 case string:<span class="cov0" title="0">
                         audience = []string{v}</span>
-                case []interface{}:<span class="cov0" title="0">
+                case []interface{}:<span class="cov8" title="1">
                         audience = make([]string, 0, len(v))
-                        for _, a := range v </span><span class="cov0" title="0">{
-                                if aStr, ok := a.(string); ok </span><span class="cov0" title="0">{
+                        for _, a := range v </span><span class="cov8" title="1">{
+                                if aStr, ok := a.(string); ok </span><span class="cov8" title="1">{
                                         audience = append(audience, aStr)
                                 }</span>
                         }
@@ -1203,10 +1203,10 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) <span
                 switch v := aud.(type) </span>{
                 case string:<span class="cov0" title="0">
                         audience = []string{v}</span>
-                case []interface{}:<span class="cov0" title="0">
+                case []interface{}:<span class="cov8" title="1">
                         audience = make([]string, 0, len(v))
-                        for _, a := range v </span><span class="cov0" title="0">{
-                                if aStr, ok := a.(string); ok </span><span class="cov0" title="0">{
+                        for _, a := range v </span><span class="cov8" title="1">{
+                                if aStr, ok := a.(string); ok </span><span class="cov8" title="1">{
                                         audience = append(audience, aStr)
                                 }</span>
                         }
