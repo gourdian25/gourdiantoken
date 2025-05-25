@@ -277,15 +277,12 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 type AccessTokenClaims struct {
 	ID        uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
 	Subject   uuid.UUID `json:"sub"` // Subject (user UUID)
-	SessionID uuid.UUID `json:"sid"` // Session identifier (UUIDv4)
 	Username  string    `json:"usr"` // Human-readable username
-	Issuer    string    `json:"iss"` // Issuer identifier (e.g., "auth.example.com")
-	Audience  []string  `json:"aud"` // Intended audience (e.g., ["api.example.com"])
-	Roles     []string  `json:"rls"` // Authorization roles
+	SessionID uuid.UUID `json:"sid"` // Session identifier (UUIDv4)
 	IssuedAt  time.Time `json:"iat"` // Issuance timestamp (UTC)
 	ExpiresAt time.Time `json:"exp"` // Expiration timestamp (UTC)
-	NotBefore time.Time `json:"nbf"` // Not before timestamp (optional)
 	TokenType TokenType `json:"typ"` // Fixed value "access"
+	Roles     []string  `json:"rls"` // Authorization roles
 }
 
 // RefreshTokenClaims represents the decoded payload of a refresh token.
@@ -307,13 +304,10 @@ type AccessTokenClaims struct {
 type RefreshTokenClaims struct {
 	ID        uuid.UUID `json:"jti"` // Unique token identifier
 	Subject   uuid.UUID `json:"sub"` // Subject (user UUID)
-	SessionID uuid.UUID `json:"sid"` // Session identifier
 	Username  string    `json:"usr"` // Human-readable username
-	Issuer    string    `json:"iss"` // Issuer identifier (e.g., "auth.example.com")
-	Audience  []string  `json:"aud"` // Intended audience (e.g., ["api.example.com"])
+	SessionID uuid.UUID `json:"sid"` // Session identifier
 	IssuedAt  time.Time `json:"iat"` // Issuance timestamp
 	ExpiresAt time.Time `json:"exp"` // Expiration timestamp
-	NotBefore time.Time `json:"nbf"` // Not before timestamp (optional)
 	TokenType TokenType `json:"typ"` // Fixed value "refresh"
 }
 
@@ -334,16 +328,13 @@ type RefreshTokenClaims struct {
 //	    "rls": ["admin", "user"]
 //	}
 type AccessTokenResponse struct {
-	Subject   uuid.UUID `json:"sub"` // User UUID
-	SessionID uuid.UUID `json:"sid"` // Session UUID
 	Token     string    `json:"tok"` // Signed JWT string
-	Issuer    string    `json:"iss"` // Issuer identifier
+	Subject   uuid.UUID `json:"sub"` // User UUID
 	Username  string    `json:"usr"` // Username
-	Roles     []string  `json:"rls"` // Authorization roles
-	Audience  []string  `json:"aud"` // Intended audience
-	IssuedAt  time.Time `json:"iat"` // Issuance timestamp (RFC3339)
+	SessionID uuid.UUID `json:"sid"` // Session UUID
 	ExpiresAt time.Time `json:"exp"` // Expiration timestamp (RFC3339)
-	NotBefore time.Time `json:"nbf"` // Not before timestamp (optional)
+	IssuedAt  time.Time `json:"iat"` // Issuance timestamp (RFC3339)
+	Roles     []string  `json:"rls"` // Authorization roles
 }
 
 // RefreshTokenResponse contains the results of refresh token generation or rotation.
@@ -362,13 +353,10 @@ type AccessTokenResponse struct {
 //	    "iat": "2023-01-01T11:30:00Z"
 //	}
 type RefreshTokenResponse struct {
-	Subject   uuid.UUID `json:"sub"` // User UUID
-	SessionID uuid.UUID `json:"sid"` // Session UUID
 	Token     string    `json:"tok"` // Signed JWT string
-	Issuer    string    `json:"iss"` // Issuer identifier
+	Subject   uuid.UUID `json:"sub"` // User UUID
 	Username  string    `json:"usr"` // Username
-	Audience  []string  `json:"aud"` // Intended audience
-	NotBefore time.Time `json:"nbf"` // Not before timestamp
+	SessionID uuid.UUID `json:"sid"` // Session UUID
 	ExpiresAt time.Time `json:"exp"` // Expiration timestamp
 	IssuedAt  time.Time `json:"iat"` // Issuance timestamp
 }
@@ -593,8 +581,6 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		Issuer:    maker.config.AccessToken.Issuer,
-		Audience:  maker.config.AccessToken.Audience,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(maker.config.AccessToken.Duration),
 		TokenType: AccessToken,
@@ -613,8 +599,6 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		Subject:   claims.Subject,
 		Username:  claims.Username,
 		SessionID: claims.SessionID,
-		Issuer:    claims.Issuer,
-		Audience:  claims.Audience,
 		ExpiresAt: claims.ExpiresAt,
 		IssuedAt:  claims.IssuedAt,
 		Roles:     roles,
@@ -672,8 +656,6 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		Issuer:    maker.config.AccessToken.Issuer,   // Using same issuer as access token
-		Audience:  maker.config.AccessToken.Audience, // Using same audience as access token
 		IssuedAt:  now,
 		ExpiresAt: now.Add(maker.config.RefreshToken.Duration),
 		TokenType: RefreshToken,
@@ -691,8 +673,6 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 		Subject:   claims.Subject,
 		Username:  claims.Username,
 		SessionID: claims.SessionID,
-		Issuer:    claims.Issuer,
-		Audience:  claims.Audience,
 		ExpiresAt: claims.ExpiresAt,
 		IssuedAt:  claims.IssuedAt,
 	}
@@ -1271,38 +1251,26 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 		if len(v.Roles) == 0 {
 			panic("at least one role must be provided")
 		}
-		mapClaims := jwt.MapClaims{
+		return jwt.MapClaims{
 			"jti": v.ID.String(),
 			"sub": v.Subject.String(),
 			"usr": v.Username,
 			"sid": v.SessionID.String(),
-			"iss": v.Issuer,
-			"aud": v.Audience,
 			"iat": v.IssuedAt.Unix(),
 			"exp": v.ExpiresAt.Unix(),
 			"typ": string(v.TokenType),
 			"rls": v.Roles,
 		}
-		if !v.NotBefore.IsZero() {
-			mapClaims["nbf"] = v.NotBefore.Unix()
-		}
-		return mapClaims
 	case RefreshTokenClaims:
-		mapClaims := jwt.MapClaims{
+		return jwt.MapClaims{
 			"jti": v.ID.String(),
 			"sub": v.Subject.String(),
 			"usr": v.Username,
 			"sid": v.SessionID.String(),
-			"iss": v.Issuer,
-			"aud": v.Audience,
 			"iat": v.IssuedAt.Unix(),
 			"exp": v.ExpiresAt.Unix(),
 			"typ": string(v.TokenType),
 		}
-		if !v.NotBefore.IsZero() {
-			mapClaims["nbf"] = v.NotBefore.Unix()
-		}
-		return mapClaims
 	default:
 		panic(fmt.Sprintf("unsupported claims type: %T", claims))
 	}
@@ -1349,27 +1317,6 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		return nil, fmt.Errorf("invalid username type: expected string")
 	}
 
-	// Validate issuer claim
-	issuer, _ := claims["iss"].(string) // Optional
-
-	// Validate audience claim
-	var audience []string
-	if aud, ok := claims["aud"]; ok {
-		switch v := aud.(type) {
-		case string:
-			audience = []string{v}
-		case []interface{}:
-			audience = make([]string, 0, len(v))
-			for _, a := range v {
-				if aStr, ok := a.(string); ok {
-					audience = append(audience, aStr)
-				}
-			}
-		case []string:
-			audience = v
-		}
-	}
-
 	// Validate roles claim
 	rolesInterface, ok := claims["rls"]
 	if !ok {
@@ -1406,29 +1353,20 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 	// Get timestamps with validation
 	iat := getUnixTime(claims["iat"])
 	exp := getUnixTime(claims["exp"])
-	nbf := getUnixTime(claims["nbf"])
 	if iat == 0 || exp == 0 {
 		return nil, fmt.Errorf("invalid timestamp format")
 	}
 
-	accessClaims := &AccessTokenClaims{
+	return &AccessTokenClaims{
 		ID:        tokenID,
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		Issuer:    issuer,
-		Audience:  audience,
 		IssuedAt:  time.Unix(iat, 0),
 		ExpiresAt: time.Unix(exp, 0),
 		TokenType: TokenType(typ),
 		Roles:     roles,
-	}
-
-	if nbf != 0 {
-		accessClaims.NotBefore = time.Unix(nbf, 0)
-	}
-
-	return accessClaims, nil
+	}, nil
 }
 
 // mapToRefreshClaims decodes jwt.MapClaims into a strongly-typed RefreshTokenClaims struct.
@@ -1456,25 +1394,6 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 		return nil, fmt.Errorf("invalid username type: expected string")
 	}
 
-	issuer, _ := claims["iss"].(string) // Optional
-
-	var audience []string
-	if aud, ok := claims["aud"]; ok {
-		switch v := aud.(type) {
-		case string:
-			audience = []string{v}
-		case []interface{}:
-			audience = make([]string, 0, len(v))
-			for _, a := range v {
-				if aStr, ok := a.(string); ok {
-					audience = append(audience, aStr)
-				}
-			}
-		case []string:
-			audience = v
-		}
-	}
-
 	typ, ok := claims["typ"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid or missing token type")
@@ -1486,29 +1405,20 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 
 	iat := getUnixTime(claims["iat"])
 	exp := getUnixTime(claims["exp"])
-	nbf := getUnixTime(claims["nbf"])
 
 	if iat == 0 || exp == 0 {
 		return nil, fmt.Errorf("invalid timestamp format")
 	}
 
-	refreshClaims := &RefreshTokenClaims{
+	return &RefreshTokenClaims{
 		ID:        tokenID,
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		Issuer:    issuer,
-		Audience:  audience,
 		IssuedAt:  time.Unix(iat, 0),
 		ExpiresAt: time.Unix(exp, 0),
 		TokenType: TokenType(typ),
-	}
-
-	if nbf != 0 {
-		refreshClaims.NotBefore = time.Unix(nbf, 0)
-	}
-
-	return refreshClaims, nil
+	}, nil
 }
 
 // validateTokenClaims performs runtime validation of claims for expiration, issuance, and required fields.
