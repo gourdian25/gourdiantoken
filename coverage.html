@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (44.6%)</option>
+				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (60.6%)</option>
 				
 				</select>
 			</div>
@@ -160,6 +160,27 @@ func NewGourdianTokenConfig(
         }
 }</span>
 
+func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig <span class="cov8" title="1">{
+        return GourdianTokenConfig{
+                RevocationEnabled:        false,
+                RotationEnabled:          false,
+                SigningMethod:            Symmetric,
+                Algorithm:                "HS256",
+                SymmetricKey:             symmetricKey,
+                PrivateKeyPath:           "",
+                PublicKeyPath:            "",
+                Issuer:                   "gourdian.com",
+                Audience:                 nil,
+                AllowedAlgorithms:        []string{"HS256", "RS256", "ES256", "PS256"},
+                RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
+                AccessExpiryDuration:     30 * time.Minute,
+                AccessMaxLifetimeExpiry:  24 * time.Hour,
+                RefreshExpiryDuration:    7 * 24 * time.Hour,
+                RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+                RefreshReuseInterval:     5 * time.Minute,
+        }
+}</span>
+
 type AccessTokenClaims struct {
         ID                uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
         Subject           uuid.UUID `json:"sub"` // Subject (user UUID)
@@ -238,7 +259,7 @@ type JWTMaker struct {
 
 func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) <span class="cov8" title="1">{
         // Validate configuration
-        if err := validateConfig(&amp;config); err != nil </span><span class="cov0" title="0">{
+        if err := validateConfig(&amp;config); err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid config: %w", err)
         }</span>
 
@@ -435,13 +456,13 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 
 func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) <span class="cov8" title="1">{
 
-        if maker.config.RevocationEnabled &amp;&amp; maker.redisClient != nil </span><span class="cov0" title="0">{
+        if maker.config.RevocationEnabled &amp;&amp; maker.redisClient != nil </span><span class="cov8" title="1">{
 
                 exists, err := maker.redisClient.Exists(ctx, revokedAccessPrefix+tokenString).Result()
                 if err != nil </span><span class="cov0" title="0">{
                         return nil, fmt.Errorf("failed to check token revocation: %w", err)
                 }</span>
-                <span class="cov0" title="0">if exists &gt; 0 </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if exists &gt; 0 </span><span class="cov8" title="1">{
                         return nil, fmt.Errorf("token has been revoked")
                 }</span>
         }
@@ -451,39 +472,39 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
                 if token.Method.Alg() != maker.signingMethod.Alg() </span><span class="cov8" title="1">{
                         return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
                 }</span>
-                <span class="cov0" title="0">return maker.publicKey, nil</span>
+                <span class="cov8" title="1">return maker.publicKey, nil</span>
         })
 
         <span class="cov8" title="1">if err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid token: %w", err)
         }</span>
 
-        <span class="cov0" title="0">if !token.Valid </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if !token.Valid </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("invalid token: %v", err)
         }</span>
 
-        <span class="cov0" title="0">claims, ok := token.Claims.(jwt.MapClaims)
+        <span class="cov8" title="1">claims, ok := token.Claims.(jwt.MapClaims)
         if !ok || !token.Valid </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("invalid token claims")
         }</span>
 
         // 2. Validate all required claims exist
-        <span class="cov0" title="0">if err := validateTokenClaims(claims, AccessToken, maker.config.RequiredClaims); err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err := validateTokenClaims(claims, AccessToken, maker.config.RequiredClaims); err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
 
         // 3. Convert and validate UUID formats before other validations
-        <span class="cov0" title="0">accessClaims, err := mapToAccessClaims(claims)
+        <span class="cov8" title="1">accessClaims, err := mapToAccessClaims(claims)
         if err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
 
         // 4. Validate roles claim exists and is non-empty
-        <span class="cov0" title="0">if _, ok := claims["rls"]; !ok </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if _, ok := claims["rls"]; !ok </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("missing roles claim in access token")
         }</span>
 
-        <span class="cov0" title="0">return accessClaims, nil</span>
+        <span class="cov8" title="1">return accessClaims, nil</span>
 }
 
 func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error) <span class="cov8" title="1">{
@@ -519,7 +540,7 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
                 return nil, fmt.Errorf("invalid token claims")
         }</span>
 
-        <span class="cov8" title="1">if err := validateTokenClaims(claims, RefreshToken, maker.config.RequiredClaims); err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err := validateTokenClaims(claims, RefreshToken, maker.config.RequiredClaims); err != nil </span><span class="cov8" title="1">{
                 return nil, err
         }</span>
 
@@ -548,7 +569,7 @@ func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) erro
         if exp == 0 </span><span class="cov8" title="1">{
                 return fmt.Errorf("token missing exp claim")
         }</span>
-        <span class="cov0" title="0">ttl := time.Until(time.Unix(exp, 0))
+        <span class="cov8" title="1">ttl := time.Until(time.Unix(exp, 0))
 
         // Store the token string as revoked in Redis with expiry
         return maker.redisClient.Set(ctx, revokedAccessPrefix+token, "1", ttl).Err()</span>
@@ -761,7 +782,7 @@ func (maker *JWTMaker) initializeSigningMethod() error <span class="cov8" title=
                 maker.signingMethod = jwt.SigningMethodHS384</span>
         case "HS512":<span class="cov0" title="0">
                 maker.signingMethod = jwt.SigningMethodHS512</span>
-        case "RS256":<span class="cov0" title="0">
+        case "RS256":<span class="cov8" title="1">
                 maker.signingMethod = jwt.SigningMethodRS256</span>
         case "RS384":<span class="cov0" title="0">
                 maker.signingMethod = jwt.SigningMethodRS384</span>
@@ -795,31 +816,31 @@ func (maker *JWTMaker) initializeKeys() error <span class="cov8" title="1">{
                 maker.privateKey = []byte(maker.config.SymmetricKey)
                 maker.publicKey = []byte(maker.config.SymmetricKey)
                 return nil</span>
-        case Asymmetric:<span class="cov0" title="0">
+        case Asymmetric:<span class="cov8" title="1">
                 return maker.parseKeyPair()</span>
         default:<span class="cov0" title="0">
                 return fmt.Errorf("unsupported signing method: %s", maker.config.SigningMethod)</span>
         }
 }
 
-func (maker *JWTMaker) parseKeyPair() error <span class="cov0" title="0">{
+func (maker *JWTMaker) parseKeyPair() error <span class="cov8" title="1">{
         privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
         if err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to read private key file: %w", err)
         }</span>
 
-        <span class="cov0" title="0">publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
+        <span class="cov8" title="1">publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
         if err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to read public key file: %w", err)
         }</span>
 
-        <span class="cov0" title="0">switch maker.signingMethod.Alg() </span>{
-        case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":<span class="cov0" title="0">
+        <span class="cov8" title="1">switch maker.signingMethod.Alg() </span>{
+        case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":<span class="cov8" title="1">
                 maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)
                 if err != nil </span><span class="cov0" title="0">{
                         return fmt.Errorf("failed to parse RSA private key: %w", err)
                 }</span>
-                <span class="cov0" title="0">maker.publicKey, err = parseRSAPublicKey(publicKeyBytes)
+                <span class="cov8" title="1">maker.publicKey, err = parseRSAPublicKey(publicKeyBytes)
                 if err != nil </span><span class="cov0" title="0">{
                         return fmt.Errorf("failed to parse RSA public key: %w", err)
                 }</span>
@@ -845,7 +866,7 @@ func (maker *JWTMaker) parseKeyPair() error <span class="cov0" title="0">{
                 return fmt.Errorf("unsupported algorithm for asymmetric signing: %s", maker.signingMethod.Alg())</span>
         }
 
-        <span class="cov0" title="0">return nil</span>
+        <span class="cov8" title="1">return nil</span>
 }
 
 func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title="1">{
@@ -854,32 +875,32 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title=
                 if config.SymmetricKey == "" </span><span class="cov0" title="0">{
                         return fmt.Errorf("symmetric key is required for symmetric signing method")
                 }</span>
-                <span class="cov8" title="1">if !strings.HasPrefix(config.Algorithm, "HS") &amp;&amp; config.Algorithm != "none" </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if !strings.HasPrefix(config.Algorithm, "HS") &amp;&amp; config.Algorithm != "none" </span><span class="cov8" title="1">{
                         return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
                 }</span>
-                <span class="cov8" title="1">if len(config.SymmetricKey) &lt; 32 </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if len(config.SymmetricKey) &lt; 32 </span><span class="cov8" title="1">{
                         return fmt.Errorf("symmetric key must be at least 32 bytes")
                 }</span>
-                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov8" title="1">{
                         return fmt.Errorf("private and public key paths must be empty for symmetric signing")
                 }</span>
-        case Asymmetric:<span class="cov0" title="0">
+        case Asymmetric:<span class="cov8" title="1">
                 if config.PrivateKeyPath == "" || config.PublicKeyPath == "" </span><span class="cov0" title="0">{
                         return fmt.Errorf("private and public key paths are required for asymmetric signing method")
                 }</span>
-                <span class="cov0" title="0">if config.SymmetricKey != "" </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if config.SymmetricKey != "" </span><span class="cov0" title="0">{
                         return fmt.Errorf("symmetric key must be empty for asymmetric signing")
                 }</span>
-                <span class="cov0" title="0">if !strings.HasPrefix(config.Algorithm, "RS") &amp;&amp;
+                <span class="cov8" title="1">if !strings.HasPrefix(config.Algorithm, "RS") &amp;&amp;
                         !strings.HasPrefix(config.Algorithm, "ES") &amp;&amp;
                         !strings.HasPrefix(config.Algorithm, "PS") &amp;&amp;
                         config.Algorithm != "EdDSA" </span><span class="cov0" title="0">{
                         return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
                 }</span>
-                <span class="cov0" title="0">if err := checkFilePermissions(config.PrivateKeyPath, 0644); err != nil </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if err := checkFilePermissions(config.PrivateKeyPath, 0644); err != nil </span><span class="cov0" title="0">{
                         return fmt.Errorf("insecure private key file permissions: %w", err)
                 }</span>
-                <span class="cov0" title="0">if err := checkFilePermissions(config.PublicKeyPath, 0644); err != nil </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if err := checkFilePermissions(config.PublicKeyPath, 0644); err != nil </span><span class="cov0" title="0">{
                         return fmt.Errorf("insecure public key file permissions: %w", err)
                 }</span>
         default:<span class="cov0" title="0">
@@ -942,7 +963,7 @@ func validateAlgorithmAndMethod(config *GourdianTokenConfig) error <span class="
                 if !strings.HasPrefix(config.Algorithm, "HS") </span><span class="cov0" title="0">{
                         return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
                 }</span>
-        case Asymmetric:<span class="cov0" title="0">
+        case Asymmetric:<span class="cov8" title="1">
                 if !strings.HasPrefix(config.Algorithm, "RS") &amp;&amp;
                         !strings.HasPrefix(config.Algorithm, "ES") &amp;&amp;
                         !strings.HasPrefix(config.Algorithm, "PS") &amp;&amp;
@@ -1068,14 +1089,14 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) <span c
 
         <span class="cov8" title="1">var roles []string
         switch v := rolesInterface.(type) </span>{
-        case []interface{}:<span class="cov0" title="0">
+        case []interface{}:<span class="cov8" title="1">
                 roles = make([]string, 0, len(v))
-                for _, r := range v </span><span class="cov0" title="0">{
+                for _, r := range v </span><span class="cov8" title="1">{
                         role, ok := r.(string)
                         if !ok </span><span class="cov0" title="0">{
                                 return nil, fmt.Errorf("invalid role type: expected string")
                         }</span>
-                        <span class="cov0" title="0">roles = append(roles, role)</span>
+                        <span class="cov8" title="1">roles = append(roles, role)</span>
                 }
         case []string:<span class="cov8" title="1">
                 roles = v</span>
@@ -1226,7 +1247,7 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required 
 
         // Validate token type
         <span class="cov8" title="1">tokenType, ok := claims["typ"].(string)
-        if !ok || TokenType(tokenType) != expectedType </span><span class="cov0" title="0">{
+        if !ok || TokenType(tokenType) != expectedType </span><span class="cov8" title="1">{
                 return fmt.Errorf("invalid token type: expected %s", expectedType)
         }</span>
 
@@ -1302,25 +1323,25 @@ func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) <span class
         <span class="cov0" title="0">return eddsaPub, nil</span>
 }
 
-func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) <span class="cov0" title="0">{
+func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) <span class="cov8" title="1">{
         block, _ := pem.Decode(pemBytes)
         if block == nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to parse PEM block containing the RSA private key")
         }</span>
 
-        <span class="cov0" title="0">if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil </span><span class="cov8" title="1">{
                 return key, nil
         }</span>
 
-        <span class="cov0" title="0">if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil </span><span class="cov0" title="0">{
-                if rsaKey, ok := key.(*rsa.PrivateKey); ok </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil </span><span class="cov8" title="1">{
+                if rsaKey, ok := key.(*rsa.PrivateKey); ok </span><span class="cov8" title="1">{
                         return rsaKey, nil
                 }</span>
                 <span class="cov0" title="0">return nil, fmt.Errorf("expected RSA private key, got %T", key)</span>
         }
 
-        <span class="cov0" title="0">var privKey pkcs8
-        if _, err := asn1.Unmarshal(block.Bytes, &amp;privKey); err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">var privKey pkcs8
+        if _, err := asn1.Unmarshal(block.Bytes, &amp;privKey); err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("failed to parse PKCS8 structure: %w", err)
         }</span>
 
@@ -1344,37 +1365,37 @@ func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) <span class="c
         }, nil</span>
 }
 
-func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) <span class="cov0" title="0">{
+func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) <span class="cov8" title="1">{
         block, _ := pem.Decode(pemBytes)
         if block == nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to parse PEM block containing the RSA public key")
         }</span>
 
-        <span class="cov0" title="0">pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-        if err == nil </span><span class="cov0" title="0">{
-                if rsaPub, ok := pub.(*rsa.PublicKey); ok </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+        if err == nil </span><span class="cov8" title="1">{
+                if rsaPub, ok := pub.(*rsa.PublicKey); ok </span><span class="cov8" title="1">{
                         return rsaPub, nil
                 }</span>
                 <span class="cov0" title="0">return nil, fmt.Errorf("expected RSA public key, got %T", pub)</span>
         }
 
-        <span class="cov0" title="0">if pub, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if pub, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil </span><span class="cov0" title="0">{
                 return pub, nil
         }</span>
 
-        <span class="cov0" title="0">cert, err := x509.ParseCertificate(block.Bytes)
-        if err == nil </span><span class="cov0" title="0">{
-                if rsaPub, ok := cert.PublicKey.(*rsa.PublicKey); ok </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">cert, err := x509.ParseCertificate(block.Bytes)
+        if err == nil </span><span class="cov8" title="1">{
+                if rsaPub, ok := cert.PublicKey.(*rsa.PublicKey); ok </span><span class="cov8" title="1">{
                         return rsaPub, nil
                 }</span>
                 <span class="cov0" title="0">return nil, fmt.Errorf("expected RSA public key in certificate, got %T", cert.PublicKey)</span>
         }
 
-        <span class="cov0" title="0">var pubKey struct {
+        <span class="cov8" title="1">var pubKey struct {
                 Algo      pkix.AlgorithmIdentifier
                 BitString asn1.BitString
         }
-        if _, err := asn1.Unmarshal(block.Bytes, &amp;pubKey); err != nil </span><span class="cov0" title="0">{
+        if _, err := asn1.Unmarshal(block.Bytes, &amp;pubKey); err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("failed to parse public key structure: %w", err)
         }</span>
 
@@ -1392,37 +1413,37 @@ func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) <span class="cov
         }, nil</span>
 }
 
-func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) <span class="cov0" title="0">{
+func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) <span class="cov8" title="1">{
         block, _ := pem.Decode(pemBytes)
         if block == nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to parse PEM block containing the ECDSA private key")
         }</span>
 
-        <span class="cov0" title="0">key, err := x509.ParseECPrivateKey(block.Bytes)
-        if err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">key, err := x509.ParseECPrivateKey(block.Bytes)
+        if err != nil </span><span class="cov8" title="1">{
                 pkcs8Key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-                if err != nil </span><span class="cov0" title="0">{
+                if err != nil </span><span class="cov8" title="1">{
                         return nil, fmt.Errorf("failed to parse ECDSA private key: %w", err)
                 }</span>
-                <span class="cov0" title="0">key, ok := pkcs8Key.(*ecdsa.PrivateKey)
+                <span class="cov8" title="1">key, ok := pkcs8Key.(*ecdsa.PrivateKey)
                 if !ok </span><span class="cov0" title="0">{
                         return nil, fmt.Errorf("not a valid ECDSA private key")
                 }</span>
-                <span class="cov0" title="0">return key, nil</span>
+                <span class="cov8" title="1">return key, nil</span>
         }
         <span class="cov0" title="0">return key, nil</span>
 }
 
-func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) <span class="cov0" title="0">{
+func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) <span class="cov8" title="1">{
         block, _ := pem.Decode(pemBytes)
         if block == nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to parse PEM block containing the ECDSA public key")
         }</span>
 
-        <span class="cov0" title="0">pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-        if err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+        if err != nil </span><span class="cov8" title="1">{
                 cert, err := x509.ParseCertificate(block.Bytes)
-                if err != nil </span><span class="cov0" title="0">{
+                if err != nil </span><span class="cov8" title="1">{
                         return nil, fmt.Errorf("failed to parse ECDSA public key: %w", err)
                 }</span>
                 <span class="cov0" title="0">ecdsaPub, ok := cert.PublicKey.(*ecdsa.PublicKey)
@@ -1439,18 +1460,18 @@ func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) <span class=
         <span class="cov0" title="0">return ecdsaPub, nil</span>
 }
 
-func checkFilePermissions(path string, requiredPerm os.FileMode) error <span class="cov0" title="0">{
+func checkFilePermissions(path string, requiredPerm os.FileMode) error <span class="cov8" title="1">{
         info, err := os.Stat(path)
         if err != nil </span><span class="cov0" title="0">{
                 return fmt.Errorf("failed to stat file: %w", err)
         }</span>
 
-        <span class="cov0" title="0">actualPerm := info.Mode().Perm()
+        <span class="cov8" title="1">actualPerm := info.Mode().Perm()
         if actualPerm&amp;^requiredPerm != 0 </span><span class="cov0" title="0">{
                 return fmt.Errorf("file %s has permissions %#o, expected %#o", path, actualPerm, requiredPerm)
         }</span>
 
-        <span class="cov0" title="0">return nil</span>
+        <span class="cov8" title="1">return nil</span>
 }
 
 func getUnixTime(claim interface{}) int64 <span class="cov8" title="1">{
