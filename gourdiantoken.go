@@ -38,97 +38,48 @@ const (
 )
 
 type GourdianTokenConfig struct {
-	Algorithm         string             // JWT signing algorithm (e.g., "HS256", "RS256"). Must match key type.
-	SigningMethod     SigningMethod      // Cryptographic method (Symmetric/Asymmetric)
-	SymmetricKey      string             // Base64-encoded secret key for HMAC (min 32 bytes for HS256)
-	PrivateKeyPath    string             // Path to PEM-encoded private key file (asymmetric only)
-	PublicKeyPath     string             // Path to PEM-encoded public key/certificate (asymmetric only)
-	Issuer            string             // Token issuer identifier (e.g., "auth.example.com")
-	Audience          []string           // Intended recipients (e.g., ["api.example.com"])
-	AllowedAlgorithms []string           // Whitelist of acceptable algorithms for verification
-	RequiredClaims    []string           // Mandatory claims that must be present and valid
-	RevocationEnabled bool               // Whether to check Redis for revoked tokens
-	RotationEnabled   bool               // Whether to enable refresh token rotation
-	AccessToken       AccessTokenConfig  // Fine-grained access token settings
-	RefreshToken      RefreshTokenConfig // Fine-grained refresh token settings
-}
-
-type AccessTokenConfig struct {
-	Duration    time.Duration // Time until token expires after issuance (e.g., 30m)
-	MaxLifetime time.Duration // Absolute maximum validity from creation (e.g., 24h)
-}
-
-type RefreshTokenConfig struct {
-	Duration      time.Duration // Time until token expires after issuance
-	MaxLifetime   time.Duration // Absolute maximum validity from creation
-	ReuseInterval time.Duration // Minimum time between reuse attempts (rotation)
+	RotationEnabled          bool          // Whether to enable refresh token rotation
+	RevocationEnabled        bool          // Whether to check Redis for revoked tokens
+	Algorithm                string        // JWT signing algorithm (e.g., "HS256", "RS256"). Must match key type.
+	SymmetricKey             string        // Base64-encoded secret key for HMAC (min 32 bytes for HS256)
+	PrivateKeyPath           string        // Path to PEM-encoded private key file (asymmetric only)
+	PublicKeyPath            string        // Path to PEM-encoded public key/certificate (asymmetric only)
+	Issuer                   string        // Token issuer identifier (e.g., "auth.example.com")
+	Audience                 []string      // Intended recipients (e.g., ["api.example.com"])
+	AllowedAlgorithms        []string      // Whitelist of acceptable algorithms for verification
+	RequiredClaims           []string      // Mandatory claims that must be present and valid
+	SigningMethod            SigningMethod // Cryptographic method (Symmetric/Asymmetric)
+	AccessExpiryDuration     time.Duration // Time until token expires after issuance (e.g., 30m)
+	AccessMaxLifetimeExpiry  time.Duration // Absolute maximum validity from creation (e.g., 24h)
+	RefreshExpiryDuration    time.Duration // Time until token expires after issuance
+	RefreshMaxLifetimeExpiry time.Duration // Absolute maximum validity from creation
+	RefreshReuseInterval     time.Duration // Minimum time between reuse attempts (rotation)
 }
 
 func NewGourdianTokenConfig(
-	algorithm string,
 	signingMethod SigningMethod,
-	symmetricKey string,
-	privateKeyPath string,
-	publicKeyPath string,
-	accessDuration time.Duration,
-	accessMaxLifetime time.Duration,
-	accessIssuer string,
-	accessAudience []string,
-	accessAllowedAlgorithms []string,
-	accessRequiredClaims []string,
-	accessRevocationEnabled bool,
-	refreshDuration time.Duration,
-	refreshMaxLifetime time.Duration,
-	refreshReuseInterval time.Duration,
-	refreshRotationEnabled bool,
-	refreshRevocationEnabled bool,
+	rotationEnabled, revocationEnabled bool,
+	audience, allowedAlgorithms, requiredClaims []string,
+	algorithm, symmetricKey, privateKeyPath, publicKeyPath, issuer string,
+	accessExpiryDuration, accessMaxLifetimeExpiry, refreshExpiryDuration, refreshMaxLifetimeExpiry, refreshReuseInterval time.Duration,
 ) GourdianTokenConfig {
 	return GourdianTokenConfig{
-		Algorithm:         algorithm,
-		SigningMethod:     signingMethod,
-		SymmetricKey:      symmetricKey,
-		PrivateKeyPath:    privateKeyPath,
-		PublicKeyPath:     publicKeyPath,
-		Issuer:            accessIssuer,
-		Audience:          accessAudience,
-		AllowedAlgorithms: accessAllowedAlgorithms,
-		RequiredClaims:    accessRequiredClaims,
-		RevocationEnabled: accessRevocationEnabled,
-		RotationEnabled:   refreshRotationEnabled,
-		AccessToken: AccessTokenConfig{
-			Duration:    accessDuration,
-			MaxLifetime: accessMaxLifetime,
-		},
-		RefreshToken: RefreshTokenConfig{
-			Duration:      refreshDuration,
-			MaxLifetime:   refreshMaxLifetime,
-			ReuseInterval: refreshReuseInterval,
-		},
-	}
-}
-
-func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
-	return GourdianTokenConfig{
-		Algorithm:         "HS256",
-		SigningMethod:     Symmetric,
-		SymmetricKey:      symmetricKey,
-		PrivateKeyPath:    "",
-		PublicKeyPath:     "",
-		Issuer:            "",
-		Audience:          nil,
-		AllowedAlgorithms: []string{"HS256"},
-		RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "rls"},
-		RevocationEnabled: false,
-		RotationEnabled:   false,
-		AccessToken: AccessTokenConfig{
-			Duration:    30 * time.Minute,
-			MaxLifetime: 24 * time.Hour,
-		},
-		RefreshToken: RefreshTokenConfig{
-			Duration:      7 * 24 * time.Hour,
-			MaxLifetime:   30 * 24 * time.Hour,
-			ReuseInterval: time.Minute,
-		},
+		RevocationEnabled:        revocationEnabled,
+		RotationEnabled:          rotationEnabled,
+		SigningMethod:            signingMethod,
+		Audience:                 audience,
+		AllowedAlgorithms:        allowedAlgorithms,
+		RequiredClaims:           requiredClaims,
+		Algorithm:                algorithm,
+		SymmetricKey:             symmetricKey,
+		PrivateKeyPath:           privateKeyPath,
+		PublicKeyPath:            publicKeyPath,
+		Issuer:                   issuer,
+		AccessExpiryDuration:     accessExpiryDuration,
+		AccessMaxLifetimeExpiry:  accessMaxLifetimeExpiry,
+		RefreshExpiryDuration:    refreshExpiryDuration,
+		RefreshMaxLifetimeExpiry: refreshMaxLifetimeExpiry,
+		RefreshReuseInterval:     refreshReuseInterval,
 	}
 }
 
@@ -143,7 +94,7 @@ type AccessTokenClaims struct {
 	IssuedAt          time.Time `json:"iat"` // Issuance timestamp (UTC)
 	ExpiresAt         time.Time `json:"exp"` // Expiration timestamp (UTC)
 	NotBefore         time.Time `json:"nbf"` // Not before timestamp (optional)
-	MaxLifetimeExpiry time.Time `json:"mle"`
+	MaxLifetimeExpiry time.Time `json:"mle"` // Maximum lifetime expiry timestamp (RFC3339)
 	TokenType         TokenType `json:"typ"` // Fixed value "access"
 }
 
@@ -157,7 +108,7 @@ type RefreshTokenClaims struct {
 	IssuedAt          time.Time `json:"iat"` // Issuance timestamp
 	ExpiresAt         time.Time `json:"exp"` // Expiration timestamp
 	NotBefore         time.Time `json:"nbf"` // Not before timestamp (optional)
-	MaxLifetimeExpiry time.Time `json:"mle"`
+	MaxLifetimeExpiry time.Time `json:"mle"` // Maximum lifetime expiry timestamp (RFC3339)
 	TokenType         TokenType `json:"typ"` // Fixed value "refresh"
 }
 
@@ -254,12 +205,30 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	return maker, nil
 }
 
-func NewGourdianTokenMakerWithDefaults(
+func DefaultGourdianTokenMaker(
 	ctx context.Context,
 	symmetricKey string,
 	redisOpts *redis.Options,
 ) (GourdianTokenMaker, error) {
-	config := DefaultGourdianTokenConfig(symmetricKey)
+	config := GourdianTokenConfig{
+		RevocationEnabled:        false,
+		RotationEnabled:          false,
+		Algorithm:                "HS256",
+		SymmetricKey:             symmetricKey,
+		PrivateKeyPath:           "",
+		PublicKeyPath:            "",
+		Issuer:                   "gourdian.com",
+		Audience:                 nil,
+		AllowedAlgorithms:        []string{"HS256"},
+		RequiredClaims:           []string{"jti", "sub", "sid", "usr", "iss", "aud", "rls", "iat", "exp", "nbf", "mle", "typ"},
+		SigningMethod:            Symmetric,
+		AccessExpiryDuration:     30 * time.Minute,
+		AccessMaxLifetimeExpiry:  24 * time.Hour,
+		RefreshExpiryDuration:    7 * 24 * time.Hour,
+		RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+		RefreshReuseInterval:     time.Minute,
+	}
+
 	if redisOpts != nil {
 		config.RevocationEnabled = true
 		config.RotationEnabled = true
@@ -299,7 +268,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		Issuer:    maker.config.Issuer,
 		Audience:  maker.config.Audience,
 		IssuedAt:  now,
-		ExpiresAt: now.Add(maker.config.AccessToken.Duration),
+		ExpiresAt: now.Add(maker.config.AccessExpiryDuration),
 		TokenType: AccessToken,
 		Roles:     roles,
 	}
@@ -348,7 +317,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 		Issuer:    maker.config.Issuer,
 		Audience:  maker.config.Audience,
 		IssuedAt:  now,
-		ExpiresAt: now.Add(maker.config.RefreshToken.Duration),
+		ExpiresAt: now.Add(maker.config.RefreshExpiryDuration),
 		TokenType: RefreshToken,
 	}
 
@@ -552,7 +521,7 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 		return nil, err
 	}
 
-	err = maker.redisClient.Set(ctx, tokenKey, "1", maker.config.RefreshToken.MaxLifetime).Err()
+	err = maker.redisClient.Set(ctx, tokenKey, "1", maker.config.RefreshMaxLifetimeExpiry).Err()
 	if err != nil {
 		return nil, fmt.Errorf("failed to record rotation: %w", err)
 	}
