@@ -220,7 +220,7 @@ func DefaultGourdianTokenMaker(
 		Issuer:                   "gourdian.com",
 		Audience:                 nil,
 		AllowedAlgorithms:        []string{"HS256"},
-		RequiredClaims:           []string{"jti", "sub", "sid", "usr", "iss", "aud", "rls", "iat", "exp", "nbf", "mle", "typ"},
+		RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
 		SigningMethod:            Symmetric,
 		AccessExpiryDuration:     30 * time.Minute,
 		AccessMaxLifetimeExpiry:  24 * time.Hour,
@@ -387,7 +387,7 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 	}
 
 	// 2. Validate all required claims exist
-	if err := validateTokenClaims(claims, AccessToken); err != nil {
+	if err := validateTokenClaims(claims, AccessToken, maker.config.RequiredClaims); err != nil {
 		return nil, err
 	}
 
@@ -438,7 +438,7 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 		return nil, fmt.Errorf("invalid token claims")
 	}
 
-	if err := validateTokenClaims(claims, RefreshToken); err != nil {
+	if err := validateTokenClaims(claims, RefreshToken, maker.config.RequiredClaims); err != nil {
 		return nil, err
 	}
 
@@ -1020,24 +1020,34 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 	return refreshClaims, nil
 }
 
-func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
+func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error {
+	// Base required claims for all tokens
+	baseRequired := []string{"jti", "sub", "sid", "usr", "iat", "exp", "typ"}
 
-	tokenType, ok := claims["typ"].(string)
-	if !ok || TokenType(tokenType) != expectedType {
-		return fmt.Errorf("invalid token type: expected %s", expectedType)
-	}
-
-	requiredClaims := []string{"jti", "sub", "typ", "usr", "sid", "iat", "exp"}
+	// Add token-type specific required claims
 	if expectedType == AccessToken {
-		requiredClaims = append(requiredClaims, "rls")
+		baseRequired = append(baseRequired, "rls")
 	}
 
-	for _, claim := range requiredClaims {
+	// Add config-specified required claims
+	if len(required) > 0 {
+		baseRequired = append(baseRequired, required...)
+	}
+
+	// Check all required claims exist
+	for _, claim := range baseRequired {
 		if _, ok := claims[claim]; !ok {
 			return fmt.Errorf("missing required claim: %s", claim)
 		}
 	}
 
+	// Validate token type
+	tokenType, ok := claims["typ"].(string)
+	if !ok || TokenType(tokenType) != expectedType {
+		return fmt.Errorf("invalid token type: expected %s", expectedType)
+	}
+
+	// Validate expiration
 	exp, ok := claims["exp"].(float64)
 	if !ok {
 		return fmt.Errorf("invalid exp claim type")
@@ -1046,6 +1056,7 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType) error {
 		return fmt.Errorf("token has expired")
 	}
 
+	// Validate issuance time
 	if iat, ok := claims["iat"].(float64); ok {
 		if time.Unix(int64(iat), 0).After(time.Now()) {
 			return fmt.Errorf("token issued in the future")
