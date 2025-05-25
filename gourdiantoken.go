@@ -23,6 +23,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	revokedAccessPrefix  = "revoked:access:"
+	revokedRefreshPrefix = "revoked:refresh:"
+	rotatedPrefix        = "rotated:"
+)
+
 type TokenType string
 
 const (
@@ -163,6 +169,10 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	// Validate configuration
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	if err := validateAlgorithmAndMethod(&config); err != nil {
+		return nil, fmt.Errorf("invalid algorithm/method combination: %w", err)
 	}
 
 	// Check Redis requirements
@@ -356,7 +366,7 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 
 	if maker.config.RevocationEnabled && maker.redisClient != nil {
 
-		exists, err := maker.redisClient.Exists(ctx, "revoked:access:"+tokenString).Result()
+		exists, err := maker.redisClient.Exists(ctx, revokedAccessPrefix+tokenString).Result()
 		if err != nil {
 			return nil, fmt.Errorf("failed to check token revocation: %w", err)
 		}
@@ -409,7 +419,7 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 
 	if maker.config.RevocationEnabled && maker.redisClient != nil {
 
-		exists, err := maker.redisClient.Exists(ctx, "revoked:refresh:"+tokenString).Result()
+		exists, err := maker.redisClient.Exists(ctx, revokedRefreshPrefix+tokenString).Result()
 		if err != nil {
 			return nil, fmt.Errorf("failed to check token revocation: %w", err)
 		}
@@ -470,7 +480,7 @@ func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) erro
 	ttl := time.Until(time.Unix(exp, 0))
 
 	// Store the token string as revoked in Redis with expiry
-	return maker.redisClient.Set(ctx, "revoked:access:"+token, "1", ttl).Err()
+	return maker.redisClient.Set(ctx, revokedAccessPrefix+token, "1", ttl).Err()
 }
 
 func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) error {
@@ -498,7 +508,7 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 	ttl := time.Until(time.Unix(exp, 0))
 
 	// Store the token string as revoked in Redis with expiry
-	return maker.redisClient.Set(ctx, "revoked:refresh:"+token, "1", ttl).Err()
+	return maker.redisClient.Set(ctx, revokedRefreshPrefix+token, "1", ttl).Err()
 }
 
 func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) {
@@ -515,7 +525,7 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 		return nil, fmt.Errorf("invalid token: %w", err)
 	}
 
-	tokenKey := "rotated:" + oldToken
+	tokenKey := rotatedPrefix + oldToken
 
 	exists, err := maker.redisClient.Exists(ctx, tokenKey).Result()
 	if err != nil {
@@ -528,7 +538,7 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 
 	// Enforce reuse interval
 	if maker.config.RefreshReuseInterval > 0 {
-		ttl, err := maker.redisClient.TTL(ctx, "rotated:"+oldToken).Result()
+		ttl, err := maker.redisClient.TTL(ctx, rotatedPrefix+oldToken).Result()
 		if err == nil && ttl > 0 {
 			remaining := time.Duration(ttl) * time.Second
 			if remaining > maker.config.RefreshReuseInterval {
@@ -617,7 +627,7 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 				continue
 			}
 
-			for _, prefix := range []string{"revoked:access:", "revoked:refresh:"} {
+			for _, prefix := range []string{revokedAccessPrefix, revokedRefreshPrefix} {
 				var cursor uint64
 				const batchSize = 100
 
@@ -845,6 +855,23 @@ func validateConfig(config *GourdianTokenConfig) error {
 	// 	}
 	// }
 
+	return nil
+}
+
+func validateAlgorithmAndMethod(config *GourdianTokenConfig) error {
+	switch config.SigningMethod {
+	case Symmetric:
+		if !strings.HasPrefix(config.Algorithm, "HS") {
+			return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
+		}
+	case Asymmetric:
+		if !strings.HasPrefix(config.Algorithm, "RS") &&
+			!strings.HasPrefix(config.Algorithm, "ES") &&
+			!strings.HasPrefix(config.Algorithm, "PS") &&
+			config.Algorithm != "EdDSA" {
+			return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
+		}
+	}
 	return nil
 }
 
