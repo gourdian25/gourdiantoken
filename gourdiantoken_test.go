@@ -667,124 +667,144 @@ func TestConfigValidation(t *testing.T) {
 	})
 }
 
-// func TestTokenClaimsValidation(t *testing.T) {
-// 	config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 	require.NoError(t, err)
+func TestTokenRotation_ReuseInterval(t *testing.T) {
+	client := redisTestClient(t)
+	defer client.Close()
 
-// 	t.Run("Missing Required Claim", func(t *testing.T) {
-// 		// Create a token missing the "sub" claim
-// 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-// 			"jti": uuid.New().String(),
-// 			"usr": "testuser",
-// 			"sid": uuid.New().String(),
-// 			"iat": time.Now().Unix(),
-// 			"exp": time.Now().Add(time.Hour).Unix(),
-// 			"typ": string(AccessToken),
-// 			"rls": []string{"admin"},
-// 		})
+	config := DefaultGourdianTokenConfig(testSymmetricKey)
+	config.RotationEnabled = true
+	config.RefreshReuseInterval = time.Second
+	// Ensure refresh duration is less than max lifetime
+	config.RefreshExpiryDuration = 30 * time.Minute
+	config.RefreshMaxLifetimeExpiry = time.Hour
 
-// 		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-// 		require.NoError(t, err)
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	require.NoError(t, err)
 
-// 		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-// 		require.Error(t, err)
-// 		assert.Contains(t, err.Error(), "missing required claim: sub")
-// 	})
+	token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+	require.NoError(t, err)
 
-// 	t.Run("Invalid Token Type", func(t *testing.T) {
-// 		// Create a token with wrong type
-// 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-// 			"jti": uuid.New().String(),
-// 			"sub": uuid.New().String(),
-// 			"usr": "testuser",
-// 			"sid": uuid.New().String(),
-// 			"iat": time.Now().Unix(),
-// 			"exp": time.Now().Add(time.Hour).Unix(),
-// 			"typ": "invalid",
-// 			"rls": []string{"admin"},
-// 		})
+	// First rotation should work
+	_, err = maker.RotateRefreshToken(context.Background(), token.Token)
+	require.NoError(t, err)
 
-// 		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-// 		require.NoError(t, err)
+	// Immediate reuse should fail
+	_, err = maker.RotateRefreshToken(context.Background(), token.Token)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token reused too soon")
 
-// 		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-// 		require.Error(t, err)
-// 		assert.Contains(t, err.Error(), "invalid token type")
-// 	})
+	// Wait longer than reuse interval and try again
+	time.Sleep(2 * time.Second)
+	newToken, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+	require.NoError(t, err)
 
-// 	t.Run("Token From Future", func(t *testing.T) {
-// 		// Create a token with iat in the future
-// 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-// 			"jti": uuid.New().String(),
-// 			"sub": uuid.New().String(),
-// 			"usr": "testuser",
-// 			"sid": uuid.New().String(),
-// 			"iat": time.Now().Add(time.Hour).Unix(),
-// 			"exp": time.Now().Add(2 * time.Hour).Unix(),
-// 			"typ": string(AccessToken),
-// 			"rls": []string{"admin"},
-// 		})
+	_, err = maker.RotateRefreshToken(context.Background(), newToken.Token)
+	require.NoError(t, err)
+}
 
-// 		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-// 		require.NoError(t, err)
+func TestTokenClaimsValidation(t *testing.T) {
+	config := DefaultGourdianTokenConfig(testSymmetricKey)
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	require.NoError(t, err)
 
-// 		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-// 		require.Error(t, err)
-// 		assert.Contains(t, err.Error(), "token issued in the future")
-// 	})
+	// Common claims that satisfy all required claims
+	baseClaims := jwt.MapClaims{
+		"iss": config.Issuer,
+		"aud": config.Audience,
+		"nbf": time.Now().Unix(),
+		"mle": time.Now().Add(time.Hour).Unix(),
+	}
 
-// 	t.Run("Invalid Roles Claim", func(t *testing.T) {
-// 		// Create a token with invalid roles claim
-// 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-// 			"jti": uuid.New().String(),
-// 			"sub": uuid.New().String(),
-// 			"usr": "testuser",
-// 			"sid": uuid.New().String(),
-// 			"iat": time.Now().Unix(),
-// 			"exp": time.Now().Add(time.Hour).Unix(),
-// 			"typ": string(AccessToken),
-// 			"rls": "not-an-array",
-// 		})
+	t.Run("Missing Required Claim", func(t *testing.T) {
+		claims := jwt.MapClaims{}
+		for k, v := range baseClaims {
+			claims[k] = v
+		}
+		claims["jti"] = uuid.New().String()
+		claims["usr"] = "testuser"
+		claims["sid"] = uuid.New().String()
+		claims["iat"] = time.Now().Unix()
+		claims["exp"] = time.Now().Add(time.Hour).Unix()
+		claims["typ"] = string(AccessToken)
+		claims["rls"] = []string{"admin"}
+		// Remove one required claim - now removing "sub" which is actually checked first
+		delete(claims, "sub")
 
-// 		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-// 		require.NoError(t, err)
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
+		require.NoError(t, err)
 
-// 		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-// 		require.Error(t, err)
-// 		assert.Contains(t, err.Error(), "invalid roles type")
-// 	})
-// }
+		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing required claim: sub")
+	})
 
-// func TestTokenRotation_ReuseInterval(t *testing.T) {
-// 	client := redisTestClient(t)
-// 	defer client.Close()
+	t.Run("Invalid Token Type", func(t *testing.T) {
+		claims := jwt.MapClaims{}
+		for k, v := range baseClaims {
+			claims[k] = v
+		}
+		claims["jti"] = uuid.New().String()
+		claims["sub"] = uuid.New().String()
+		claims["usr"] = "testuser"
+		claims["sid"] = uuid.New().String()
+		claims["iat"] = time.Now().Unix()
+		claims["exp"] = time.Now().Add(time.Hour).Unix()
+		claims["typ"] = "invalid" // Invalid type
+		claims["rls"] = []string{"admin"}
 
-// 	config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 	config.RotationEnabled = true
-// 	config.RefreshReuseInterval = time.Second
-// 	config.RefreshMaxLifetimeExpiry = time.Hour
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
+		require.NoError(t, err)
 
-// 	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 	require.NoError(t, err)
+		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid token type")
+	})
 
-// 	token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-// 	require.NoError(t, err)
+	t.Run("Token From Future", func(t *testing.T) {
+		claims := jwt.MapClaims{}
+		for k, v := range baseClaims {
+			claims[k] = v
+		}
+		claims["jti"] = uuid.New().String()
+		claims["sub"] = uuid.New().String()
+		claims["usr"] = "testuser"
+		claims["sid"] = uuid.New().String()
+		claims["iat"] = time.Now().Add(time.Hour).Unix() // Future iat
+		claims["exp"] = time.Now().Add(2 * time.Hour).Unix()
+		claims["typ"] = string(AccessToken)
+		claims["rls"] = []string{"admin"}
 
-// 	// First rotation should work
-// 	_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-// 	require.NoError(t, err)
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
+		require.NoError(t, err)
 
-// 	// Immediate reuse should fail
-// 	_, err = maker.RotateRefreshToken(context.Background(), token.Token)
-// 	require.Error(t, err)
-// 	assert.Contains(t, err.Error(), "token reused too soon")
+		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "token issued in the future")
+	})
 
-// 	// Wait longer than reuse interval and try again
-// 	time.Sleep(2 * time.Second)
-// 	newToken, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
-// 	require.NoError(t, err)
+	t.Run("Invalid Roles Claim", func(t *testing.T) {
+		claims := jwt.MapClaims{}
+		for k, v := range baseClaims {
+			claims[k] = v
+		}
+		claims["jti"] = uuid.New().String()
+		claims["sub"] = uuid.New().String()
+		claims["usr"] = "testuser"
+		claims["sid"] = uuid.New().String()
+		claims["iat"] = time.Now().Unix()
+		claims["exp"] = time.Now().Add(time.Hour).Unix()
+		claims["typ"] = string(AccessToken)
+		claims["rls"] = "not-an-array" // Invalid roles type
 
-// 	_, err = maker.RotateRefreshToken(context.Background(), newToken.Token)
-// 	require.NoError(t, err)
-// }
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, err := token.SignedString([]byte(config.SymmetricKey))
+		require.NoError(t, err)
+
+		_, err = maker.VerifyAccessToken(context.Background(), tokenString)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid roles type")
+	})
+}
