@@ -1,4 +1,4 @@
-// gourdiantoken_serialization_test.go
+// File: gourdiantoken_serialization_test.go
 
 package gourdiantoken
 
@@ -16,14 +16,18 @@ func TestTokenClaimsSerialization(t *testing.T) {
 	t.Run("AccessTokenClaims", func(t *testing.T) {
 		now := time.Now().UTC()
 		claims := AccessTokenClaims{
-			ID:        uuid.New(),
-			Subject:   uuid.New(),
-			Username:  "testuser",
-			SessionID: uuid.New(),
-			IssuedAt:  now,
-			ExpiresAt: now.Add(time.Hour),
-			TokenType: AccessToken,
-			Roles:     []string{"admin", "user"},
+			ID:                uuid.New(),
+			Subject:           uuid.New(),
+			Username:          "testuser",
+			SessionID:         uuid.New(),
+			Issuer:            "test-issuer",
+			Audience:          []string{"aud1", "aud2"},
+			Roles:             []string{"admin", "user"},
+			IssuedAt:          now,
+			ExpiresAt:         now.Add(time.Hour),
+			NotBefore:         now,
+			MaxLifetimeExpiry: now.Add(24 * time.Hour),
+			TokenType:         AccessToken,
 		}
 
 		// Test JSON serialization
@@ -39,8 +43,12 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			assert.Equal(t, claims.Subject, decoded.Subject)
 			assert.Equal(t, claims.Username, decoded.Username)
 			assert.Equal(t, claims.SessionID, decoded.SessionID)
+			assert.Equal(t, claims.Issuer, decoded.Issuer)
+			assert.Equal(t, claims.Audience, decoded.Audience)
 			assert.Equal(t, claims.IssuedAt.Unix(), decoded.IssuedAt.Unix())
 			assert.Equal(t, claims.ExpiresAt.Unix(), decoded.ExpiresAt.Unix())
+			assert.Equal(t, claims.NotBefore.Unix(), decoded.NotBefore.Unix())
+			assert.Equal(t, claims.MaxLifetimeExpiry.Unix(), decoded.MaxLifetimeExpiry.Unix())
 			assert.Equal(t, claims.TokenType, decoded.TokenType)
 			assert.Equal(t, claims.Roles, decoded.Roles)
 		})
@@ -70,8 +78,12 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			assert.Equal(t, claims.Subject.String(), mapClaims["sub"])
 			assert.Equal(t, claims.Username, mapClaims["usr"])
 			assert.Equal(t, claims.SessionID.String(), mapClaims["sid"])
+			assert.Equal(t, claims.Issuer, mapClaims["iss"])
+			assert.Equal(t, claims.Audience, mapClaims["aud"])
 			assert.Equal(t, claims.IssuedAt.Unix(), mapClaims["iat"])
 			assert.Equal(t, claims.ExpiresAt.Unix(), mapClaims["exp"])
+			assert.Equal(t, claims.NotBefore.Unix(), mapClaims["nbf"])
+			assert.Equal(t, claims.MaxLifetimeExpiry.Unix(), mapClaims["mle"])
 			assert.Equal(t, string(claims.TokenType), mapClaims["typ"])
 			assert.Equal(t, claims.Roles, mapClaims["rls"])
 		})
@@ -86,8 +98,12 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			assert.Equal(t, claims.Subject, decodedClaims.Subject)
 			assert.Equal(t, claims.Username, decodedClaims.Username)
 			assert.Equal(t, claims.SessionID, decodedClaims.SessionID)
+			assert.Equal(t, claims.Issuer, decodedClaims.Issuer)
+			assert.Equal(t, claims.Audience, decodedClaims.Audience)
 			assert.Equal(t, claims.IssuedAt.Unix(), decodedClaims.IssuedAt.Unix())
 			assert.Equal(t, claims.ExpiresAt.Unix(), decodedClaims.ExpiresAt.Unix())
+			assert.Equal(t, claims.NotBefore.Unix(), decodedClaims.NotBefore.Unix())
+			assert.Equal(t, claims.MaxLifetimeExpiry.Unix(), decodedClaims.MaxLifetimeExpiry.Unix())
 			assert.Equal(t, claims.TokenType, decodedClaims.TokenType)
 			assert.Equal(t, claims.Roles, decodedClaims.Roles)
 		})
@@ -139,18 +155,30 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			_, err := mapToAccessClaims(mapClaims)
 			assert.Error(t, err)
 		})
+
+		// Test missing max lifetime expiry
+		t.Run("MapToAccessClaimsMissingMaxLifetime", func(t *testing.T) {
+			mapClaims := toMapClaims(claims)
+			delete(mapClaims, "mle")
+			_, err := mapToAccessClaims(mapClaims)
+			assert.NoError(t, err)
+		})
 	})
 
 	t.Run("RefreshTokenClaims", func(t *testing.T) {
 		now := time.Now().UTC()
 		claims := RefreshTokenClaims{
-			ID:        uuid.New(),
-			Subject:   uuid.New(),
-			Username:  "testuser",
-			SessionID: uuid.New(),
-			IssuedAt:  now,
-			ExpiresAt: now.Add(24 * time.Hour),
-			TokenType: RefreshToken,
+			ID:                uuid.New(),
+			Subject:           uuid.New(),
+			Username:          "testuser",
+			SessionID:         uuid.New(),
+			Issuer:            "test-issuer",
+			Audience:          []string{"aud1", "aud2"},
+			IssuedAt:          now,
+			ExpiresAt:         now.Add(24 * time.Hour),
+			NotBefore:         now,
+			MaxLifetimeExpiry: now.Add(7 * 24 * time.Hour),
+			TokenType:         RefreshToken,
 		}
 
 		// Test JSON serialization
@@ -166,8 +194,12 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			assert.Equal(t, claims.Subject, decoded.Subject)
 			assert.Equal(t, claims.Username, decoded.Username)
 			assert.Equal(t, claims.SessionID, decoded.SessionID)
+			assert.Equal(t, claims.Issuer, decoded.Issuer)
+			assert.Equal(t, claims.Audience, decoded.Audience)
 			assert.Equal(t, claims.IssuedAt.Unix(), decoded.IssuedAt.Unix())
 			assert.Equal(t, claims.ExpiresAt.Unix(), decoded.ExpiresAt.Unix())
+			assert.Equal(t, claims.NotBefore.Unix(), decoded.NotBefore.Unix())
+			assert.Equal(t, claims.MaxLifetimeExpiry.Unix(), decoded.MaxLifetimeExpiry.Unix())
 			assert.Equal(t, claims.TokenType, decoded.TokenType)
 		})
 
@@ -186,8 +218,12 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			assert.Equal(t, claims.Subject.String(), mapClaims["sub"])
 			assert.Equal(t, claims.Username, mapClaims["usr"])
 			assert.Equal(t, claims.SessionID.String(), mapClaims["sid"])
+			assert.Equal(t, claims.Issuer, mapClaims["iss"])
+			assert.Equal(t, claims.Audience, mapClaims["aud"])
 			assert.Equal(t, claims.IssuedAt.Unix(), mapClaims["iat"])
 			assert.Equal(t, claims.ExpiresAt.Unix(), mapClaims["exp"])
+			assert.Equal(t, claims.NotBefore.Unix(), mapClaims["nbf"])
+			assert.Equal(t, claims.MaxLifetimeExpiry.Unix(), mapClaims["mle"])
 			assert.Equal(t, string(claims.TokenType), mapClaims["typ"])
 		})
 
@@ -201,8 +237,12 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			assert.Equal(t, claims.Subject, decodedClaims.Subject)
 			assert.Equal(t, claims.Username, decodedClaims.Username)
 			assert.Equal(t, claims.SessionID, decodedClaims.SessionID)
+			assert.Equal(t, claims.Issuer, decodedClaims.Issuer)
+			assert.Equal(t, claims.Audience, decodedClaims.Audience)
 			assert.Equal(t, claims.IssuedAt.Unix(), decodedClaims.IssuedAt.Unix())
 			assert.Equal(t, claims.ExpiresAt.Unix(), decodedClaims.ExpiresAt.Unix())
+			assert.Equal(t, claims.NotBefore.Unix(), decodedClaims.NotBefore.Unix())
+			assert.Equal(t, claims.MaxLifetimeExpiry.Unix(), decodedClaims.MaxLifetimeExpiry.Unix())
 			assert.Equal(t, claims.TokenType, decodedClaims.TokenType)
 		})
 
@@ -237,6 +277,14 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			_, err := mapToRefreshClaims(mapClaims)
 			assert.Error(t, err)
 		})
+
+		// Test missing max lifetime expiry
+		t.Run("MapToRefreshClaimsMissingMaxLifetime", func(t *testing.T) {
+			mapClaims := toMapClaims(claims)
+			delete(mapClaims, "mle")
+			_, err := mapToRefreshClaims(mapClaims)
+			assert.NoError(t, err)
+		})
 	})
 
 	t.Run("ResponseTypes", func(t *testing.T) {
@@ -246,13 +294,18 @@ func TestTokenClaimsSerialization(t *testing.T) {
 
 		t.Run("AccessTokenResponse", func(t *testing.T) {
 			resp := AccessTokenResponse{
-				Token:     "test-token",
-				Subject:   userID,
-				Username:  "testuser",
-				SessionID: sessionID,
-				ExpiresAt: now.Add(time.Hour),
-				IssuedAt:  now,
-				Roles:     []string{"admin", "user"},
+				Token:             "test-token",
+				Subject:           userID,
+				Username:          "testuser",
+				SessionID:         sessionID,
+				Issuer:            "test-issuer",
+				Audience:          []string{"aud1", "aud2"},
+				Roles:             []string{"admin", "user"},
+				ExpiresAt:         now.Add(time.Hour),
+				IssuedAt:          now,
+				NotBefore:         now,
+				MaxLifetimeExpiry: now.Add(24 * time.Hour),
+				TokenType:         AccessToken,
 			}
 
 			// Test JSON serialization
@@ -267,19 +320,29 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			assert.Equal(t, resp.Subject, decoded.Subject)
 			assert.Equal(t, resp.Username, decoded.Username)
 			assert.Equal(t, resp.SessionID, decoded.SessionID)
+			assert.Equal(t, resp.Issuer, decoded.Issuer)
+			assert.Equal(t, resp.Audience, decoded.Audience)
+			assert.Equal(t, resp.Roles, decoded.Roles)
 			assert.Equal(t, resp.ExpiresAt.Unix(), decoded.ExpiresAt.Unix())
 			assert.Equal(t, resp.IssuedAt.Unix(), decoded.IssuedAt.Unix())
-			assert.Equal(t, resp.Roles, decoded.Roles)
+			assert.Equal(t, resp.NotBefore.Unix(), decoded.NotBefore.Unix())
+			assert.Equal(t, resp.MaxLifetimeExpiry.Unix(), decoded.MaxLifetimeExpiry.Unix())
+			assert.Equal(t, resp.TokenType, decoded.TokenType)
 		})
 
 		t.Run("RefreshTokenResponse", func(t *testing.T) {
 			resp := RefreshTokenResponse{
-				Token:     "test-token",
-				Subject:   userID,
-				Username:  "testuser",
-				SessionID: sessionID,
-				ExpiresAt: now.Add(24 * time.Hour),
-				IssuedAt:  now,
+				Token:             "test-token",
+				Subject:           userID,
+				Username:          "testuser",
+				SessionID:         sessionID,
+				Issuer:            "test-issuer",
+				Audience:          []string{"aud1", "aud2"},
+				ExpiresAt:         now.Add(24 * time.Hour),
+				IssuedAt:          now,
+				NotBefore:         now,
+				MaxLifetimeExpiry: now.Add(7 * 24 * time.Hour),
+				TokenType:         RefreshToken,
 			}
 
 			// Test JSON serialization
@@ -294,8 +357,13 @@ func TestTokenClaimsSerialization(t *testing.T) {
 			assert.Equal(t, resp.Subject, decoded.Subject)
 			assert.Equal(t, resp.Username, decoded.Username)
 			assert.Equal(t, resp.SessionID, decoded.SessionID)
+			assert.Equal(t, resp.Issuer, decoded.Issuer)
+			assert.Equal(t, resp.Audience, decoded.Audience)
 			assert.Equal(t, resp.ExpiresAt.Unix(), decoded.ExpiresAt.Unix())
 			assert.Equal(t, resp.IssuedAt.Unix(), decoded.IssuedAt.Unix())
+			assert.Equal(t, resp.NotBefore.Unix(), decoded.NotBefore.Unix())
+			assert.Equal(t, resp.MaxLifetimeExpiry.Unix(), decoded.MaxLifetimeExpiry.Unix())
+			assert.Equal(t, resp.TokenType, decoded.TokenType)
 		})
 	})
 
@@ -336,6 +404,28 @@ func TestTokenClaimsSerialization(t *testing.T) {
 
 			// Should fail validation when converting to map claims
 			assert.Panics(t, func() {
+				toMapClaims(claims)
+			})
+		})
+
+		t.Run("MissingMaxLifetime", func(t *testing.T) {
+			claims := AccessTokenClaims{
+				ID:                uuid.New(),
+				Subject:           uuid.New(),
+				Username:          "testuser",
+				SessionID:         uuid.New(),
+				Issuer:            "test-issuer",
+				Audience:          []string{"aud1", "aud2"},
+				Roles:             []string{"admin"},
+				IssuedAt:          time.Now(),
+				ExpiresAt:         time.Now().Add(time.Hour),
+				NotBefore:         time.Now(),
+				MaxLifetimeExpiry: time.Time{}, // zero value
+				TokenType:         AccessToken,
+			}
+
+			// Should not panic with zero MaxLifetimeExpiry
+			assert.NotPanics(t, func() {
 				toMapClaims(claims)
 			})
 		})
