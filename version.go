@@ -2,4 +2,4 @@
 
 package gourdiantoken
 
-var Version = "v1.0.1"
+var Version = "v1.0.3"
