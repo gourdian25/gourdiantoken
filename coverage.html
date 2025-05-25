@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (69.3%)</option>
+				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (69.8%)</option>
 				
 				</select>
 			</div>
@@ -863,7 +863,7 @@ func (maker *JWTMaker) parseKeyPair() error <span class="cov8" title="1">{
         <span class="cov8" title="1">switch maker.signingMethod.Alg() </span>{
         case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":<span class="cov8" title="1">
                 maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)
-                if err != nil </span><span class="cov0" title="0">{
+                if err != nil </span><span class="cov8" title="1">{
                         return fmt.Errorf("failed to parse RSA private key: %w", err)
                 }</span>
                 <span class="cov8" title="1">maker.publicKey, err = parseRSAPublicKey(publicKeyBytes)
@@ -879,9 +879,9 @@ func (maker *JWTMaker) parseKeyPair() error <span class="cov8" title="1">{
                 if err != nil </span><span class="cov0" title="0">{
                         return fmt.Errorf("failed to parse ECDSA public key: %w", err)
                 }</span>
-        case "EdDSA":<span class="cov0" title="0">
+        case "EdDSA":<span class="cov8" title="1">
                 maker.privateKey, err = parseEdDSAPrivateKey(privateKeyBytes)
-                if err != nil </span><span class="cov0" title="0">{
+                if err != nil </span><span class="cov8" title="1">{
                         return fmt.Errorf("failed to parse EdDSA private key: %w", err)
                 }</span>
                 <span class="cov0" title="0">maker.publicKey, err = parseEdDSAPublicKey(publicKeyBytes)
@@ -907,14 +907,14 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title=
                 <span class="cov8" title="1">if len(config.SymmetricKey) &lt; 32 </span><span class="cov8" title="1">{
                         return fmt.Errorf("symmetric key must be at least 32 bytes")
                 }</span>
-                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov8" title="1">{
+                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov0" title="0">{
                         return fmt.Errorf("private and public key paths must be empty for symmetric signing")
                 }</span>
         case Asymmetric:<span class="cov8" title="1">
                 if config.PrivateKeyPath == "" || config.PublicKeyPath == "" </span><span class="cov8" title="1">{
                         return fmt.Errorf("private and public key paths are required for asymmetric signing method")
                 }</span>
-                <span class="cov8" title="1">if config.SymmetricKey != "" </span><span class="cov8" title="1">{
+                <span class="cov8" title="1">if config.SymmetricKey != "" </span><span class="cov0" title="0">{
                         return fmt.Errorf("symmetric key must be empty for asymmetric signing")
                 }</span>
                 <span class="cov8" title="1">if !strings.HasPrefix(config.Algorithm, "RS") &amp;&amp;
@@ -1258,18 +1258,23 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) <span
 }
 
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error <span class="cov8" title="1">{
-        // Base required claims
+        // First validate required claims exist
         baseRequired := map[TokenType][]string{
                 AccessToken:  {"jti", "sub", "sid", "usr", "iat", "exp", "typ", "rls"},
                 RefreshToken: {"jti", "sub", "sid", "usr", "iat", "exp", "typ"},
         }
 
-        // Check all required claims
+        // Check all required claims exist first
         for _, claim := range append(baseRequired[expectedType], required...) </span><span class="cov8" title="1">{
                 if _, ok := claims[claim]; !ok </span><span class="cov8" title="1">{
                         return fmt.Errorf("missing required claim: %s", claim)
                 }</span>
         }
+
+        // Then validate individual claim formats
+        <span class="cov8" title="1">if _, ok := claims["jti"].(string); !ok </span><span class="cov0" title="0">{
+                return fmt.Errorf("invalid token ID type: expected string")
+        }</span>
 
         // Validate token type
         <span class="cov8" title="1">tokenType, ok := claims["typ"].(string)
@@ -1311,7 +1316,7 @@ func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) <span cla
         }</span>
 
         <span class="cov8" title="1">priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-        if err != nil </span><span class="cov0" title="0">{
+        if err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("failed to parse EdDSA private key: %w", err)
         }</span>
 
