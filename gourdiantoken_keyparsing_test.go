@@ -2,6 +2,7 @@
 package gourdiantoken
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -11,8 +12,10 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,4 +106,170 @@ func TestKeyParsingEdgeCases(t *testing.T) {
 		// Check for any permission-related error, not exact message
 		require.Contains(t, err.Error(), "permissions")
 	})
+}
+
+func TestNewGourdianTokenMaker_InvalidConfigs(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  GourdianTokenConfig
+		wantErr bool
+	}{
+		{
+			name: "Invalid Algorithm",
+			config: GourdianTokenConfig{
+				SigningMethod: Symmetric,
+				Algorithm:     "INVALID",
+				SymmetricKey:  "12345678901234567890123456789012",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Asymmetric with missing keys",
+			config: GourdianTokenConfig{
+				SigningMethod: Asymmetric,
+				Algorithm:     "RS256",
+			},
+			wantErr: true,
+		},
+		// Add more invalid config cases
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewGourdianTokenMaker(context.Background(), tt.config, nil)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewGourdianTokenMaker() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCreateAccessToken_InvalidInputs(t *testing.T) {
+	maker, _ := DefaultGourdianTokenMaker(context.Background(), "test-key-123456789012345678901234", nil)
+
+	tests := []struct {
+		name      string
+		userID    uuid.UUID
+		username  string
+		roles     []string
+		sessionID uuid.UUID
+		wantErr   bool
+	}{
+		{"Nil UserID", uuid.Nil, "user1", []string{"admin"}, uuid.New(), true},
+		{"Empty Roles", uuid.New(), "user1", []string{}, uuid.New(), true},
+		{"Long Username", uuid.New(), strings.Repeat("a", 1025), []string{"admin"}, uuid.New(), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := maker.CreateAccessToken(context.Background(), tt.userID, tt.username, tt.roles, tt.sessionID)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CreateAccessToken() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRevocationFlow(t *testing.T) {
+	config := DefaultGourdianTokenConfig("test-key-123456789012345678901234")
+	config.RevocationEnabled = true
+
+	maker, _ := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+
+	// Create and verify token
+	token, _ := maker.CreateAccessToken(context.Background(), uuid.New(), "user1", []string{"admin"}, uuid.New())
+	_, err := maker.VerifyAccessToken(context.Background(), token.Token)
+	require.NoError(t, err)
+
+	// Revoke token
+	err = maker.RevokeAccessToken(context.Background(), token.Token)
+	require.NoError(t, err)
+
+	// Verify revoked token
+	_, err = maker.VerifyAccessToken(context.Background(), token.Token)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "revoked")
+}
+
+func TestKeyParsingErrors(t *testing.T) {
+	// Test invalid PEM data
+	_, err := parseRSAPrivateKey([]byte("not a pem"))
+	require.Error(t, err)
+
+	// Test invalid key type
+	_, err = parseECDSAPublicKey([]byte("-----BEGIN PUBLIC KEY-----\ninvalid\n-----END PUBLIC KEY-----"))
+	require.Error(t, err)
+}
+
+func TestInvalidConfig(t *testing.T) {
+	// Test invalid symmetric key length
+	cfg := DefaultGourdianTokenConfig("shortkey")
+	err := validateConfig(&cfg)
+	require.Error(t, err)
+
+	// Test asymmetric config without key paths
+	cfg = GourdianTokenConfig{SigningMethod: Asymmetric}
+	err = validateConfig(&cfg)
+	require.Error(t, err)
+}
+
+func TestParseKeyPairs(t *testing.T) {
+	tests := []struct {
+		name       string
+		privateKey string
+		publicKey  string
+		algorithm  string
+		wantErr    bool
+	}{
+		{
+			name:       "Valid RSA Key Pair",
+			privateKey: "testdata/rsa_private.pem",
+			publicKey:  "testdata/rsa_public.pem",
+			algorithm:  "RS256",
+			wantErr:    false,
+		},
+		{
+			name:       "Mismatched Key Pair",
+			privateKey: "testdata/rsa_private.pem",
+			publicKey:  "testdata/ecdsa_public.pem",
+			algorithm:  "RS256",
+			wantErr:    true,
+		},
+		// Add ECDSA and EdDSA test cases
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := GourdianTokenConfig{
+				SigningMethod:  Asymmetric,
+				Algorithm:      tt.algorithm,
+				PrivateKeyPath: tt.privateKey,
+				PublicKeyPath:  tt.publicKey,
+			}
+
+			maker := &JWTMaker{config: config}
+			err := maker.parseKeyPair()
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseKeyPair() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDifferentAlgorithms(t *testing.T) {
+	algorithms := []string{"HS256", "HS384", "HS512", "RS256", "ES256"}
+	for _, alg := range algorithms {
+		t.Run(alg, func(t *testing.T) {
+			cfg := DefaultGourdianTokenConfig("longenoughsecretkeyforHS384andHS512")
+			cfg.Algorithm = alg
+			maker, err := NewGourdianTokenMaker(context.Background(), cfg, nil)
+			require.NoError(t, err)
+
+			token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "test", []string{"user"}, uuid.New())
+			require.NoError(t, err)
+			_, err = maker.VerifyAccessToken(context.Background(), token.Token)
+			require.NoError(t, err)
+		})
+	}
 }

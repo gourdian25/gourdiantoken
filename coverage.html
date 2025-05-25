@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (65.7%)</option>
+				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (66.0%)</option>
 				
 				</select>
 			</div>
@@ -911,7 +911,7 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title=
                         return fmt.Errorf("private and public key paths must be empty for symmetric signing")
                 }</span>
         case Asymmetric:<span class="cov8" title="1">
-                if config.PrivateKeyPath == "" || config.PublicKeyPath == "" </span><span class="cov0" title="0">{
+                if config.PrivateKeyPath == "" || config.PublicKeyPath == "" </span><span class="cov8" title="1">{
                         return fmt.Errorf("private and public key paths are required for asymmetric signing method")
                 }</span>
                 <span class="cov8" title="1">if config.SymmetricKey != "" </span><span class="cov0" title="0">{
@@ -1462,7 +1462,7 @@ func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) <span clas
 
 func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) <span class="cov8" title="1">{
         block, _ := pem.Decode(pemBytes)
-        if block == nil </span><span class="cov0" title="0">{
+        if block == nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("failed to parse PEM block containing the ECDSA public key")
         }</span>
 
