@@ -1,4 +1,5 @@
-// gourdiantoken_error_test.go
+// File: gourdiantoken_error_test.go
+
 package gourdiantoken
 
 import (

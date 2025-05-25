@@ -1,3 +1,5 @@
+// File: gourdiantoken.go
+
 // Package gourdiantoken provides a secure JWT token generation and validation system
 // with advanced features like token rotation, revocation, and configurable security policies.
 //

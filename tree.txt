@@ -3,50 +3,27 @@
 ├── LICENSE
 ├── Makefile
 ├── Readme.md
-├── dist
-│   ├── CHANGELOG.md
-│   ├── artifacts.json
-│   ├── config.yaml
-│   └── metadata.json
+├── coverage.html
 ├── docs.go
-├── examples
-│   ├── gourdiantoken.go
-│   ├── keys
-│   │   ├── ec256_private.pem
-│   │   ├── ec256_public.pem
-│   │   ├── ed25519_private.pem
-│   │   ├── ed25519_public.pem
-│   │   ├── rsa_private.pem
-│   │   ├── rsa_pss_private.pem
-│   │   ├── rsa_pss_public.pem
-│   │   └── rsa_public.pem
-│   ├── main.go
-│   ├── scenarios
-│   │   ├── basic_usage_scenario.go
-│   │   ├── eddsa_scenario.go
-│   │   ├── high_security_scenario.go
-│   │   ├── hmac_scenario.go
-│   │   ├── multitenant_scenario.go
-│   │   ├── refresh_flow_scenario.go
-│   │   ├── revocation_scenario.go
-│   │   ├── rsa_pss_scenario.go
-│   │   ├── rsa_scenario.go
-│   │   ├── scenarios.go
-│   │   ├── short_lived_scenario.go
-│   │   ├── stateless_scenario.go
-│   │   └── token_family_scenario.go
-│   └── utils
-│       └── helpers.go
 ├── go.mod
 ├── go.sum
 ├── goReleaser.txt
 ├── gourdiantoken.go
+├── gourdiantoken.go.bak
 ├── gourdiantoken_benchmark_test.go
+├── gourdiantoken_claims_test.go
+├── gourdiantoken_concurrency_test.go
+├── gourdiantoken_config_test.go
 ├── gourdiantoken_error_test.go
+├── gourdiantoken_init_test.go
+├── gourdiantoken_integration_test.go
+├── gourdiantoken_keyparsing_test.go
+├── gourdiantoken_response_test.go
 ├── gourdiantoken_serialization_test.go
 ├── gourdiantoken_test.go
-├── tests_helpers.go
+├── gourdiantoken_validation_test.go
+├── gourdiantoken_verification_test.go
 ├── tree.txt
 └── version.go
 
-6 directories, 44 files
+1 directory, 26 files

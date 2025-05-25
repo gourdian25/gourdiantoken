@@ -1,3 +1,5 @@
+// File: docs.go
+
 // Package gourdiantoken provides a secure and flexible JWT-based token management system
 // for handling both access and refresh tokens in Go applications.
 //
