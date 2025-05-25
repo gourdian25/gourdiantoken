@@ -148,22 +148,65 @@ func TestContextCancellation(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Immediately cancel the context
-
 	// Test NewGourdianTokenMaker with cancelled context
-	_, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "context canceled")
+	t.Run("NewGourdianTokenMaker with cancelled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Immediately cancel the context
+
+		_, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "context canceled")
+	})
 
 	// Test token operations with cancelled context
-	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-	require.NoError(t, err)
+	t.Run("Token operations with cancelled context", func(t *testing.T) {
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
 
-	cancelledCtx, cancel := context.WithCancel(context.Background())
-	cancel()
+		// Test CreateAccessToken with cancelled context
+		t.Run("CreateAccessToken", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
 
-	_, err = maker.CreateAccessToken(cancelledCtx, uuid.New(), "user", []string{"admin"}, uuid.New())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "context canceled")
+			_, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "context canceled")
+		})
+
+		// Test CreateRefreshToken with cancelled context
+		t.Run("CreateRefreshToken", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			_, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "context canceled")
+		})
+
+		// Test VerifyAccessToken with cancelled context (when revocation is enabled)
+		t.Run("VerifyAccessToken", func(t *testing.T) {
+			token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			_, err = maker.VerifyAccessToken(ctx, token.Token)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "context canceled")
+		})
+
+		// Test RevokeAccessToken with cancelled context
+		t.Run("RevokeAccessToken", func(t *testing.T) {
+			token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			err = maker.RevokeAccessToken(ctx, token.Token)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "context canceled")
+		})
+	})
 }
