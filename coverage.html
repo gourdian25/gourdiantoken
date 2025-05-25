@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (68.8%)</option>
+				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (69.3%)</option>
 				
 				</select>
 			</div>
@@ -426,7 +426,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
         <span class="cov8" title="1">if userID == uuid.Nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid user ID: cannot be empty")
         }</span>
-        <span class="cov8" title="1">if len(username) &gt; 1024 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if len(username) &gt; 1024 </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("username too long: max 1024 characters")
         }</span>
 
@@ -907,14 +907,14 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title=
                 <span class="cov8" title="1">if len(config.SymmetricKey) &lt; 32 </span><span class="cov8" title="1">{
                         return fmt.Errorf("symmetric key must be at least 32 bytes")
                 }</span>
-                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov8" title="1">{
                         return fmt.Errorf("private and public key paths must be empty for symmetric signing")
                 }</span>
         case Asymmetric:<span class="cov8" title="1">
                 if config.PrivateKeyPath == "" || config.PublicKeyPath == "" </span><span class="cov8" title="1">{
                         return fmt.Errorf("private and public key paths are required for asymmetric signing method")
                 }</span>
-                <span class="cov8" title="1">if config.SymmetricKey != "" </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if config.SymmetricKey != "" </span><span class="cov8" title="1">{
                         return fmt.Errorf("symmetric key must be empty for asymmetric signing")
                 }</span>
                 <span class="cov8" title="1">if !strings.HasPrefix(config.Algorithm, "RS") &amp;&amp;

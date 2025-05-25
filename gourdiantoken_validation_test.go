@@ -2,8 +2,19 @@
 package gourdiantoken
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,344 +59,182 @@ func TestInitializeSigningMethod_EdgeCases(t *testing.T) {
 	}
 }
 
-// func TestValidateTokenClaims_EdgeCases(t *testing.T) {
-// 	config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 	maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-// 	require.NoError(t, err)
+func TestValidateConfig_EdgeCases(t *testing.T) {
+	t.Run("Invalid Symmetric Config with Key Paths", func(t *testing.T) {
+		config := GourdianTokenConfig{
+			SigningMethod:            Symmetric,
+			SymmetricKey:             testSymmetricKey,
+			PrivateKeyPath:           "private.key",
+			PublicKeyPath:            "public.key",
+			Algorithm:                "HS256",
+			AccessExpiryDuration:     time.Hour,
+			RefreshExpiryDuration:    time.Hour * 24,
+			RefreshMaxLifetimeExpiry: time.Hour * 24 * 30,
+		}
 
-// 	now := time.Now()
-// 	baseClaims := jwt.MapClaims{
-// 		"jti": "invalid-uuid", // Will be replaced in each test
-// 		"sub": "invalid-uuid",
-// 		"usr": "testuser",
-// 		"sid": "invalid-uuid",
-// 		"iss": config.Issuer,
-// 		"aud": config.Audience,
-// 		"iat": now.Unix(),
-// 		"exp": now.Add(time.Hour).Unix(),
-// 		"typ": string(AccessToken),
-// 		"rls": []string{"admin"},
-// 	}
+		err := validateConfig(&config)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "private and public key paths must be empty for symmetric signing")
+	})
 
-// 	tests := []struct {
-// 		name        string
-// 		modifyFn    func(jwt.MapClaims)
-// 		expectedErr string
-// 	}{
-// 		{
-// 			name: "Invalid JTI format",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["jti"] = "not-a-uuid"
-// 			},
-// 			expectedErr: "invalid token ID",
-// 		},
-// 		{
-// 			name: "Invalid SUB format",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["sub"] = "not-a-uuid"
-// 			},
-// 			expectedErr: "invalid user ID",
-// 		},
-// 		{
-// 			name: "Invalid SID format",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["sid"] = "not-a-uuid"
-// 			},
-// 			expectedErr: "invalid session ID",
-// 		},
-// 		{
-// 			name: "Missing username",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				delete(c, "usr")
-// 			},
-// 			expectedErr: "missing required claim: usr",
-// 		},
-// 		{
-// 			name: "Invalid username type",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["usr"] = 12345
-// 			},
-// 			expectedErr: "invalid username type",
-// 		},
-// 		{
-// 			name: "Invalid issuer",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["iss"] = "wrong-issuer"
-// 			},
-// 			expectedErr: "invalid issuer",
-// 		},
-// 		{
-// 			name: "Invalid audience",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["aud"] = "wrong-audience"
-// 			},
-// 			expectedErr: "invalid audience",
-// 		},
-// 		{
-// 			name: "Invalid issued at time",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["iat"] = "not-a-number"
-// 			},
-// 			expectedErr: "invalid iat claim type",
-// 		},
-// 		{
-// 			name: "Token from future",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["iat"] = time.Now().Add(time.Hour).Unix()
-// 			},
-// 			expectedErr: "token issued in the future",
-// 		},
-// 		{
-// 			name: "Invalid expiration time",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["exp"] = "not-a-number"
-// 			},
-// 			expectedErr: "invalid exp claim type",
-// 		},
-// 		{
-// 			name: "Expired token",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["exp"] = time.Now().Add(-time.Hour).Unix()
-// 			},
-// 			expectedErr: "token has expired",
-// 		},
-// 		{
-// 			name: "Invalid token type",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["typ"] = "invalid-type"
-// 			},
-// 			expectedErr: "invalid token type",
-// 		},
-// 		{
-// 			name: "Missing roles",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				delete(c, "rls")
-// 			},
-// 			expectedErr: "missing roles claim",
-// 		},
-// 		{
-// 			name: "Invalid roles type",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["rls"] = "not-an-array"
-// 			},
-// 			expectedErr: "invalid roles type",
-// 		},
-// 		{
-// 			name: "Empty roles array",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["rls"] = []string{}
-// 			},
-// 			expectedErr: "at least one role must be provided",
-// 		},
-// 		{
-// 			name: "Invalid role type",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["rls"] = []interface{}{123}
-// 			},
-// 			expectedErr: "invalid role type",
-// 		},
-// 	}
+	t.Run("Invalid Asymmetric Config with Symmetric Key", func(t *testing.T) {
+		// Create temp key files
+		privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+		privBytes := x509.MarshalPKCS1PrivateKey(privKey)
+		privBlock := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes}
+		privPath := filepath.Join(t.TempDir(), "rsa.key")
+		require.NoError(t, os.WriteFile(privPath, pem.EncodeToMemory(privBlock), 0600))
 
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			claims := make(jwt.MapClaims)
-// 			for k, v := range baseClaims {
-// 				claims[k] = v
-// 			}
+		pubBytes, _ := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
+		pubBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}
+		pubPath := filepath.Join(t.TempDir(), "rsa.pub")
+		require.NoError(t, os.WriteFile(pubPath, pem.EncodeToMemory(pubBlock), 0644))
 
-// 			// Set valid UUIDs by default
-// 			claims["jti"] = uuid.New().String()
-// 			claims["sub"] = uuid.New().String()
-// 			claims["sid"] = uuid.New().String()
+		config := GourdianTokenConfig{
+			SigningMethod:            Asymmetric,
+			SymmetricKey:             testSymmetricKey,
+			PrivateKeyPath:           privPath,
+			PublicKeyPath:            pubPath,
+			Algorithm:                "RS256",
+			AccessExpiryDuration:     time.Hour,
+			RefreshExpiryDuration:    time.Hour * 24,
+			RefreshMaxLifetimeExpiry: time.Hour * 24 * 30,
+		}
 
-// 			tt.modifyFn(claims)
+		err := validateConfig(&config)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "symmetric key must be empty for asymmetric signing")
+	})
 
-// 			token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-// 			tokenString, err := token.SignedString([]byte(config.SymmetricKey))
-// 			require.NoError(t, err)
+}
 
-// 			_, err = maker.VerifyAccessToken(context.Background(), tokenString)
-// 			require.Error(t, err)
-// 			require.Contains(t, err.Error(), tt.expectedErr)
-// 		})
-// 	}
-// }
+func TestTokenCreationEdgeCases(t *testing.T) {
+	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, nil)
+	require.NoError(t, err)
 
-// func TestInitializeKeys_EdgeCases(t *testing.T) {
-// 	t.Run("Invalid Symmetric Key Length", func(t *testing.T) {
-// 		maker := &JWTMaker{
-// 			config: GourdianTokenConfig{
-// 				SigningMethod: Symmetric,
-// 				SymmetricKey:  "too-short",
-// 			},
-// 		}
+	t.Run("Create Access Token with Empty Roles", func(t *testing.T) {
+		_, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{}, uuid.New())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "at least one role must be provided")
+	})
 
-// 		err := maker.initializeKeys()
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "symmetric key must be at least 32 bytes")
-// 	})
+	t.Run("Create Access Token with Empty Role String", func(t *testing.T) {
+		_, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{""}, uuid.New())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "roles cannot contain empty strings")
+	})
 
-// 	t.Run("Missing Private Key File", func(t *testing.T) {
-// 		maker := &JWTMaker{
-// 			config: GourdianTokenConfig{
-// 				SigningMethod:  Asymmetric,
-// 				Algorithm:      "RS256",
-// 				PrivateKeyPath: "nonexistent.key",
-// 				PublicKeyPath:  "nonexistent.pub",
-// 			},
-// 		}
+	t.Run("Create Refresh Token with Long Username", func(t *testing.T) {
+		longUsername := strings.Repeat("a", 1025)
+		_, err := maker.CreateRefreshToken(context.Background(), uuid.New(), longUsername, uuid.New())
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "username too long")
+	})
+}
 
-// 		err := maker.initializeKeys()
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "failed to read private key file")
-// 	})
+func TestValidateTokenClaims_EdgeCases(t *testing.T) {
+	now := time.Now()
+	validClaims := jwt.MapClaims{
+		"jti": uuid.New().String(),
+		"sub": uuid.New().String(),
+		"usr": "testuser",
+		"sid": uuid.New().String(),
+		"iss": "test-issuer",
+		"aud": []string{"aud1", "aud2"},
+		"rls": []string{"admin"},
+		"iat": now.Unix(),
+		"exp": now.Add(time.Hour).Unix(),
+		"nbf": now.Unix(),
+		"mle": now.Add(24 * time.Hour).Unix(),
+		"typ": string(AccessToken),
+	}
 
-// 	t.Run("Invalid Private Key Format", func(t *testing.T) {
-// 		tempDir := t.TempDir()
-// 		invalidKeyPath := filepath.Join(tempDir, "invalid.key")
-// 		require.NoError(t, os.WriteFile(invalidKeyPath, []byte("invalid key data"), 0600))
+	tests := []struct {
+		name        string
+		modifyFn    func(jwt.MapClaims)
+		expectedErr string
+	}{
+		{
+			name: "Missing JTI",
+			modifyFn: func(c jwt.MapClaims) {
+				delete(c, "jti")
+			},
+			expectedErr: "missing required claim: jti",
+		},
+		{
+			name: "Invalid JTI format",
+			modifyFn: func(c jwt.MapClaims) {
+				c["jti"] = "not-a-uuid"
+			},
+			expectedErr: "invalid token ID",
+		},
+		// Add other test cases similarly...
+	}
 
-// 		maker := &JWTMaker{
-// 			config: GourdianTokenConfig{
-// 				SigningMethod:  Asymmetric,
-// 				Algorithm:      "RS256",
-// 				PrivateKeyPath: invalidKeyPath,
-// 				PublicKeyPath:  "nonexistent.pub",
-// 			},
-// 		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := make(jwt.MapClaims)
+			for k, v := range validClaims {
+				claims[k] = v
+			}
+			tt.modifyFn(claims)
 
-// 		err := maker.initializeKeys()
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "failed to parse RSA private key")
-// 	})
+			err := validateTokenClaims(claims, AccessToken, []string{"iss", "aud", "nbf", "mle"})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.expectedErr)
+		})
+	}
+}
 
-// 	t.Run("Key Algorithm Mismatch", func(t *testing.T) {
-// 		// Generate RSA key but try to use with EdDSA algorithm
-// 		privKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-// 		privBytes := x509.MarshalPKCS1PrivateKey(privKey)
-// 		privBlock := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes}
-// 		privPath := filepath.Join(t.TempDir(), "rsa.key")
-// 		require.NoError(t, os.WriteFile(privPath, pem.EncodeToMemory(privBlock), 0600))
+func TestInitializeKeys_EdgeCases(t *testing.T) {
+	t.Run("Invalid Symmetric Key Length", func(t *testing.T) {
+		maker := &JWTMaker{
+			config: GourdianTokenConfig{
+				SigningMethod: Symmetric,
+				SymmetricKey:  "too-short",
+				Algorithm:     "HS256",
+			},
+			signingMethod: jwt.SigningMethodHS256,
+		}
 
-// 		// Generate Ed25519 public key
-// 		pubKey, _, _ := ed25519.GenerateKey(rand.Reader)
-// 		pubBytes, _ := x509.MarshalPKIXPublicKey(pubKey)
-// 		pubBlock := &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes}
-// 		pubPath := filepath.Join(t.TempDir(), "ed25519.pub")
-// 		require.NoError(t, os.WriteFile(pubPath, pem.EncodeToMemory(pubBlock), 0644))
+		err := maker.initializeKeys()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "symmetric key must be at least 32 bytes")
+	})
 
-// 		maker := &JWTMaker{
-// 			config: GourdianTokenConfig{
-// 				SigningMethod:  Asymmetric,
-// 				Algorithm:      "EdDSA",
-// 				PrivateKeyPath: privPath,
-// 				PublicKeyPath:  pubPath,
-// 			},
-// 			signingMethod: jwt.SigningMethodEdDSA,
-// 		}
+	t.Run("Missing Private Key File", func(t *testing.T) {
+		maker := &JWTMaker{
+			config: GourdianTokenConfig{
+				SigningMethod:  Asymmetric,
+				Algorithm:      "RS256",
+				PrivateKeyPath: "nonexistent.key",
+				PublicKeyPath:  "nonexistent.pub",
+			},
+			signingMethod: jwt.SigningMethodRS256,
+		}
 
-// 		err := maker.initializeKeys()
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "failed to parse EdDSA private key")
-// 	})
-// }
+		err := maker.initializeKeys()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to read private key file")
+	})
 
-// func TestValidateConfig_EdgeCases(t *testing.T) {
-// 	t.Run("Invalid Symmetric Config with Key Paths", func(t *testing.T) {
-// 		config := GourdianTokenConfig{
-// 			SigningMethod:     Symmetric,
-// 			SymmetricKey:      testSymmetricKey,
-// 			PrivateKeyPath:    "private.key",
-// 			PublicKeyPath:     "public.key",
-// 			Algorithm:         "HS256",
-// 			AllowedAlgorithms: []string{"HS256"},
-// 		}
+	t.Run("Invalid Private Key Format", func(t *testing.T) {
+		tempDir := t.TempDir()
+		invalidKeyPath := filepath.Join(tempDir, "invalid.key")
+		require.NoError(t, os.WriteFile(invalidKeyPath, []byte("invalid key data"), 0600))
 
-// 		err := validateConfig(&config)
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "private and public key paths must be empty for symmetric signing")
-// 	})
+		maker := &JWTMaker{
+			config: GourdianTokenConfig{
+				SigningMethod:  Asymmetric,
+				Algorithm:      "RS256",
+				PrivateKeyPath: invalidKeyPath,
+				PublicKeyPath:  "nonexistent.pub", // Still need this even though we'll fail earlier
+			},
+			signingMethod: jwt.SigningMethodRS256,
+		}
 
-// 	t.Run("Invalid Asymmetric Config with Symmetric Key", func(t *testing.T) {
-// 		config := GourdianTokenConfig{
-// 			SigningMethod:     Asymmetric,
-// 			SymmetricKey:      testSymmetricKey,
-// 			Algorithm:         "RS256",
-// 			AllowedAlgorithms: []string{"RS256"},
-// 		}
-
-// 		err := validateConfig(&config)
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "symmetric key must be empty for asymmetric signing")
-// 	})
-
-// 	t.Run("Invalid Expiry Durations", func(t *testing.T) {
-// 		tests := []struct {
-// 			name          string
-// 			accessExpiry  time.Duration
-// 			refreshExpiry time.Duration
-// 			expectedErr   string
-// 		}{
-// 			{
-// 				name:          "Negative access expiry",
-// 				accessExpiry:  -time.Hour,
-// 				refreshExpiry: time.Hour,
-// 				expectedErr:   "access token duration must be positive",
-// 			},
-// 			{
-// 				name:          "Negative refresh expiry",
-// 				accessExpiry:  time.Hour,
-// 				refreshExpiry: -time.Hour,
-// 				expectedErr:   "refresh token duration must be positive",
-// 			},
-// 			{
-// 				name:          "Access expiry exceeds max lifetime",
-// 				accessExpiry:  48 * time.Hour,
-// 				refreshExpiry: time.Hour,
-// 				expectedErr:   "access token duration exceeds max lifetime",
-// 			},
-// 		}
-
-// 		for _, tt := range tests {
-// 			t.Run(tt.name, func(t *testing.T) {
-// 				config := GourdianTokenConfig{
-// 					SigningMethod:           Symmetric,
-// 					SymmetricKey:            testSymmetricKey,
-// 					Algorithm:               "HS256",
-// 					AccessExpiryDuration:    tt.accessExpiry,
-// 					AccessMaxLifetimeExpiry: 24 * time.Hour,
-// 					RefreshExpiryDuration:   tt.refreshExpiry,
-// 				}
-
-// 				err := validateConfig(&config)
-// 				require.Error(t, err)
-// 				require.Contains(t, err.Error(), tt.expectedErr)
-// 			})
-// 		}
-// 	})
-
-// 	t.Run("Invalid Algorithm for Method", func(t *testing.T) {
-// 		config := GourdianTokenConfig{
-// 			SigningMethod: Symmetric,
-// 			SymmetricKey:  testSymmetricKey,
-// 			Algorithm:     "RS256", // RSA algorithm with symmetric method
-// 		}
-
-// 		err := validateConfig(&config)
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "algorithm RS256 not compatible with symmetric signing")
-// 	})
-
-// 	t.Run("Unsupported Algorithm in AllowedAlgorithms", func(t *testing.T) {
-// 		config := GourdianTokenConfig{
-// 			SigningMethod:     Symmetric,
-// 			SymmetricKey:      testSymmetricKey,
-// 			Algorithm:         "HS256",
-// 			AllowedAlgorithms: []string{"HS256", "INVALID"},
-// 		}
-
-// 		err := validateConfig(&config)
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "unsupported algorithm in AllowedAlgorithms")
-// 	})
-// }
+		err := maker.initializeKeys()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to parse RSA private key")
+	})
+}
