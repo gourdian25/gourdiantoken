@@ -143,27 +143,27 @@ func TestGetUnixTime(t *testing.T) {
 	}
 }
 
-// func TestContextCancellation(t *testing.T) {
-// 	config := DefaultGourdianTokenConfig(testSymmetricKey)
-// 	config.RevocationEnabled = true
-// 	config.RotationEnabled = true
+func TestContextCancellation(t *testing.T) {
+	config := DefaultGourdianTokenConfig(testSymmetricKey)
+	config.RevocationEnabled = true
+	config.RotationEnabled = true
 
-// 	ctx, cancel := context.WithCancel(context.Background())
-// 	cancel() // Immediately cancel the context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Immediately cancel the context
 
-// 	// Test NewGourdianTokenMaker with cancelled context
-// 	_, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
-// 	require.Error(t, err)
-// 	require.Contains(t, err.Error(), "context canceled")
+	// Test NewGourdianTokenMaker with cancelled context
+	_, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "context canceled")
 
-// 	// Test token operations with cancelled context
-// 	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
-// 	require.NoError(t, err)
+	// Test token operations with cancelled context
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	require.NoError(t, err)
 
-// 	cancelledCtx, cancel := context.WithCancel(context.Background())
-// 	cancel()
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
 
-// 	_, err = maker.CreateAccessToken(cancelledCtx, uuid.New(), "user", []string{"admin"}, uuid.New())
-// 	require.Error(t, err)
-// 	require.Contains(t, err.Error(), "context canceled")
-// }
+	_, err = maker.CreateAccessToken(cancelledCtx, uuid.New(), "user", []string{"admin"}, uuid.New())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "context canceled")
+}

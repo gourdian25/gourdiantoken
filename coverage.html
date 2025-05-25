@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (65.2%)</option>
+				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (65.3%)</option>
 				
 				</select>
 			</div>
@@ -258,8 +258,13 @@ type JWTMaker struct {
 }
 
 func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) <span class="cov8" title="1">{
+        // Check context cancellation first
+        if err := ctx.Err(); err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("context canceled: %w", err)
+        }</span>
+
         // Validate configuration
-        if err := validateConfig(&amp;config); err != nil </span><span class="cov8" title="1">{
+        <span class="cov8" title="1">if err := validateConfig(&amp;config); err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid config: %w", err)
         }</span>
 
@@ -283,6 +288,11 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
                 // Verify Redis connection with the provided context
                 if _, err := maker.redisClient.Ping(ctx).Result(); err != nil </span><span class="cov8" title="1">{
                         return nil, fmt.Errorf("redis connection failed: %w", err)
+                }</span>
+
+                // Check context again before starting goroutines
+                <span class="cov8" title="1">if err := ctx.Err(); err != nil </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("context canceled: %w", err)
                 }</span>
 
                 // Set up background cleanup if needed
@@ -339,7 +349,12 @@ func DefaultGourdianTokenMaker(
 }
 
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) <span class="cov8" title="1">{
-        if userID == uuid.Nil </span><span class="cov8" title="1">{
+
+        if err := ctx.Err(); err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("context canceled: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if userID == uuid.Nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid user ID: cannot be empty")
         }</span>
         <span class="cov8" title="1">if len(roles) == 0 </span><span class="cov8" title="1">{
@@ -403,7 +418,12 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 }
 
 func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) <span class="cov8" title="1">{
-        if userID == uuid.Nil </span><span class="cov8" title="1">{
+
+        if err := ctx.Err(); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("context canceled: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if userID == uuid.Nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid user ID: cannot be empty")
         }</span>
         <span class="cov8" title="1">if len(username) &gt; 1024 </span><span class="cov0" title="0">{
@@ -604,7 +624,12 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 }
 
 func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) <span class="cov8" title="1">{
-        if !maker.config.RotationEnabled </span><span class="cov8" title="1">{
+
+        if err := ctx.Err(); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("context canceled: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">if !maker.config.RotationEnabled </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("token rotation not enabled")
         }</span>
 

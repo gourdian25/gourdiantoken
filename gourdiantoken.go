@@ -187,6 +187,11 @@ type JWTMaker struct {
 }
 
 func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) {
+	// Check context cancellation first
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context canceled: %w", err)
+	}
+
 	// Validate configuration
 	if err := validateConfig(&config); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -212,6 +217,11 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 		// Verify Redis connection with the provided context
 		if _, err := maker.redisClient.Ping(ctx).Result(); err != nil {
 			return nil, fmt.Errorf("redis connection failed: %w", err)
+		}
+
+		// Check context again before starting goroutines
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context canceled: %w", err)
 		}
 
 		// Set up background cleanup if needed
@@ -268,6 +278,11 @@ func DefaultGourdianTokenMaker(
 }
 
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
+
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context canceled: %w", err)
+	}
+
 	if userID == uuid.Nil {
 		return nil, fmt.Errorf("invalid user ID: cannot be empty")
 	}
@@ -332,6 +347,11 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 }
 
 func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) {
+
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context canceled: %w", err)
+	}
+
 	if userID == uuid.Nil {
 		return nil, fmt.Errorf("invalid user ID: cannot be empty")
 	}
@@ -533,6 +553,11 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 }
 
 func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) {
+
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context canceled: %w", err)
+	}
+
 	if !maker.config.RotationEnabled {
 		return nil, fmt.Errorf("token rotation not enabled")
 	}
