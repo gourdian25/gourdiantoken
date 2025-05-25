@@ -1187,17 +1187,22 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 }
 
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error {
-	// Base required claims
+	// First validate required claims exist
 	baseRequired := map[TokenType][]string{
 		AccessToken:  {"jti", "sub", "sid", "usr", "iat", "exp", "typ", "rls"},
 		RefreshToken: {"jti", "sub", "sid", "usr", "iat", "exp", "typ"},
 	}
 
-	// Check all required claims
+	// Check all required claims exist first
 	for _, claim := range append(baseRequired[expectedType], required...) {
 		if _, ok := claims[claim]; !ok {
 			return fmt.Errorf("missing required claim: %s", claim)
 		}
+	}
+
+	// Then validate individual claim formats
+	if _, ok := claims["jti"].(string); !ok {
+		return fmt.Errorf("invalid token ID type: expected string")
 	}
 
 	// Validate token type
