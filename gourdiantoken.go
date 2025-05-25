@@ -89,6 +89,27 @@ func NewGourdianTokenConfig(
 	}
 }
 
+func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
+	return GourdianTokenConfig{
+		RevocationEnabled:        false,
+		RotationEnabled:          false,
+		SigningMethod:            Symmetric,
+		Algorithm:                "HS256",
+		SymmetricKey:             symmetricKey,
+		PrivateKeyPath:           "",
+		PublicKeyPath:            "",
+		Issuer:                   "gourdian.com",
+		Audience:                 nil,
+		AllowedAlgorithms:        []string{"HS256", "RS256", "ES256", "PS256"},
+		RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
+		AccessExpiryDuration:     30 * time.Minute,
+		AccessMaxLifetimeExpiry:  24 * time.Hour,
+		RefreshExpiryDuration:    7 * 24 * time.Hour,
+		RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+		RefreshReuseInterval:     5 * time.Minute,
+	}
+}
+
 type AccessTokenClaims struct {
 	ID                uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
 	Subject           uuid.UUID `json:"sub"` // Subject (user UUID)

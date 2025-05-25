@@ -15,6 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	testSymmetricKey = "test-secret-32-bytes-long-1234567890"
+)
+
 func testRedisOptions() *redis.Options {
 	return &redis.Options{
 		Addr:     "127.0.0.1:6379",
@@ -75,8 +79,7 @@ func TestRevocationErrors(t *testing.T) {
 		},
 	}
 
-	symmetricKey := "test-secret-32-bytes-long-1234567890"
-	maker, err := DefaultGourdianTokenMaker(context.Background(), symmetricKey, testRedisOptions())
+	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
 	require.NoError(t, err)
 
 	for _, tt := range tests {
@@ -129,8 +132,7 @@ func TestRotationErrors(t *testing.T) {
 		},
 	}
 
-	symmetricKey := "test-secret-32-bytes-long-1234567890"
-	maker, err := DefaultGourdianTokenMaker(context.Background(), symmetricKey, testRedisOptions())
+	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
 	require.NoError(t, err)
 
 	for _, tt := range tests {
@@ -188,8 +190,7 @@ func TestRedisConnectionErrors(t *testing.T) {
 }
 
 func TestTokenCreationErrors(t *testing.T) {
-	symmetricKey := "test-secret-32-bytes-long-1234567890"
-	maker, err := DefaultGourdianTokenMaker(context.Background(), symmetricKey, nil)
+	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, nil)
 	require.NoError(t, err)
 
 	t.Run("Create access token with empty user ID", func(t *testing.T) {
@@ -229,8 +230,7 @@ func TestTokenCreationErrors(t *testing.T) {
 
 func TestAlgorithmMismatchErrors(t *testing.T) {
 	// Create token with HS256
-	symmetricKey := "test-secret-32-bytes-long-1234567890"
-	maker1, err := DefaultGourdianTokenMaker(context.Background(), symmetricKey, nil)
+	maker1, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, nil)
 	require.NoError(t, err)
 
 	token, err := maker1.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
