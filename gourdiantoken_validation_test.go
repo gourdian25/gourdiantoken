@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -169,132 +170,134 @@ func TestInitializeKeys_EdgeCases(t *testing.T) {
 	})
 }
 
-// func TestValidateConfig_EdgeCases(t *testing.T) {
-// 	t.Run("Invalid Symmetric Config with Key Paths", func(t *testing.T) {
-// 		config := GourdianTokenConfig{
-// 			SigningMethod:     Symmetric,
-// 			SymmetricKey:      testSymmetricKey,
-// 			PrivateKeyPath:    "private.key",
-// 			PublicKeyPath:     "public.key",
-// 			Algorithm:         "HS256",
-// 			AllowedAlgorithms: []string{"HS256"},
-// 		}
+func TestValidateConfig_EdgeCases(t *testing.T) {
+	t.Run("Invalid Symmetric Config with Key Paths", func(t *testing.T) {
+		config := GourdianTokenConfig{
+			SigningMethod:     Symmetric,
+			SymmetricKey:      testSymmetricKey,
+			PrivateKeyPath:    "private.key",
+			PublicKeyPath:     "public.key",
+			Algorithm:         "HS256",
+			AllowedAlgorithms: []string{"HS256"},
+		}
 
-// 		err := validateConfig(&config)
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "private and public key paths must be empty for symmetric signing")
-// 	})
+		err := validateConfig(&config)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "private and public key paths must be empty for symmetric signing")
+	})
 
-// 	t.Run("Invalid Asymmetric Config with Symmetric Key", func(t *testing.T) {
-// 		config := GourdianTokenConfig{
-// 			SigningMethod:     Asymmetric,
-// 			SymmetricKey:      testSymmetricKey,
-// 			Algorithm:         "RS256",
-// 			AllowedAlgorithms: []string{"RS256"},
-// 		}
+	t.Run("Invalid Asymmetric Config with Symmetric Key", func(t *testing.T) {
+		config := GourdianTokenConfig{
+			SigningMethod:     Asymmetric,
+			SymmetricKey:      testSymmetricKey,
+			PrivateKeyPath:    "private.key", // Add these to trigger the correct error
+			PublicKeyPath:     "public.key",
+			Algorithm:         "RS256",
+			AllowedAlgorithms: []string{"RS256"},
+		}
 
-// 		err := validateConfig(&config)
-// 		require.Error(t, err)
-// 		require.Contains(t, err.Error(), "symmetric key must be empty for asymmetric signing")
-// 	})
+		err := validateConfig(&config)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "symmetric key must be empty for asymmetric signing")
+	})
 
-// 	t.Run("Invalid Expiry Durations", func(t *testing.T) {
-// 		tests := []struct {
-// 			name          string
-// 			accessExpiry  time.Duration
-// 			refreshExpiry time.Duration
-// 			expectedErr   string
-// 		}{
-// 			{
-// 				name:          "Negative access expiry",
-// 				accessExpiry:  -time.Hour,
-// 				refreshExpiry: time.Hour,
-// 				expectedErr:   "access token duration must be positive",
-// 			},
-// 		}
+	t.Run("Invalid Expiry Durations", func(t *testing.T) {
+		tests := []struct {
+			name          string
+			accessExpiry  time.Duration
+			refreshExpiry time.Duration
+			expectedErr   string
+		}{
+			{
+				name:          "Negative access expiry",
+				accessExpiry:  -time.Hour,
+				refreshExpiry: time.Hour,
+				expectedErr:   "access token duration must be positive",
+			},
+		}
 
-// 		for _, tt := range tests {
-// 			t.Run(tt.name, func(t *testing.T) {
-// 				config := GourdianTokenConfig{
-// 					SigningMethod:           Symmetric,
-// 					SymmetricKey:            testSymmetricKey,
-// 					Algorithm:               "HS256",
-// 					AccessExpiryDuration:    tt.accessExpiry,
-// 					AccessMaxLifetimeExpiry: 24 * time.Hour,
-// 					RefreshExpiryDuration:   tt.refreshExpiry,
-// 				}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				config := GourdianTokenConfig{
+					SigningMethod:           Symmetric,
+					SymmetricKey:            testSymmetricKey,
+					Algorithm:               "HS256",
+					AccessExpiryDuration:    tt.accessExpiry,
+					AccessMaxLifetimeExpiry: 24 * time.Hour,
+					RefreshExpiryDuration:   tt.refreshExpiry,
+				}
 
-// 				err := validateConfig(&config)
-// 				require.Error(t, err)
-// 				require.Contains(t, err.Error(), tt.expectedErr)
-// 			})
-// 		}
-// 	})
-// }
+				err := validateConfig(&config)
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.expectedErr)
+			})
+		}
+	})
+}
 
-// func TestValidateTokenClaims_EdgeCases(t *testing.T) {
-// 	now := time.Now()
-// 	validClaims := jwt.MapClaims{
-// 		"jti": uuid.New().String(),
-// 		"sub": uuid.New().String(),
-// 		"usr": "testuser",
-// 		"sid": uuid.New().String(),
-// 		"iss": "test-issuer",
-// 		"aud": []string{"aud1", "aud2"},
-// 		"rls": []string{"admin"},
-// 		"iat": now.Unix(),
-// 		"exp": now.Add(time.Hour).Unix(),
-// 		"nbf": now.Unix(),
-// 		"mle": now.Add(24 * time.Hour).Unix(),
-// 		"typ": string(AccessToken),
-// 	}
+func TestValidateTokenClaims_EdgeCases(t *testing.T) {
+	now := time.Now()
+	validClaims := jwt.MapClaims{
+		"jti": uuid.New().String(),
+		"sub": uuid.New().String(),
+		"usr": "testuser",
+		"sid": uuid.New().String(),
+		"iss": "test-issuer",
+		"aud": []string{"aud1", "aud2"},
+		"rls": []string{"admin"},
+		"iat": now.Unix(),
+		"exp": now.Add(time.Hour).Unix(),
+		"nbf": now.Unix(),
+		"mle": now.Add(24 * time.Hour).Unix(),
+		"typ": string(AccessToken),
+	}
 
-// 	tests := []struct {
-// 		name        string
-// 		modifyFn    func(jwt.MapClaims)
-// 		expectedErr string
-// 	}{
-// 		{
-// 			name: "Invalid JTI format",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["jti"] = "not-a-uuid"
-// 			},
-// 			expectedErr: "invalid token ID",
-// 		},
-// 		{
-// 			name: "Invalid SUB format",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["sub"] = "not-a-uuid"
-// 			},
-// 			expectedErr: "invalid user ID",
-// 		},
-// 		{
-// 			name: "Invalid SID format",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				c["sid"] = "not-a-uuid"
-// 			},
-// 			expectedErr: "invalid session ID",
-// 		},
-// 		{
-// 			name: "Missing username",
-// 			modifyFn: func(c jwt.MapClaims) {
-// 				delete(c, "usr")
-// 			},
-// 			expectedErr: "missing required claim: usr",
-// 		},
-// 	}
+	tests := []struct {
+		name        string
+		modifyFn    func(jwt.MapClaims)
+		expectedErr string
+	}{
+		{
+			name: "Invalid JTI format",
+			modifyFn: func(c jwt.MapClaims) {
+				c["jti"] = "not-a-uuid"
+			},
+			expectedErr: "invalid token ID",
+		},
+		{
+			name: "Invalid SUB format",
+			modifyFn: func(c jwt.MapClaims) {
+				c["sub"] = "not-a-uuid"
+			},
+			expectedErr: "invalid user ID",
+		},
+		{
+			name: "Invalid SID format",
+			modifyFn: func(c jwt.MapClaims) {
+				c["sid"] = "not-a-uuid"
+			},
+			expectedErr: "invalid session ID",
+		},
+		{
+			name: "Missing username",
+			modifyFn: func(c jwt.MapClaims) {
+				delete(c, "usr")
+			},
+			expectedErr: "missing required claim: usr",
+		},
+	}
 
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			claims := make(jwt.MapClaims)
-// 			for k, v := range validClaims {
-// 				claims[k] = v
-// 			}
-// 			tt.modifyFn(claims)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := make(jwt.MapClaims)
+			for k, v := range validClaims {
+				claims[k] = v
+			}
+			tt.modifyFn(claims)
 
-// 			err := validateTokenClaims(claims, AccessToken, []string{"iss", "aud", "nbf", "mle"})
-// 			require.Error(t, err)
-// 			require.Contains(t, err.Error(), tt.expectedErr)
-// 		})
-// 	}
-// }
+			err := validateTokenClaims(claims, AccessToken, []string{"iss", "aud", "nbf", "mle"})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.expectedErr)
+		})
+	}
+}

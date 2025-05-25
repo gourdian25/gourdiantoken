@@ -1201,10 +1201,25 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required 
 	}
 
 	// Then validate individual claim formats
-	if _, ok := claims["jti"].(string); !ok {
+	if jti, ok := claims["jti"].(string); !ok {
 		return fmt.Errorf("invalid token ID type: expected string")
+	} else if _, err := uuid.Parse(jti); err != nil {
+		return fmt.Errorf("invalid token ID format: %w", err)
 	}
 
+	if sub, ok := claims["sub"].(string); !ok {
+		return fmt.Errorf("invalid user ID type: expected string")
+	} else if _, err := uuid.Parse(sub); err != nil {
+		return fmt.Errorf("invalid user ID format: %w", err)
+	}
+
+	if sid, ok := claims["sid"].(string); !ok {
+		return fmt.Errorf("invalid session ID type: expected string")
+	} else if _, err := uuid.Parse(sid); err != nil {
+		return fmt.Errorf("invalid session ID format: %w", err)
+	}
+
+	// Rest of the validation remains the same...
 	// Validate token type
 	tokenType, ok := claims["typ"].(string)
 	if !ok || TokenType(tokenType) != expectedType {
