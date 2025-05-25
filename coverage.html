@@ -171,7 +171,7 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig <span c
                 PublicKeyPath:            "",
                 Issuer:                   "gourdian.com",
                 Audience:                 nil,
-                AllowedAlgorithms:        []string{"HS256", "RS256", "ES256", "PS256"},
+                AllowedAlgorithms:        []string{"HS256", "HS384", "HS512", "RS256", "ES256", "PS256"},
                 RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
                 AccessExpiryDuration:     30 * time.Minute,
                 AccessMaxLifetimeExpiry:  24 * time.Hour,
@@ -807,6 +807,7 @@ func (maker *JWTMaker) initializeSigningMethod() error <span class="cov8" title=
         default:<span class="cov0" title="0">
                 return fmt.Errorf("unsupported algorithm: %s", maker.config.Algorithm)</span>
         }
+
         <span class="cov8" title="1">return nil</span>
 }
 

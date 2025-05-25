@@ -4,9 +4,11 @@ package gourdiantoken
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"os"
 	"testing"
 	"time"
 
@@ -475,113 +477,134 @@ func BenchmarkTokenRevocationParallel(b *testing.B) {
 	})
 }
 
-// func BenchmarkTokenOperations(b *testing.B) {
-// 	benchmarks := []struct {
-// 		name       string
-// 		keySize    int
-// 		algorithm  string
-// 		signingKey interface{}
-// 	}{
-// 		{"HMAC-256", 32, "HS256", []byte("test-secret-32-bytes-long-1234567890")},
-// 		{"HMAC-384", 48, "HS384", []byte("test-secret-48-bytes-long-123456789012345678901234")},
-// 		{"HMAC-512", 64, "HS512", []byte("test-secret-64-bytes-long-123456789012345678901234567890123456789012345678901234")},
-// 		{"RSA-2048", 2048, "RS256", generateRSAKey(2048)},
-// 		{"RSA-4096", 4096, "RS256", generateRSAKey(4096)},
-// 		{"ECDSA-P256", 256, "ES256", generateECDSAKey(elliptic.P256())},
-// 		{"ECDSA-P384", 384, "ES384", generateECDSAKey(elliptic.P384())},
-// 	}
+func BenchmarkTokenOperations(b *testing.B) {
+	benchmarks := []struct {
+		name       string
+		keySize    int
+		algorithm  string
+		signingKey interface{}
+	}{
+		{"HMAC-256", 32, "HS256", []byte("test-secret-32-bytes-long-1234567890")},
+		{"HMAC-384", 48, "HS384", []byte("test-secret-48-bytes-long-123456789012345678901234")},
+		{"HMAC-512", 64, "HS512", []byte("test-secret-64-bytes-long-123456789012345678901234567890123456789012345678901234")},
+		{"RSA-2048", 2048, "RS256", generateRSAKey(2048)},
+		{"RSA-4096", 4096, "RS256", generateRSAKey(4096)},
+		{"ECDSA-P256", 256, "ES256", generateECDSAKey(elliptic.P256())},
+		{"ECDSA-P384", 384, "ES384", generateECDSAKey(elliptic.P384())},
+	}
 
-// 	for _, bb := range benchmarks {
-// 		b.Run(bb.name, func(b *testing.B) {
-// 			var maker GourdianTokenMaker
-// 			var err error
+	for _, bb := range benchmarks {
+		b.Run(bb.name, func(b *testing.B) {
+			var maker GourdianTokenMaker
+			var err error
 
-// 			switch k := bb.signingKey.(type) {
-// 			case []byte:
-// 				config := DefaultGourdianTokenConfig(string(k))
-// 				config.Algorithm = bb.algorithm
-// 				config.AccessExpiryDuration = time.Hour
-// 				maker, err = NewGourdianTokenMaker(context.Background(), config, nil)
-// 			case *rsa.PrivateKey, *ecdsa.PrivateKey:
-// 				privatePath, publicPath := writeTempKeyFiles(b, k)
-// 				config := GourdianTokenConfig{
-// 					Algorithm:                bb.algorithm,
-// 					SigningMethod:            Asymmetric,
-// 					PrivateKeyPath:           privatePath,
-// 					PublicKeyPath:            publicPath,
-// 					AccessExpiryDuration:     time.Hour,
-// 					AccessMaxLifetimeExpiry:  24 * time.Hour,
-// 					RefreshExpiryDuration:    7 * 24 * time.Hour,
-// 					RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
-// 				}
-// 				maker, err = NewGourdianTokenMaker(context.Background(), config, nil)
-// 			}
-// 			require.NoError(b, err)
+			switch k := bb.signingKey.(type) {
+			case []byte:
+				config := DefaultGourdianTokenConfig(string(k))
+				config.Algorithm = bb.algorithm
+				config.AccessExpiryDuration = time.Hour
+				maker, err = NewGourdianTokenMaker(context.Background(), config, nil)
+			case *rsa.PrivateKey, *ecdsa.PrivateKey:
+				privatePath, publicPath := writeTempKeyFiles(b, k)
+				config := GourdianTokenConfig{
+					Algorithm:                bb.algorithm,
+					SigningMethod:            Asymmetric,
+					PrivateKeyPath:           privatePath,
+					PublicKeyPath:            publicPath,
+					AccessExpiryDuration:     time.Hour,
+					AccessMaxLifetimeExpiry:  24 * time.Hour,
+					RefreshExpiryDuration:    7 * 24 * time.Hour,
+					RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+				}
+				maker, err = NewGourdianTokenMaker(context.Background(), config, nil)
+			}
+			require.NoError(b, err)
 
-// 			userID := uuid.New()
-// 			username := "benchuser"
-// 			roles := []string{"admin"}
-// 			sessionID := uuid.New()
+			userID := uuid.New()
+			username := "benchuser"
+			roles := []string{"admin"}
+			sessionID := uuid.New()
 
-// 			b.Run("Create", func(b *testing.B) {
-// 				for i := 0; i < b.N; i++ {
-// 					_, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
-// 					if err != nil {
-// 						b.Fatal(err)
-// 					}
-// 				}
-// 			})
+			b.Run("Create", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					_, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
 
-// 			token, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
-// 			require.NoError(b, err)
+			token, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+			require.NoError(b, err)
 
-// 			b.Run("Verify", func(b *testing.B) {
-// 				for i := 0; i < b.N; i++ {
-// 					_, err := maker.VerifyAccessToken(context.Background(), token.Token)
-// 					if err != nil {
-// 						b.Fatal(err)
-// 					}
-// 				}
-// 			})
-// 		})
-// 	}
-// }
+			b.Run("Verify", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					_, err := maker.VerifyAccessToken(context.Background(), token.Token)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		})
+	}
+}
 
-// func BenchmarkCreateRefreshToken(b *testing.B) {
-// 	symmetricConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
-// 	symmetricMaker, _ := NewGourdianTokenMaker(context.Background(), symmetricConfig, nil)
+func BenchmarkCreateRefreshToken(b *testing.B) {
+	// Symmetric setup
+	symmetricConfig := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
+	symmetricMaker, err := NewGourdianTokenMaker(context.Background(), symmetricConfig, nil)
+	if err != nil {
+		b.Fatalf("failed to create symmetric maker: %v", err)
+	}
 
-// 	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-// 	privatePath, publicPath := writeTempKeyFiles(b, privateKey)
-// 	asymmetricConfig := GourdianTokenConfig{
-// 		Algorithm:                "RS256",
-// 		SigningMethod:            Asymmetric,
-// 		PrivateKeyPath:           privatePath,
-// 		PublicKeyPath:            publicPath,
-// 		RefreshExpiryDuration:    7 * 24 * time.Hour,
-// 		RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
-// 	}
-// 	asymmetricMaker, _ := NewGourdianTokenMaker(context.Background(), asymmetricConfig, nil)
+	// Asymmetric setup
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		b.Fatalf("failed to generate RSA key: %v", err)
+	}
 
-// 	userID := uuid.New()
-// 	username := "benchuser"
-// 	sessionID := uuid.New()
+	privatePath, publicPath := writeTempKeyFiles(b, privateKey)
+	defer os.Remove(privatePath)
+	defer os.Remove(publicPath)
 
-// 	b.Run("Symmetric", func(b *testing.B) {
-// 		for i := 0; i < b.N; i++ {
-// 			_, err := symmetricMaker.CreateRefreshToken(context.Background(), userID, username, sessionID)
-// 			if err != nil {
-// 				b.Fatal(err)
-// 			}
-// 		}
-// 	})
+	asymmetricConfig := GourdianTokenConfig{
+		Algorithm:                "RS256",
+		SigningMethod:            Asymmetric,
+		PrivateKeyPath:           privatePath,
+		PublicKeyPath:            publicPath,
+		Issuer:                   "benchmark",
+		Audience:                 []string{"benchmark"},
+		AllowedAlgorithms:        []string{"RS256"},
+		RequiredClaims:           []string{"iss", "aud", "exp", "iat"},
+		AccessExpiryDuration:     time.Hour,
+		AccessMaxLifetimeExpiry:  24 * time.Hour,
+		RefreshExpiryDuration:    7 * 24 * time.Hour,
+		RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+	}
+	asymmetricMaker, err := NewGourdianTokenMaker(context.Background(), asymmetricConfig, nil)
+	if err != nil {
+		b.Fatalf("failed to create asymmetric maker: %v", err)
+	}
 
-// 	b.Run("Asymmetric", func(b *testing.B) {
-// 		for i := 0; i < b.N; i++ {
-// 			_, err := asymmetricMaker.CreateRefreshToken(context.Background(), userID, username, sessionID)
-// 			if err != nil {
-// 				b.Fatal(err)
-// 			}
-// 		}
-// 	})
-// }
+	userID := uuid.New()
+	username := "benchuser"
+	sessionID := uuid.New()
+
+	b.Run("Symmetric", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := symmetricMaker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Asymmetric", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := asymmetricMaker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}

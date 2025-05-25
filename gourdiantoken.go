@@ -100,7 +100,7 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 		PublicKeyPath:            "",
 		Issuer:                   "gourdian.com",
 		Audience:                 nil,
-		AllowedAlgorithms:        []string{"HS256", "RS256", "ES256", "PS256"},
+		AllowedAlgorithms:        []string{"HS256", "HS384", "HS512", "RS256", "ES256", "PS256"},
 		RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
 		AccessExpiryDuration:     30 * time.Minute,
 		AccessMaxLifetimeExpiry:  24 * time.Hour,
@@ -736,6 +736,7 @@ func (maker *JWTMaker) initializeSigningMethod() error {
 	default:
 		return fmt.Errorf("unsupported algorithm: %s", maker.config.Algorithm)
 	}
+
 	return nil
 }
 

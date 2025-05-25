@@ -543,7 +543,7 @@ func TestDefaultConfig(t *testing.T) {
 		assert.Equal(t, Symmetric, config.SigningMethod)
 		assert.Equal(t, 30*time.Minute, config.AccessExpiryDuration)
 		assert.Equal(t, 24*time.Hour, config.AccessMaxLifetimeExpiry)
-		assert.Equal(t, []string{"HS256", "RS256", "ES256", "PS256"}, config.AllowedAlgorithms)
+		assert.Equal(t, []string{"HS256", "HS384", "HS512", "RS256", "ES256", "PS256"}, config.AllowedAlgorithms)
 		assert.Equal(t, []string{"iss", "aud", "nbf", "mle"}, config.RequiredClaims)
 		assert.Equal(t, 7*24*time.Hour, config.RefreshExpiryDuration)
 		assert.Equal(t, 30*24*time.Hour, config.RefreshMaxLifetimeExpiry)
