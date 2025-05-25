@@ -134,9 +134,9 @@ type RefreshTokenResponse struct {
 	Issuer            string    `json:"iss"` // Issuer identifier
 	Username          string    `json:"usr"` // Username
 	Audience          []string  `json:"aud"` // Intended audience
-	NotBefore         time.Time `json:"nbf"` // Not before timestamp
-	ExpiresAt         time.Time `json:"exp"` // Expiration timestamp
 	IssuedAt          time.Time `json:"iat"` // Issuance timestamp
+	ExpiresAt         time.Time `json:"exp"` // Expiration timestamp
+	NotBefore         time.Time `json:"nbf"` // Not before timestamp
 	MaxLifetimeExpiry time.Time `json:"mle"` // Maximum lifetime expiry timestamp (RFC3339)
 	TokenType         TokenType `json:"typ"` // Fixed value "access"
 }
@@ -261,16 +261,18 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 
 	now := time.Now()
 	claims := AccessTokenClaims{
-		ID:        tokenID,
-		Subject:   userID,
-		Username:  username,
-		SessionID: sessionID,
-		Issuer:    maker.config.Issuer,
-		Audience:  maker.config.Audience,
-		IssuedAt:  now,
-		ExpiresAt: now.Add(maker.config.AccessExpiryDuration),
-		TokenType: AccessToken,
-		Roles:     roles,
+		ID:                tokenID,
+		Subject:           userID,
+		SessionID:         sessionID,
+		Username:          username,
+		Issuer:            maker.config.Issuer,
+		Audience:          maker.config.Audience,
+		Roles:             roles,
+		IssuedAt:          now,
+		ExpiresAt:         now.Add(maker.config.AccessExpiryDuration),
+		NotBefore:         now,
+		MaxLifetimeExpiry: now.Add(maker.config.AccessMaxLifetimeExpiry),
+		TokenType:         AccessToken,
 	}
 
 	token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
@@ -281,15 +283,18 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 	}
 
 	response := &AccessTokenResponse{
-		Token:     signedToken,
-		Subject:   claims.Subject,
-		Username:  claims.Username,
-		SessionID: claims.SessionID,
-		Issuer:    claims.Issuer,
-		Audience:  claims.Audience,
-		ExpiresAt: claims.ExpiresAt,
-		IssuedAt:  claims.IssuedAt,
-		Roles:     roles,
+		Subject:           claims.Subject,
+		SessionID:         claims.SessionID,
+		Token:             signedToken,
+		Issuer:            claims.Issuer,
+		Username:          claims.Username,
+		Roles:             roles,
+		Audience:          claims.Audience,
+		IssuedAt:          claims.IssuedAt,
+		ExpiresAt:         claims.ExpiresAt,
+		NotBefore:         claims.NotBefore,
+		MaxLifetimeExpiry: claims.MaxLifetimeExpiry,
+		TokenType:         claims.TokenType,
 	}
 
 	return response, nil
@@ -310,15 +315,17 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 
 	now := time.Now()
 	claims := RefreshTokenClaims{
-		ID:        tokenID,
-		Subject:   userID,
-		Username:  username,
-		SessionID: sessionID,
-		Issuer:    maker.config.Issuer,
-		Audience:  maker.config.Audience,
-		IssuedAt:  now,
-		ExpiresAt: now.Add(maker.config.RefreshExpiryDuration),
-		TokenType: RefreshToken,
+		ID:                tokenID,
+		Subject:           userID,
+		SessionID:         sessionID,
+		Username:          username,
+		Issuer:            maker.config.Issuer,
+		Audience:          maker.config.Audience,
+		IssuedAt:          now,
+		ExpiresAt:         now.Add(maker.config.RefreshExpiryDuration),
+		NotBefore:         now,
+		MaxLifetimeExpiry: now.Add(maker.config.RefreshMaxLifetimeExpiry),
+		TokenType:         RefreshToken,
 	}
 
 	token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
@@ -329,14 +336,17 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 	}
 
 	response := &RefreshTokenResponse{
-		Token:     signedToken,
-		Subject:   claims.Subject,
-		Username:  claims.Username,
-		SessionID: claims.SessionID,
-		Issuer:    claims.Issuer,
-		Audience:  claims.Audience,
-		ExpiresAt: claims.ExpiresAt,
-		IssuedAt:  claims.IssuedAt,
+		Subject:           claims.Subject,
+		SessionID:         claims.SessionID,
+		Token:             signedToken,
+		Issuer:            claims.Issuer,
+		Username:          claims.Username,
+		Audience:          claims.Audience,
+		IssuedAt:          claims.IssuedAt,
+		ExpiresAt:         claims.ExpiresAt,
+		NotBefore:         claims.NotBefore,
+		MaxLifetimeExpiry: claims.MaxLifetimeExpiry,
+		TokenType:         claims.TokenType,
 	}
 
 	return response, nil
