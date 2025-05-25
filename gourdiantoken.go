@@ -1,5 +1,8 @@
-// gourdiantoken.go
-
+// Package gourdiantoken provides a secure JWT token generation and validation system
+// with advanced features like token rotation, revocation, and configurable security policies.
+//
+// The package supports both symmetric (HMAC) and asymmetric (RSA/ECDSA) signing methods,
+// with built-in protections against common JWT vulnerabilities.
 package gourdiantoken
 
 import (
@@ -29,6 +32,17 @@ const (
 	rotatedPrefix        = "rotated:"
 )
 
+// TokenType defines the type of token (access or refresh).
+//
+// Used to distinguish between short-lived access tokens and long-lived refresh tokens
+// in the token validation process.
+//
+// Example:
+//
+//	const myTokenType = AccessToken // or RefreshToken
+//
+// AccessToken represents a short-lived token used for API access
+// RefreshToken represents a long-lived token used to obtain new access tokens
 type TokenType string
 
 const (
@@ -36,6 +50,17 @@ const (
 	RefreshToken TokenType = "refresh"
 )
 
+// SigningMethod defines the cryptographic method used for token signing.
+//
+// Determines whether symmetric (shared secret) or asymmetric (public/private key)
+// cryptography will be used.
+//
+// Example:
+//
+//	const method = Symmetric // or Asymmetric
+//
+// Symmetric indicates HMAC signing with a shared secret key
+// Asymmetric indicates signing with public/private key pairs (RSA/ECDSA)
 type SigningMethod string
 
 const (
@@ -43,8 +68,27 @@ const (
 	Asymmetric SigningMethod = "asymmetric"
 )
 
+// GourdianTokenConfig contains all configurable parameters for token generation and validation.
+//
+// This struct serves as the security policy definition for your token system,
+// allowing fine-grained control over token lifetimes, cryptographic methods,
+// and security features.
+//
+// Example Configuration:
+//
+//	config := GourdianTokenConfig{
+//	    Algorithm:                "RS256",
+//	    SigningMethod:            Asymmetric,
+//	    PrivateKeyPath:           "/path/to/private.pem",
+//	    PublicKeyPath:            "/path/to/public.pem",
+//	    Issuer:                   "auth.example.com",
+//	    AccessExpiryDuration:     30 * time.Minute,
+//	    AccessMaxLifetimeExpiry:  24 * time.Hour,
+//	    RefreshExpiryDuration:    7 * 24 * time.Hour,
+//	    RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+//	}
 type GourdianTokenConfig struct {
-	RotationEnabled          bool          // Whether to enable refresh token rotation
+	RotationEnabled          bool          // Whether to enable refresh token rotation (prevents token reuse)
 	RevocationEnabled        bool          // Whether to check Redis for revoked tokens
 	Algorithm                string        // JWT signing algorithm (e.g., "HS256", "RS256"). Must match key type.
 	SymmetricKey             string        // Base64-encoded secret key for HMAC (min 32 bytes for HS256)
@@ -62,6 +106,49 @@ type GourdianTokenConfig struct {
 	RefreshReuseInterval     time.Duration // Minimum time between reuse attempts (rotation)
 }
 
+// NewGourdianTokenConfig constructs a complete token configuration with explicit settings.
+//
+// This constructor forces explicit consideration of all security parameters rather than
+// relying on defaults. For most cases, DefaultGourdianTokenConfig() is recommended.
+//
+// Parameters:
+//   - signingMethod: Cryptographic method type (Symmetric/Asymmetric)
+//   - rotationEnabled: Whether refresh token rotation is enabled
+//   - revocationEnabled: Whether token revocation checks are enabled
+//   - audience: List of intended token recipients
+//   - allowedAlgorithms: Whitelist of acceptable JWT algorithms
+//   - requiredClaims: Mandatory claims that must be present
+//   - algorithm: JWT signing algorithm name (e.g., "HS256")
+//   - symmetricKey: Secret key for HMAC (base64 encoded)
+//   - privateKeyPath: File path to private key (asymmetric)
+//   - publicKeyPath: File path to public key (asymmetric)
+//   - issuer: Token issuer identifier
+//   - accessExpiryDuration: Access token validity duration
+//   - accessMaxLifetimeExpiry: Access token absolute max lifetime
+//   - refreshExpiryDuration: Refresh token validity duration
+//   - refreshMaxLifetimeExpiry: Refresh token absolute max lifetime
+//   - refreshReuseInterval: Minimum time between refresh token reuse attempts
+//
+// Example:
+//
+//	config := NewGourdianTokenConfig(
+//	    Asymmetric,
+//	    true,
+//	    true,
+//	    []string{"api.example.com"},
+//	    []string{"RS256", "ES256"},
+//	    []string{"iss", "aud", "exp"},
+//	    "RS256",
+//	    "",
+//	    "/path/to/private.pem",
+//	    "/path/to/public.pem",
+//	    "auth.example.com",
+//	    30*time.Minute,
+//	    24*time.Hour,
+//	    168*time.Hour,
+//	    720*time.Hour,
+//	    5*time.Minute,
+//	)
 func NewGourdianTokenConfig(
 	signingMethod SigningMethod,
 	rotationEnabled, revocationEnabled bool,
@@ -89,6 +176,19 @@ func NewGourdianTokenConfig(
 	}
 }
 
+// DefaultGourdianTokenConfig creates a secure default configuration with HMAC-SHA256.
+//
+// This configuration is suitable for most applications and provides:
+// - 30 minute access tokens
+// - 7 day refresh tokens
+// - Basic security requirements
+//
+// Parameters:
+//   - symmetricKey: Base64-encoded secret key (minimum 32 bytes)
+//
+// Example:
+//
+//	config := DefaultGourdianTokenConfig("my-very-secure-base64-encoded-secret-key")
 func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 	return GourdianTokenConfig{
 		RevocationEnabled:        false,
@@ -110,6 +210,27 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 	}
 }
 
+// AccessTokenClaims represents the decoded payload of an access token.
+//
+// Contains standard JWT claims plus authorization roles and session identifiers.
+// Access tokens are short-lived and carry the user's permissions.
+//
+// Example JSON Structure:
+//
+//	{
+//	    "jti": "123e4567-e89b-12d3-a456-426614174000",
+//	    "sub": "123e4567-e89b-12d3-a456-426614174000",
+//	    "usr": "alice",
+//	    "sid": "123e4567-e89b-12d3-a456-426614174000",
+//	    "iss": "auth.example.com",
+//	    "aud": ["api.example.com"],
+//	    "rls": ["user", "admin"],
+//	    "iat": 1516239022,
+//	    "exp": 1516239322,
+//	    "nbf": 1516239022,
+//	    "mle": 1516325422,
+//	    "typ": "access"
+//	}
 type AccessTokenClaims struct {
 	ID                uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
 	Subject           uuid.UUID `json:"sub"` // Subject (user UUID)
@@ -125,6 +246,26 @@ type AccessTokenClaims struct {
 	TokenType         TokenType `json:"typ"` // Fixed value "access"
 }
 
+// RefreshTokenClaims represents the decoded payload of a refresh token.
+//
+// Contains standard JWT claims plus session identifiers but no authorization roles.
+// Refresh tokens are simpler since they're only used to obtain new access tokens.
+//
+// Example JSON Structure:
+//
+//	{
+//	    "jti": "123e4567-e89b-12d3-a456-426614174000",
+//	    "sub": "123e4567-e89b-12d3-a456-426614174000",
+//	    "usr": "alice",
+//	    "sid": "123e4567-e89b-12d3-a456-426614174000",
+//	    "iss": "auth.example.com",
+//	    "aud": ["api.example.com"],
+//	    "iat": 1516239022,
+//	    "exp": 1516242622,
+//	    "nbf": 1516239022,
+//	    "mle": 1516325422,
+//	    "typ": "refresh"
+//	}
 type RefreshTokenClaims struct {
 	ID                uuid.UUID `json:"jti"` // Unique token identifier
 	Subject           uuid.UUID `json:"sub"` // Subject (user UUID)
@@ -139,6 +280,21 @@ type RefreshTokenClaims struct {
 	TokenType         TokenType `json:"typ"` // Fixed value "refresh"
 }
 
+// AccessTokenResponse contains all information about a newly created access token.
+//
+// This struct is returned when creating new access tokens and includes both
+// the signed token string and all its decoded claims for client convenience.
+//
+// Example:
+//
+//	response := AccessTokenResponse{
+//	    Token:     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+//	    Subject:   uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
+//	    SessionID: uuid.MustParse("223e4567-e89b-12d3-a456-426614174000"),
+//	    Issuer:    "auth.example.com",
+//	    ExpiresAt: time.Now().Add(30 * time.Minute),
+//	    // ... other fields
+//	}
 type AccessTokenResponse struct {
 	Subject           uuid.UUID `json:"sub"` // User UUID
 	SessionID         uuid.UUID `json:"sid"` // Session UUID
@@ -154,6 +310,21 @@ type AccessTokenResponse struct {
 	TokenType         TokenType `json:"typ"` // Fixed value "access"
 }
 
+// RefreshTokenResponse contains all information about a newly created refresh token.
+//
+// Similar to AccessTokenResponse but without roles, since refresh tokens
+// don't carry authorization information.
+//
+// Example:
+//
+//	response := RefreshTokenResponse{
+//	    Token:     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+//	    Subject:   uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
+//	    SessionID: uuid.MustParse("223e4567-e89b-12d3-a456-426614174000"),
+//	    Issuer:    "auth.example.com",
+//	    ExpiresAt: time.Now().Add(168 * time.Hour),
+//	    // ... other fields
+//	}
 type RefreshTokenResponse struct {
 	Subject           uuid.UUID `json:"sub"` // User UUID
 	SessionID         uuid.UUID `json:"sid"` // Session UUID
@@ -168,16 +339,37 @@ type RefreshTokenResponse struct {
 	TokenType         TokenType `json:"typ"` // Fixed value "access"
 }
 
+// GourdianTokenMaker defines the interface for token operations.
+//
+// Implementations should provide thread-safe methods for creating,
+// verifying, and managing JWT tokens according to the configured policies.
 type GourdianTokenMaker interface {
+	// CreateAccessToken generates a new signed access token
 	CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
+
+	// CreateRefreshToken generates a new signed refresh token
 	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
+
+	// VerifyAccessToken validates and parses an access token
 	VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
+
+	// VerifyRefreshToken validates and parses a refresh token
 	VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error)
+
+	// RevokeAccessToken marks an access token as revoked
 	RevokeAccessToken(ctx context.Context, token string) error
+
+	// RevokeRefreshToken marks a refresh token as revoked
 	RevokeRefreshToken(ctx context.Context, token string) error
+
+	// RotateRefreshToken exchanges an old refresh token for a new one
 	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
 }
 
+// JWTMaker is the concrete implementation of GourdianTokenMaker.
+//
+// This private struct holds the actual implementation details including
+// cryptographic keys and Redis connections for advanced features.
 type JWTMaker struct {
 	config        GourdianTokenConfig // Immutable configuration
 	signingMethod jwt.SigningMethod   // JWT signing algorithm instance
@@ -186,6 +378,25 @@ type JWTMaker struct {
 	redisClient   *redis.Client       // Redis client for revocation/rotation
 }
 
+// NewGourdianTokenMaker creates a new token maker with custom configuration.
+//
+// This is the primary constructor that sets up all cryptographic materials
+// and verifies the configuration is valid before use.
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - config: Complete token configuration
+//   - redisOpts: Redis connection options (required for revocation/rotation)
+//
+// Example:
+//
+//	config := DefaultGourdianTokenConfig("my-secret-key")
+//	maker, err := NewGourdianTokenMaker(context.Background(), config, &redis.Options{
+//	    Addr: "localhost:6379",
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
 func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) {
 	// Check context cancellation first
 	if err := ctx.Err(); err != nil {
@@ -246,6 +457,23 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	return maker, nil
 }
 
+// DefaultGourdianTokenMaker creates a token maker with secure defaults.
+//
+// This convenience constructor uses HMAC-SHA256 with the provided symmetric key
+// and optional Redis connection for advanced features.
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - symmetricKey: Base64-encoded secret key (minimum 32 bytes)
+//   - redisOpts: Optional Redis connection options
+//
+// Example:
+//
+//	maker, err := DefaultGourdianTokenMaker(
+//	    context.Background(),
+//	    "my-very-secure-base64-encoded-secret-key",
+//	    &redis.Options{Addr: "localhost:6379"},
+//	)
 func DefaultGourdianTokenMaker(
 	ctx context.Context,
 	symmetricKey string,
@@ -277,6 +505,27 @@ func DefaultGourdianTokenMaker(
 	return NewGourdianTokenMaker(ctx, config, redisOpts)
 }
 
+// CreateAccessToken generates a new signed access token with the given user attributes.
+//
+// The token will include all standard claims plus the provided roles and session information.
+// It will be signed using the configured cryptographic method.
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - userID: Unique identifier for the user (UUID)
+//   - username: Human-readable username
+//   - roles: Authorization roles assigned to the user
+//   - sessionID: Unique session identifier (UUID)
+//
+// Example:
+//
+//	token, err := maker.CreateAccessToken(
+//	    context.Background(),
+//	    uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
+//	    "alice",
+//	    []string{"user", "admin"},
+//	    uuid.MustParse("223e4567-e89b-12d3-a456-426614174000"),
+//	)
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
 
 	if err := ctx.Err(); err != nil {
@@ -346,6 +595,25 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 	return response, nil
 }
 
+// CreateRefreshToken generates a new signed refresh token with the given user attributes.
+//
+// Refresh tokens are longer-lived than access tokens but contain no authorization
+// roles since they're only used to obtain new access tokens.
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - userID: Unique identifier for the user (UUID)
+//   - username: Human-readable username
+//   - sessionID: Unique session identifier (UUID)
+//
+// Example:
+//
+//	token, err := maker.CreateRefreshToken(
+//	    context.Background(),
+//	    uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
+//	    "alice",
+//	    uuid.MustParse("223e4567-e89b-12d3-a456-426614174000"),
+//	)
 func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) {
 
 	if err := ctx.Err(); err != nil {
@@ -403,6 +671,24 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 	return response, nil
 }
 
+// VerifyAccessToken validates an access token signature and claims.
+//
+// Performs full validation including:
+// - Cryptographic signature verification
+// - Expiration checks
+// - Required claim validation
+// - Revocation check (if enabled)
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - tokenString: The JWT token string to verify
+//
+// Example:
+//
+//	claims, err := maker.VerifyAccessToken(context.Background(), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    // Handle invalid token
+//	}
 func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
 
 	if maker.config.RevocationEnabled && maker.redisClient != nil {
@@ -456,6 +742,20 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 	return accessClaims, nil
 }
 
+// VerifyRefreshToken validates a refresh token signature and claims.
+//
+// Similar to VerifyAccessToken but with refresh-token specific validation rules.
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - tokenString: The JWT token string to verify
+//
+// Example:
+//
+//	claims, err := maker.VerifyRefreshToken(context.Background(), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    // Handle invalid token
+//	}
 func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error) {
 
 	if maker.config.RevocationEnabled && maker.redisClient != nil {
@@ -496,6 +796,21 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 	return mapToRefreshClaims(claims)
 }
 
+// RevokeAccessToken marks an access token as revoked in Redis.
+//
+// Revoked tokens will fail validation even if they're otherwise valid.
+// The revocation entry automatically expires when the token would have naturally expired.
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - token: The token string to revoke
+//
+// Example:
+//
+//	err := maker.RevokeAccessToken(context.Background(), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    // Handle revocation failure
+//	}
 func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) error {
 	if !maker.config.RevocationEnabled || maker.redisClient == nil {
 		return fmt.Errorf("access token revocation is not enabled")
@@ -524,6 +839,20 @@ func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) erro
 	return maker.redisClient.Set(ctx, revokedAccessPrefix+token, "1", ttl).Err()
 }
 
+// RevokeRefreshToken marks a refresh token as revoked in Redis.
+//
+// Works similarly to RevokeAccessToken but for refresh tokens.
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - token: The token string to revoke
+//
+// Example:
+//
+//	err := maker.RevokeRefreshToken(context.Background(), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    // Handle revocation failure
+//	}
 func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) error {
 	if !maker.config.RevocationEnabled || maker.redisClient == nil {
 		return fmt.Errorf("refresh token revocation is not enabled")
@@ -552,6 +881,24 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 	return maker.redisClient.Set(ctx, revokedRefreshPrefix+token, "1", ttl).Err()
 }
 
+// RotateRefreshToken exchanges an old refresh token for a new one.
+//
+// Implements refresh token rotation by:
+// 1. Verifying the old token is valid
+// 2. Checking it hasn't been recently used
+// 3. Issuing a new refresh token
+// 4. Recording the old token to prevent reuse
+//
+// Parameters:
+//   - ctx: Context for cancellation/timeout
+//   - oldToken: The refresh token to rotate
+//
+// Example:
+//
+//	newToken, err := maker.RotateRefreshToken(context.Background(), "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")
+//	if err != nil {
+//	    // Handle rotation failure
+//	}
 func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) {
 
 	if err := ctx.Err(); err != nil {
@@ -606,6 +953,13 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 	return newToken, nil
 }
 
+// cleanupRotatedTokens periodically removes expired rotated token records from Redis.
+//
+// This background goroutine runs hourly to clean up rotation tracking entries
+// that have exceeded their maximum lifetime. Prevents Redis memory bloat.
+//
+// Parameters:
+//   - ctx: Context for cancellation
 func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
@@ -660,6 +1014,13 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 	}
 }
 
+// cleanupRevokedTokens periodically removes expired revocation records from Redis.
+//
+// Similar to cleanupRotatedTokens but for revoked token entries.
+// Runs hourly in a background goroutine.
+//
+// Parameters:
+//   - ctx: Context for cancellation
 func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
@@ -712,6 +1073,13 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 	}
 }
 
+// initializeSigningMethod configures the JWT signing algorithm based on the configuration.
+//
+// Validates that the configured algorithm is supported and matches the signing method.
+// This is called during maker initialization.
+//
+// Returns:
+//   - error if the algorithm is invalid or unsupported
 func (maker *JWTMaker) initializeSigningMethod() error {
 
 	// Check if configured algorithm is in allowed list if specified
@@ -765,6 +1133,14 @@ func (maker *JWTMaker) initializeSigningMethod() error {
 	return nil
 }
 
+// initializeKeys loads and parses the cryptographic keys based on the configuration.
+//
+// For symmetric signing, uses the configured secret key.
+// For asymmetric signing, loads and parses the key files.
+// This is called during maker initialization.
+//
+// Returns:
+//   - error if key loading or parsing fails
 func (maker *JWTMaker) initializeKeys() error {
 	switch maker.config.SigningMethod {
 	case Symmetric:
@@ -778,6 +1154,13 @@ func (maker *JWTMaker) initializeKeys() error {
 	}
 }
 
+// parseKeyPair loads and parses asymmetric key files.
+//
+// Handles different key formats (PEM, PKCS8, etc.) for RSA, ECDSA, and EdDSA.
+// This is called during maker initialization when using asymmetric signing.
+//
+// Returns:
+//   - error if key parsing fails
 func (maker *JWTMaker) parseKeyPair() error {
 	privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
 	if err != nil {
@@ -824,6 +1207,19 @@ func (maker *JWTMaker) parseKeyPair() error {
 	return nil
 }
 
+// validateConfig checks all configuration parameters for validity.
+//
+// Performs security checks like:
+// - Key size requirements
+// - Algorithm strength
+// - File permissions
+// - Logical duration relationships
+//
+// Parameters:
+//   - config: The configuration to validate
+//
+// Returns:
+//   - error if any configuration is invalid
 func validateConfig(config *GourdianTokenConfig) error {
 	switch config.SigningMethod {
 	case Symmetric:
@@ -912,6 +1308,16 @@ func validateConfig(config *GourdianTokenConfig) error {
 	return nil
 }
 
+// validateAlgorithmAndMethod ensures the algorithm matches the signing method.
+//
+// For example, prevents using RSA algorithms with symmetric signing.
+// This is called during configuration validation.
+//
+// Parameters:
+//   - config: The configuration to validate
+//
+// Returns:
+//   - error if algorithm/method combination is invalid
 func validateAlgorithmAndMethod(config *GourdianTokenConfig) error {
 	switch config.SigningMethod {
 	case Symmetric:
@@ -929,6 +1335,16 @@ func validateAlgorithmAndMethod(config *GourdianTokenConfig) error {
 	return nil
 }
 
+// toMapClaims converts structured claims to jwt.MapClaims for signing.
+//
+// Handles both AccessTokenClaims and RefreshTokenClaims, converting
+// all fields to the format expected by the JWT library.
+//
+// Parameters:
+//   - claims: Either AccessTokenClaims or RefreshTokenClaims
+//
+// Returns:
+//   - jwt.MapClaims ready for signing
 func toMapClaims(claims interface{}) jwt.MapClaims {
 	switch v := claims.(type) {
 	case AccessTokenClaims:
@@ -978,6 +1394,17 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 	}
 }
 
+// mapToAccessClaims converts JWT library claims back to AccessTokenClaims.
+//
+// Performs type checking and validation during conversion to ensure
+// all required fields are present and properly formatted.
+//
+// Parameters:
+//   - claims: Raw claims from JWT parsing
+//
+// Returns:
+//   - *AccessTokenClaims if valid
+//   - error if conversion fails
 func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 	// Validate and convert jti claim
 	jti, ok := claims["jti"].(string)
@@ -1104,6 +1531,16 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 	return accessClaims, nil
 }
 
+// mapToRefreshClaims converts JWT library claims back to RefreshTokenClaims.
+//
+// Similar to mapToAccessClaims but for refresh token specific claims.
+//
+// Parameters:
+//   - claims: Raw claims from JWT parsing
+//
+// Returns:
+//   - *RefreshTokenClaims if valid
+//   - error if conversion fails
 func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 	tokenID, err := uuid.Parse(claims["jti"].(string))
 	if err != nil {
@@ -1186,6 +1623,21 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 	return refreshClaims, nil
 }
 
+// validateTokenClaims checks all required claims are present and valid.
+//
+// Implements claim validation logic including:
+// - Required claim presence
+// - Token type verification
+// - Timestamp validation
+// - UUID format checking
+//
+// Parameters:
+//   - claims: Raw claims to validate
+//   - expectedType: Either AccessToken or RefreshToken
+//   - required: List of required claim names
+//
+// Returns:
+//   - error if any validation fails
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error {
 	// First validate required claims exist
 	baseRequired := map[TokenType][]string{
@@ -1253,6 +1705,16 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required 
 	return nil
 }
 
+// parseEdDSAPrivateKey decodes an EdDSA private key from PEM format.
+//
+// Supports PKCS8 encoded private keys. Used when the signing algorithm is EdDSA.
+//
+// Parameters:
+//   - pemBytes: PEM encoded private key data
+//
+// Returns:
+//   - ed25519.PrivateKey if successful
+//   - error if parsing fails
 func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
@@ -1272,6 +1734,16 @@ func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) {
 	return eddsaPriv, nil
 }
 
+// parseEdDSAPublicKey decodes an EdDSA public key from PEM format.
+//
+// Supports both raw public keys and certificates. Used when the signing algorithm is EdDSA.
+//
+// Parameters:
+//   - pemBytes: PEM encoded public key or certificate
+//
+// Returns:
+//   - ed25519.PublicKey if successful
+//   - error if parsing fails
 func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
@@ -1298,6 +1770,16 @@ func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) {
 	return eddsaPub, nil
 }
 
+// parseRSAPrivateKey decodes an RSA private key from PEM format.
+//
+// Supports PKCS1 and PKCS8 encoded private keys. Used when the signing algorithm is RSA.
+//
+// Parameters:
+//   - pemBytes: PEM encoded private key data
+//
+// Returns:
+//   - *rsa.PrivateKey if successful
+//   - error if parsing fails
 func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
@@ -1340,6 +1822,16 @@ func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 	}, nil
 }
 
+// parseRSAPublicKey decodes an RSA public key from PEM format.
+//
+// Supports PKIX, PKCS1, and certificate encoded public keys. Used when the signing algorithm is RSA.
+//
+// Parameters:
+//   - pemBytes: PEM encoded public key or certificate
+//
+// Returns:
+//   - *rsa.PublicKey if successful
+//   - error if parsing fails
 func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
@@ -1388,6 +1880,16 @@ func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
 	}, nil
 }
 
+// parseECDSAPrivateKey decodes an ECDSA private key from PEM format.
+//
+// Supports SEC1 and PKCS8 encoded private keys. Used when the signing algorithm is ECDSA.
+//
+// Parameters:
+//   - pemBytes: PEM encoded private key data
+//
+// Returns:
+//   - *ecdsa.PrivateKey if successful
+//   - error if parsing fails
 func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
@@ -1409,6 +1911,16 @@ func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
+// parseECDSAPublicKey decodes an ECDSA public key from PEM format.
+//
+// Supports both raw public keys and certificates. Used when the signing algorithm is ECDSA.
+//
+// Parameters:
+//   - pemBytes: PEM encoded public key or certificate
+//
+// Returns:
+//   - *ecdsa.PublicKey if successful
+//   - error if parsing fails
 func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
@@ -1435,6 +1947,16 @@ func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 	return ecdsaPub, nil
 }
 
+// checkFilePermissions verifies a file has secure permissions.
+//
+// Prevents key files from being world-readable. Used during configuration validation.
+//
+// Parameters:
+//   - path: File path to check
+//   - requiredPerm: Maximum allowed permissions (e.g., 0600)
+//
+// Returns:
+//   - error if permissions are too permissive
 func checkFilePermissions(path string, requiredPerm os.FileMode) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -1449,6 +1971,16 @@ func checkFilePermissions(path string, requiredPerm os.FileMode) error {
 	return nil
 }
 
+// getUnixTime extracts a Unix timestamp from various JWT claim formats.
+//
+// Handles different numeric types that JWT libraries might use for timestamp claims.
+//
+// Parameters:
+//   - claim: The claim value to convert
+//
+// Returns:
+//   - Unix timestamp if valid
+//   - 0 if conversion fails
 func getUnixTime(claim interface{}) int64 {
 	switch v := claim.(type) {
 	case float64:
@@ -1465,12 +1997,18 @@ func getUnixTime(claim interface{}) int64 {
 	}
 }
 
+// pkcs8 represents the structure of a PKCS8 private key.
+//
+// Used internally for parsing asymmetric private keys.
 type pkcs8 struct {
 	Version    int
 	Algo       pkix.AlgorithmIdentifier
 	PrivateKey []byte
 }
 
+// rsaPrivateKey represents the structure of an RSA private key.
+//
+// Used internally for parsing RSA private keys.
 type rsaPrivateKey struct {
 	Version int
 	N       *big.Int
