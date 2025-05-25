@@ -113,7 +113,9 @@ func BenchmarkRedisTokenRotation(b *testing.B) {
 	if _, err := conn.Ping(context.Background()).Result(); err != nil {
 		b.Skip("Redis not available, skipping benchmark")
 	}
-	conn.Close()
+	if conn.Close() != nil {
+		b.Fatal("Failed to close Redis connection")
+	}
 
 	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 	config.RotationEnabled = true
@@ -161,7 +163,9 @@ func BenchmarkTokenRevocation(b *testing.B) {
 	if _, err := conn.Ping(context.Background()).Result(); err != nil {
 		b.Skip("Redis not available, skipping benchmark")
 	}
-	conn.Close()
+	if conn.Close() != nil {
+		b.Fatal("Failed to close Redis connection")
+	}
 
 	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 	config.RevocationEnabled = true
@@ -564,8 +568,18 @@ func BenchmarkCreateRefreshToken(b *testing.B) {
 	}
 
 	privatePath, publicPath := writeTempKeyFiles(b, privateKey)
-	defer os.Remove(privatePath)
-	defer os.Remove(publicPath)
+
+	defer func() {
+		if err := os.Remove(privatePath); err != nil {
+			b.Fatalf("failed to remove private key file: %v", err)
+		}
+	}()
+
+	defer func() {
+		if err := os.Remove(publicPath); err != nil {
+			b.Fatalf("failed to remove private key file: %v", err)
+		}
+	}()
 
 	asymmetricConfig := GourdianTokenConfig{
 		Algorithm:                "RS256",

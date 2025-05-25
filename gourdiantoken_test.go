@@ -5,7 +5,6 @@ package gourdiantoken
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -25,15 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func createTestMaker(t *testing.T, config GourdianTokenConfig) *JWTMaker {
-	t.Helper()
-
-	ctx := context.Background()
-	maker, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
-	require.NoError(t, err)
-	return maker.(*JWTMaker)
-}
 
 func redisTestClient(t *testing.T) *redis.Client {
 	client := redis.NewClient(testRedisOptions())
@@ -68,37 +58,6 @@ func generateTempRSAPair(t *testing.T) (privatePath, publicPath string) {
 	}
 
 	publicPath = filepath.Join(t.TempDir(), "public.pem")
-	err = os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0600)
-	require.NoError(t, err)
-
-	return privatePath, publicPath
-}
-
-func generateTempECDSAPair(t *testing.T) (privatePath, publicPath string) {
-	t.Helper()
-
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	require.NoError(t, err)
-
-	privateBytes, err := x509.MarshalECPrivateKey(privateKey)
-	require.NoError(t, err)
-	privateBlock := &pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: privateBytes,
-	}
-
-	privatePath = filepath.Join(t.TempDir(), "ec_private.pem")
-	err = os.WriteFile(privatePath, pem.EncodeToMemory(privateBlock), 0600)
-	require.NoError(t, err)
-
-	publicBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-	require.NoError(t, err)
-	publicBlock := &pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: publicBytes,
-	}
-
-	publicPath = filepath.Join(t.TempDir(), "ec_public.pem")
 	err = os.WriteFile(publicPath, pem.EncodeToMemory(publicBlock), 0600)
 	require.NoError(t, err)
 
@@ -143,44 +102,6 @@ func generateTempCertificate(t *testing.T) (privatePath, publicPath string) {
 	require.NoError(t, err)
 
 	return privatePath, publicPath
-}
-
-func generateTempEdDSAKeys(t *testing.T) (privateKeyPath, publicKeyPath string) {
-	t.Helper()
-
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
-
-	// Create temp files
-	privateKeyFile, err := os.CreateTemp("", "ed25519-private-*.pem")
-	require.NoError(t, err)
-	defer privateKeyFile.Close()
-
-	publicKeyFile, err := os.CreateTemp("", "ed25519-public-*.pem")
-	require.NoError(t, err)
-	defer publicKeyFile.Close()
-
-	// Encode private key
-	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	require.NoError(t, err)
-	privateKeyBlock := &pem.Block{
-		Type:  "PRIVATE KEY",
-		Bytes: privateKeyBytes,
-	}
-	err = pem.Encode(privateKeyFile, privateKeyBlock)
-	require.NoError(t, err)
-
-	// Encode public key
-	publicKeyBytes, err := x509.MarshalPKIXPublicKey(publicKey)
-	require.NoError(t, err)
-	publicKeyBlock := &pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: publicKeyBytes,
-	}
-	err = pem.Encode(publicKeyFile, publicKeyBlock)
-	require.NoError(t, err)
-
-	return privateKeyFile.Name(), publicKeyFile.Name()
 }
 
 func generateRSAKey(bits int) *rsa.PrivateKey {
@@ -325,7 +246,11 @@ func TestSecurityScenarios(t *testing.T) {
 
 	t.Run("Token Replay Attack", func(t *testing.T) {
 		client := redisTestClient(t)
-		defer client.Close()
+		defer func() {
+			if err := client.Close(); err != nil {
+				t.Errorf("failed to close redis client: %v", err)
+			}
+		}()
 
 		maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
 		require.NoError(t, err)
@@ -669,7 +594,11 @@ func TestConfigValidation(t *testing.T) {
 
 func TestTokenRotation_ReuseInterval(t *testing.T) {
 	client := redisTestClient(t)
-	defer client.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Errorf("failed to close redis client: %v", err)
+		}
+	}()
 
 	config := DefaultGourdianTokenConfig(testSymmetricKey)
 	config.RotationEnabled = true
