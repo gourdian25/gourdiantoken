@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (16.5%)</option>
+				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (44.6%)</option>
 				
 				</select>
 			</div>
@@ -236,61 +236,61 @@ type JWTMaker struct {
         redisClient   *redis.Client       // Redis client for revocation/rotation
 }
 
-func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) <span class="cov0" title="0">{
+func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) <span class="cov8" title="1">{
         // Validate configuration
         if err := validateConfig(&amp;config); err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("invalid config: %w", err)
         }</span>
 
-        <span class="cov0" title="0">if err := validateAlgorithmAndMethod(&amp;config); err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err := validateAlgorithmAndMethod(&amp;config); err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("invalid algorithm/method combination: %w", err)
         }</span>
 
         // Check Redis requirements
-        <span class="cov0" title="0">if (config.RotationEnabled || config.RevocationEnabled) &amp;&amp; redisOpts == nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if (config.RotationEnabled || config.RevocationEnabled) &amp;&amp; redisOpts == nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("redis options required for token rotation/revocation")
         }</span>
 
-        <span class="cov0" title="0">maker := &amp;JWTMaker{
+        <span class="cov8" title="1">maker := &amp;JWTMaker{
                 config: config,
         }
 
         // Initialize Redis client if any feature requiring Redis is enabled
-        if config.RotationEnabled || config.RevocationEnabled </span><span class="cov0" title="0">{
+        if config.RotationEnabled || config.RevocationEnabled </span><span class="cov8" title="1">{
                 maker.redisClient = redis.NewClient(redisOpts)
 
                 // Verify Redis connection with the provided context
-                if _, err := maker.redisClient.Ping(ctx).Result(); err != nil </span><span class="cov0" title="0">{
+                if _, err := maker.redisClient.Ping(ctx).Result(); err != nil </span><span class="cov8" title="1">{
                         return nil, fmt.Errorf("redis connection failed: %w", err)
                 }</span>
 
                 // Set up background cleanup if needed
-                <span class="cov0" title="0">if config.RotationEnabled </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if config.RotationEnabled </span><span class="cov8" title="1">{
                         go maker.cleanupRotatedTokens(ctx)
                 }</span>
-                <span class="cov0" title="0">if config.RevocationEnabled </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if config.RevocationEnabled </span><span class="cov8" title="1">{
                         go maker.cleanupRevokedTokens(ctx)
                 }</span>
         }
 
         // Initialize signing method
-        <span class="cov0" title="0">if err := maker.initializeSigningMethod(); err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err := maker.initializeSigningMethod(); err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to initialize signing method: %w", err)
         }</span>
 
         // Initialize cryptographic keys
-        <span class="cov0" title="0">if err := maker.initializeKeys(); err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err := maker.initializeKeys(); err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to initialize keys: %w", err)
         }</span>
 
-        <span class="cov0" title="0">return maker, nil</span>
+        <span class="cov8" title="1">return maker, nil</span>
 }
 
 func DefaultGourdianTokenMaker(
         ctx context.Context,
         symmetricKey string,
         redisOpts *redis.Options,
-) (GourdianTokenMaker, error) <span class="cov0" title="0">{
+) (GourdianTokenMaker, error) <span class="cov8" title="1">{
         config := GourdianTokenConfig{
                 RevocationEnabled:        false,
                 RotationEnabled:          false,
@@ -310,37 +310,37 @@ func DefaultGourdianTokenMaker(
                 RefreshReuseInterval:     5 * time.Minute,
         }
 
-        if redisOpts != nil </span><span class="cov0" title="0">{
+        if redisOpts != nil </span><span class="cov8" title="1">{
                 config.RevocationEnabled = true
                 config.RotationEnabled = true
         }</span>
-        <span class="cov0" title="0">return NewGourdianTokenMaker(ctx, config, redisOpts)</span>
+        <span class="cov8" title="1">return NewGourdianTokenMaker(ctx, config, redisOpts)</span>
 }
 
-func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) <span class="cov0" title="0">{
-        if userID == uuid.Nil </span><span class="cov0" title="0">{
+func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) <span class="cov8" title="1">{
+        if userID == uuid.Nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid user ID: cannot be empty")
         }</span>
-        <span class="cov0" title="0">if len(roles) == 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if len(roles) == 0 </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("at least one role must be provided")
         }</span>
-        <span class="cov0" title="0">if len(username) &gt; 1024 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if len(username) &gt; 1024 </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("username too long: max 1024 characters")
         }</span>
 
         // Validate roles are non-empty strings
-        <span class="cov0" title="0">for _, role := range roles </span><span class="cov0" title="0">{
-                if role == "" </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">for _, role := range roles </span><span class="cov8" title="1">{
+                if role == "" </span><span class="cov8" title="1">{
                         return nil, fmt.Errorf("roles cannot contain empty strings")
                 }</span>
         }
 
-        <span class="cov0" title="0">tokenID, err := uuid.NewRandom()
+        <span class="cov8" title="1">tokenID, err := uuid.NewRandom()
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to generate token ID: %w", err)
         }</span>
 
-        <span class="cov0" title="0">now := time.Now()
+        <span class="cov8" title="1">now := time.Now()
         claims := AccessTokenClaims{
                 ID:                tokenID,
                 Subject:           userID,
@@ -363,7 +363,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
                 return nil, fmt.Errorf("failed to sign access token: %w", err)
         }</span>
 
-        <span class="cov0" title="0">response := &amp;AccessTokenResponse{
+        <span class="cov8" title="1">response := &amp;AccessTokenResponse{
                 Subject:           claims.Subject,
                 SessionID:         claims.SessionID,
                 Token:             signedToken,
@@ -381,20 +381,20 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
         return response, nil</span>
 }
 
-func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) <span class="cov0" title="0">{
-        if userID == uuid.Nil </span><span class="cov0" title="0">{
+func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) <span class="cov8" title="1">{
+        if userID == uuid.Nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid user ID: cannot be empty")
         }</span>
-        <span class="cov0" title="0">if len(username) &gt; 1024 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if len(username) &gt; 1024 </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("username too long: max 1024 characters")
         }</span>
 
-        <span class="cov0" title="0">tokenID, err := uuid.NewRandom()
+        <span class="cov8" title="1">tokenID, err := uuid.NewRandom()
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to generate token ID: %w", err)
         }</span>
 
-        <span class="cov0" title="0">now := time.Now()
+        <span class="cov8" title="1">now := time.Now()
         claims := RefreshTokenClaims{
                 ID:                tokenID,
                 Subject:           userID,
@@ -416,7 +416,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
                 return nil, fmt.Errorf("failed to sign refresh token: %w", err)
         }</span>
 
-        <span class="cov0" title="0">response := &amp;RefreshTokenResponse{
+        <span class="cov8" title="1">response := &amp;RefreshTokenResponse{
                 Subject:           claims.Subject,
                 SessionID:         claims.SessionID,
                 Token:             signedToken,
@@ -433,7 +433,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
         return response, nil</span>
 }
 
-func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) <span class="cov0" title="0">{
+func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) <span class="cov8" title="1">{
 
         if maker.config.RevocationEnabled &amp;&amp; maker.redisClient != nil </span><span class="cov0" title="0">{
 
@@ -447,14 +447,14 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
         }
 
         // 1. Verify token signature and basic structure
-        <span class="cov0" title="0">token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) </span><span class="cov0" title="0">{
-                if token.Method.Alg() != maker.signingMethod.Alg() </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) </span><span class="cov8" title="1">{
+                if token.Method.Alg() != maker.signingMethod.Alg() </span><span class="cov8" title="1">{
                         return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
                 }</span>
                 <span class="cov0" title="0">return maker.publicKey, nil</span>
         })
 
-        <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid token: %w", err)
         }</span>
 
@@ -486,66 +486,66 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
         <span class="cov0" title="0">return accessClaims, nil</span>
 }
 
-func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error) <span class="cov0" title="0">{
+func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error) <span class="cov8" title="1">{
 
-        if maker.config.RevocationEnabled &amp;&amp; maker.redisClient != nil </span><span class="cov0" title="0">{
+        if maker.config.RevocationEnabled &amp;&amp; maker.redisClient != nil </span><span class="cov8" title="1">{
 
                 exists, err := maker.redisClient.Exists(ctx, revokedRefreshPrefix+tokenString).Result()
                 if err != nil </span><span class="cov0" title="0">{
                         return nil, fmt.Errorf("failed to check token revocation: %w", err)
                 }</span>
-                <span class="cov0" title="0">if exists &gt; 0 </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if exists &gt; 0 </span><span class="cov0" title="0">{
                         return nil, fmt.Errorf("token has been revoked")
                 }</span>
         }
 
-        <span class="cov0" title="0">token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) </span><span class="cov8" title="1">{
                 if token.Method.Alg() != maker.signingMethod.Alg() </span><span class="cov0" title="0">{
                         return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
                 }</span>
-                <span class="cov0" title="0">return maker.publicKey, nil</span>
+                <span class="cov8" title="1">return maker.publicKey, nil</span>
         })
 
-        <span class="cov0" title="0">if err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid token: %w", err)
         }</span>
 
-        <span class="cov0" title="0">if !token.Valid </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if !token.Valid </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("invalid token: %v", err)
         }</span>
 
-        <span class="cov0" title="0">claims, ok := token.Claims.(jwt.MapClaims)
+        <span class="cov8" title="1">claims, ok := token.Claims.(jwt.MapClaims)
         if !ok || !token.Valid </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("invalid token claims")
         }</span>
 
-        <span class="cov0" title="0">if err := validateTokenClaims(claims, RefreshToken, maker.config.RequiredClaims); err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err := validateTokenClaims(claims, RefreshToken, maker.config.RequiredClaims); err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
 
-        <span class="cov0" title="0">return mapToRefreshClaims(claims)</span>
+        <span class="cov8" title="1">return mapToRefreshClaims(claims)</span>
 }
 
-func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) error <span class="cov0" title="0">{
-        if !maker.config.RevocationEnabled || maker.redisClient == nil </span><span class="cov0" title="0">{
+func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) error <span class="cov8" title="1">{
+        if !maker.config.RevocationEnabled || maker.redisClient == nil </span><span class="cov8" title="1">{
                 return fmt.Errorf("access token revocation is not enabled")
         }</span>
 
         // Parse the token to extract expiration time
-        <span class="cov0" title="0">parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) </span><span class="cov8" title="1">{
                 return maker.publicKey, nil
         }</span>)
-        <span class="cov0" title="0">if err != nil || !parsed.Valid </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if err != nil || !parsed.Valid </span><span class="cov8" title="1">{
                 return fmt.Errorf("invalid token: %w", err)
         }</span>
 
-        <span class="cov0" title="0">claims, ok := parsed.Claims.(jwt.MapClaims)
+        <span class="cov8" title="1">claims, ok := parsed.Claims.(jwt.MapClaims)
         if !ok </span><span class="cov0" title="0">{
                 return fmt.Errorf("invalid token claims")
         }</span>
 
-        <span class="cov0" title="0">exp := getUnixTime(claims["exp"])
-        if exp == 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">exp := getUnixTime(claims["exp"])
+        if exp == 0 </span><span class="cov8" title="1">{
                 return fmt.Errorf("token missing exp claim")
         }</span>
         <span class="cov0" title="0">ttl := time.Until(time.Unix(exp, 0))
@@ -582,33 +582,33 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
         return maker.redisClient.Set(ctx, revokedRefreshPrefix+token, "1", ttl).Err()</span>
 }
 
-func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) <span class="cov0" title="0">{
-        if !maker.config.RotationEnabled </span><span class="cov0" title="0">{
+func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) <span class="cov8" title="1">{
+        if !maker.config.RotationEnabled </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("token rotation not enabled")
         }</span>
 
-        <span class="cov0" title="0">if _, err := maker.redisClient.Ping(ctx).Result(); err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if _, err := maker.redisClient.Ping(ctx).Result(); err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("redis connection failed: %w", err)
         }</span>
 
-        <span class="cov0" title="0">claims, err := maker.VerifyRefreshToken(ctx, oldToken)
-        if err != nil </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">claims, err := maker.VerifyRefreshToken(ctx, oldToken)
+        if err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("invalid token: %w", err)
         }</span>
 
-        <span class="cov0" title="0">tokenKey := rotatedPrefix + oldToken
+        <span class="cov8" title="1">tokenKey := rotatedPrefix + oldToken
 
         exists, err := maker.redisClient.Exists(ctx, tokenKey).Result()
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("redis error: %w", err)
         }</span>
 
-        <span class="cov0" title="0">if exists == 1 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if exists == 1 </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("token reused too soon")
         }</span>
 
         // Enforce reuse interval
-        <span class="cov0" title="0">if maker.config.RefreshReuseInterval &gt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if maker.config.RefreshReuseInterval &gt; 0 </span><span class="cov8" title="1">{
                 ttl, err := maker.redisClient.TTL(ctx, rotatedPrefix+oldToken).Result()
                 if err == nil &amp;&amp; ttl &gt; 0 </span><span class="cov0" title="0">{
                         remaining := time.Duration(ttl) * time.Second
@@ -618,24 +618,24 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
                 }
         }
 
-        <span class="cov0" title="0">newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID)
+        <span class="cov8" title="1">newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID)
         if err != nil </span><span class="cov0" title="0">{
                 return nil, err
         }</span>
 
-        <span class="cov0" title="0">err = maker.redisClient.Set(ctx, tokenKey, "1", maker.config.RefreshMaxLifetimeExpiry).Err()
+        <span class="cov8" title="1">err = maker.redisClient.Set(ctx, tokenKey, "1", maker.config.RefreshMaxLifetimeExpiry).Err()
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to record rotation: %w", err)
         }</span>
 
-        <span class="cov0" title="0">return newToken, nil</span>
+        <span class="cov8" title="1">return newToken, nil</span>
 }
 
-func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) <span class="cov0" title="0">{
+func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) <span class="cov8" title="1">{
         ticker := time.NewTicker(1 * time.Hour)
         defer ticker.Stop()
 
-        for </span><span class="cov0" title="0">{
+        for </span><span class="cov8" title="1">{
                 select </span>{
                 case &lt;-ctx.Done():<span class="cov0" title="0">
                         return</span>
@@ -685,11 +685,11 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) <span class="co
         }
 }
 
-func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) <span class="cov0" title="0">{
+func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) <span class="cov8" title="1">{
         ticker := time.NewTicker(1 * time.Hour)
         defer ticker.Stop()
 
-        for </span><span class="cov0" title="0">{
+        for </span><span class="cov8" title="1">{
                 select </span>{
                 case &lt;-ctx.Done():<span class="cov0" title="0">
                         return</span>
@@ -737,25 +737,25 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) <span class="co
         }
 }
 
-func (maker *JWTMaker) initializeSigningMethod() error <span class="cov0" title="0">{
+func (maker *JWTMaker) initializeSigningMethod() error <span class="cov8" title="1">{
 
         // Check if configured algorithm is in allowed list if specified
-        if len(maker.config.AllowedAlgorithms) &gt; 0 </span><span class="cov0" title="0">{
+        if len(maker.config.AllowedAlgorithms) &gt; 0 </span><span class="cov8" title="1">{
                 allowed := false
-                for _, alg := range maker.config.AllowedAlgorithms </span><span class="cov0" title="0">{
-                        if alg == maker.config.Algorithm </span><span class="cov0" title="0">{
+                for _, alg := range maker.config.AllowedAlgorithms </span><span class="cov8" title="1">{
+                        if alg == maker.config.Algorithm </span><span class="cov8" title="1">{
                                 allowed = true
                                 break</span>
                         }
                 }
-                <span class="cov0" title="0">if !allowed </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if !allowed </span><span class="cov0" title="0">{
                         return fmt.Errorf("configured algorithm %s not in allowed algorithms list",
                                 maker.config.Algorithm)
                 }</span>
         }
 
-        <span class="cov0" title="0">switch maker.config.Algorithm </span>{
-        case "HS256":<span class="cov0" title="0">
+        <span class="cov8" title="1">switch maker.config.Algorithm </span>{
+        case "HS256":<span class="cov8" title="1">
                 maker.signingMethod = jwt.SigningMethodHS256</span>
         case "HS384":<span class="cov0" title="0">
                 maker.signingMethod = jwt.SigningMethodHS384</span>
@@ -786,12 +786,12 @@ func (maker *JWTMaker) initializeSigningMethod() error <span class="cov0" title=
         default:<span class="cov0" title="0">
                 return fmt.Errorf("unsupported algorithm: %s", maker.config.Algorithm)</span>
         }
-        <span class="cov0" title="0">return nil</span>
+        <span class="cov8" title="1">return nil</span>
 }
 
-func (maker *JWTMaker) initializeKeys() error <span class="cov0" title="0">{
+func (maker *JWTMaker) initializeKeys() error <span class="cov8" title="1">{
         switch maker.config.SigningMethod </span>{
-        case Symmetric:<span class="cov0" title="0">
+        case Symmetric:<span class="cov8" title="1">
                 maker.privateKey = []byte(maker.config.SymmetricKey)
                 maker.publicKey = []byte(maker.config.SymmetricKey)
                 return nil</span>
@@ -848,19 +848,19 @@ func (maker *JWTMaker) parseKeyPair() error <span class="cov0" title="0">{
         <span class="cov0" title="0">return nil</span>
 }
 
-func validateConfig(config *GourdianTokenConfig) error <span class="cov0" title="0">{
+func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title="1">{
         switch config.SigningMethod </span>{
-        case Symmetric:<span class="cov0" title="0">
+        case Symmetric:<span class="cov8" title="1">
                 if config.SymmetricKey == "" </span><span class="cov0" title="0">{
                         return fmt.Errorf("symmetric key is required for symmetric signing method")
                 }</span>
-                <span class="cov0" title="0">if !strings.HasPrefix(config.Algorithm, "HS") &amp;&amp; config.Algorithm != "none" </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if !strings.HasPrefix(config.Algorithm, "HS") &amp;&amp; config.Algorithm != "none" </span><span class="cov0" title="0">{
                         return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
                 }</span>
-                <span class="cov0" title="0">if len(config.SymmetricKey) &lt; 32 </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if len(config.SymmetricKey) &lt; 32 </span><span class="cov0" title="0">{
                         return fmt.Errorf("symmetric key must be at least 32 bytes")
                 }</span>
-                <span class="cov0" title="0">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov0" title="0">{
+                <span class="cov8" title="1">if config.PrivateKeyPath != "" || config.PublicKeyPath != "" </span><span class="cov0" title="0">{
                         return fmt.Errorf("private and public key paths must be empty for symmetric signing")
                 }</span>
         case Asymmetric:<span class="cov0" title="0">
@@ -888,28 +888,28 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov0" title=
         }
 
         // Validate token durations make sense
-        <span class="cov0" title="0">if config.AccessExpiryDuration &lt;= 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.AccessExpiryDuration &lt;= 0 </span><span class="cov0" title="0">{
                 return fmt.Errorf("access token duration must be positive")
         }</span>
-        <span class="cov0" title="0">if config.AccessMaxLifetimeExpiry &gt; 0 &amp;&amp;
+        <span class="cov8" title="1">if config.AccessMaxLifetimeExpiry &gt; 0 &amp;&amp;
                 config.AccessExpiryDuration &gt; config.AccessMaxLifetimeExpiry </span><span class="cov0" title="0">{
                 return fmt.Errorf("access token duration exceeds max lifetime")
         }</span>
 
-        <span class="cov0" title="0">if config.RefreshExpiryDuration &lt;= 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.RefreshExpiryDuration &lt;= 0 </span><span class="cov0" title="0">{
                 return fmt.Errorf("refresh token duration must be positive")
         }</span>
-        <span class="cov0" title="0">if config.RefreshMaxLifetimeExpiry &gt; 0 &amp;&amp;
+        <span class="cov8" title="1">if config.RefreshMaxLifetimeExpiry &gt; 0 &amp;&amp;
                 config.RefreshExpiryDuration &gt; config.RefreshMaxLifetimeExpiry </span><span class="cov0" title="0">{
                 return fmt.Errorf("refresh token duration exceeds max lifetime")
         }</span>
 
-        <span class="cov0" title="0">if config.RefreshReuseInterval &lt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if config.RefreshReuseInterval &lt; 0 </span><span class="cov0" title="0">{
                 return fmt.Errorf("refresh reuse interval cannot be negative")
         }</span>
 
         // Reject weak algorithms
-        <span class="cov0" title="0">weakAlgorithms := map[string]bool{
+        <span class="cov8" title="1">weakAlgorithms := map[string]bool{
                 "HS256": false, // Considered strong enough with proper key size
                 "none":  true,
         }
@@ -917,7 +917,7 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov0" title=
                 return fmt.Errorf("algorithm %s is too weak for production use", config.Algorithm)
         }</span>
 
-        <span class="cov0" title="0">if len(config.AllowedAlgorithms) &gt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if len(config.AllowedAlgorithms) &gt; 0 </span><span class="cov8" title="1">{
                 supportedAlgs := map[string]bool{
                         "HS256": true, "HS384": true, "HS512": true,
                         "RS256": true, "RS384": true, "RS512": true,
@@ -926,19 +926,19 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov0" title=
                         "EdDSA": true,
                 }
 
-                for _, alg := range config.AllowedAlgorithms </span><span class="cov0" title="0">{
+                for _, alg := range config.AllowedAlgorithms </span><span class="cov8" title="1">{
                         if !supportedAlgs[alg] </span><span class="cov0" title="0">{
                                 return fmt.Errorf("unsupported algorithm in AllowedAlgorithms: %s", alg)
                         }</span>
                 }
         }
 
-        <span class="cov0" title="0">return nil</span>
+        <span class="cov8" title="1">return nil</span>
 }
 
-func validateAlgorithmAndMethod(config *GourdianTokenConfig) error <span class="cov0" title="0">{
+func validateAlgorithmAndMethod(config *GourdianTokenConfig) error <span class="cov8" title="1">{
         switch config.SigningMethod </span>{
-        case Symmetric:<span class="cov0" title="0">
+        case Symmetric:<span class="cov8" title="1">
                 if !strings.HasPrefix(config.Algorithm, "HS") </span><span class="cov0" title="0">{
                         return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
                 }</span>
@@ -950,7 +950,7 @@ func validateAlgorithmAndMethod(config *GourdianTokenConfig) error <span class="
                         return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
                 }</span>
         }
-        <span class="cov0" title="0">return nil</span>
+        <span class="cov8" title="1">return nil</span>
 }
 
 func toMapClaims(claims interface{}) jwt.MapClaims <span class="cov8" title="1">{
@@ -1210,7 +1210,7 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) <span
         <span class="cov8" title="1">return refreshClaims, nil</span>
 }
 
-func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error <span class="cov0" title="0">{
+func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error <span class="cov8" title="1">{
         // Base required claims
         baseRequired := map[TokenType][]string{
                 AccessToken:  {"jti", "sub", "sid", "usr", "iat", "exp", "typ", "rls"},
@@ -1218,43 +1218,43 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required 
         }
 
         // Check all required claims
-        for _, claim := range append(baseRequired[expectedType], required...) </span><span class="cov0" title="0">{
+        for _, claim := range append(baseRequired[expectedType], required...) </span><span class="cov8" title="1">{
                 if _, ok := claims[claim]; !ok </span><span class="cov0" title="0">{
                         return fmt.Errorf("missing required claim: %s", claim)
                 }</span>
         }
 
         // Validate token type
-        <span class="cov0" title="0">tokenType, ok := claims["typ"].(string)
+        <span class="cov8" title="1">tokenType, ok := claims["typ"].(string)
         if !ok || TokenType(tokenType) != expectedType </span><span class="cov0" title="0">{
                 return fmt.Errorf("invalid token type: expected %s", expectedType)
         }</span>
 
         // Validate expiration
-        <span class="cov0" title="0">exp, ok := claims["exp"].(float64)
+        <span class="cov8" title="1">exp, ok := claims["exp"].(float64)
         if !ok </span><span class="cov0" title="0">{
                 return fmt.Errorf("invalid exp claim type")
         }</span>
-        <span class="cov0" title="0">if time.Unix(int64(exp), 0).Before(time.Now()) </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if time.Unix(int64(exp), 0).Before(time.Now()) </span><span class="cov0" title="0">{
                 return fmt.Errorf("token has expired")
         }</span>
 
         // Validate issuance time
-        <span class="cov0" title="0">if iat, ok := claims["iat"].(float64); ok </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if iat, ok := claims["iat"].(float64); ok </span><span class="cov8" title="1">{
                 if time.Unix(int64(iat), 0).After(time.Now()) </span><span class="cov0" title="0">{
                         return fmt.Errorf("token issued in the future")
                 }</span>
         }
 
         // Check max lifetime if present in claims
-        <span class="cov0" title="0">if mle, ok := claims["mle"].(float64); ok </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if mle, ok := claims["mle"].(float64); ok </span><span class="cov8" title="1">{
                 maxExpiry := time.Unix(int64(mle), 0)
                 if time.Now().After(maxExpiry) </span><span class="cov0" title="0">{
                         return fmt.Errorf("token exceeded maximum lifetime")
                 }</span>
         }
 
-        <span class="cov0" title="0">return nil</span>
+        <span class="cov8" title="1">return nil</span>
 }
 
 func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) <span class="cov0" title="0">{
@@ -1455,7 +1455,7 @@ func checkFilePermissions(path string, requiredPerm os.FileMode) error <span cla
 
 func getUnixTime(claim interface{}) int64 <span class="cov8" title="1">{
         switch v := claim.(type) </span>{
-        case float64:<span class="cov0" title="0">
+        case float64:<span class="cov8" title="1">
                 return int64(v)</span>
         case int64:<span class="cov8" title="1">
                 return v</span>
