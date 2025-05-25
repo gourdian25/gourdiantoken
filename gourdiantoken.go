@@ -38,31 +38,30 @@ const (
 )
 
 type GourdianTokenConfig struct {
-	Algorithm      string             // JWT signing algorithm (e.g., "HS256", "RS256"). Must match key type.
-	SigningMethod  SigningMethod      // Cryptographic method (Symmetric/Asymmetric)
-	SymmetricKey   string             // Base64-encoded secret key for HMAC (min 32 bytes for HS256)
-	PrivateKeyPath string             // Path to PEM-encoded private key file (asymmetric only)
-	PublicKeyPath  string             // Path to PEM-encoded public key/certificate (asymmetric only)
-	AccessToken    AccessTokenConfig  // Fine-grained access token settings
-	RefreshToken   RefreshTokenConfig // Fine-grained refresh token settings
+	Algorithm         string             // JWT signing algorithm (e.g., "HS256", "RS256"). Must match key type.
+	SigningMethod     SigningMethod      // Cryptographic method (Symmetric/Asymmetric)
+	SymmetricKey      string             // Base64-encoded secret key for HMAC (min 32 bytes for HS256)
+	PrivateKeyPath    string             // Path to PEM-encoded private key file (asymmetric only)
+	PublicKeyPath     string             // Path to PEM-encoded public key/certificate (asymmetric only)
+	Issuer            string             // Token issuer identifier (e.g., "auth.example.com")
+	Audience          []string           // Intended recipients (e.g., ["api.example.com"])
+	AllowedAlgorithms []string           // Whitelist of acceptable algorithms for verification
+	RequiredClaims    []string           // Mandatory claims that must be present and valid
+	RevocationEnabled bool               // Whether to check Redis for revoked tokens
+	RotationEnabled   bool               // Whether to enable refresh token rotation
+	AccessToken       AccessTokenConfig  // Fine-grained access token settings
+	RefreshToken      RefreshTokenConfig // Fine-grained refresh token settings
 }
 
 type AccessTokenConfig struct {
-	Duration          time.Duration // Time until token expires after issuance (e.g., 30m)
-	MaxLifetime       time.Duration // Absolute maximum validity from creation (e.g., 24h)
-	Issuer            string        // Token issuer identifier (e.g., "auth.example.com")
-	Audience          []string      // Intended recipients (e.g., ["api.example.com"])
-	AllowedAlgorithms []string      // Whitelist of acceptable algorithms for verification
-	RequiredClaims    []string      // Mandatory claims that must be present and valid
-	RevocationEnabled bool          // Whether to check Redis for revoked tokens
+	Duration    time.Duration // Time until token expires after issuance (e.g., 30m)
+	MaxLifetime time.Duration // Absolute maximum validity from creation (e.g., 24h)
 }
 
 type RefreshTokenConfig struct {
-	Duration          time.Duration // Time until token expires after issuance
-	MaxLifetime       time.Duration // Absolute maximum validity from creation
-	ReuseInterval     time.Duration // Minimum time between reuse attempts (rotation)
-	RotationEnabled   bool          // Whether to enable refresh token rotation
-	RevocationEnabled bool          // Whether to check Redis for revoked tokens
+	Duration      time.Duration // Time until token expires after issuance
+	MaxLifetime   time.Duration // Absolute maximum validity from creation
+	ReuseInterval time.Duration // Minimum time between reuse attempts (rotation)
 }
 
 func NewGourdianTokenConfig(
@@ -85,106 +84,110 @@ func NewGourdianTokenConfig(
 	refreshRevocationEnabled bool,
 ) GourdianTokenConfig {
 	return GourdianTokenConfig{
-		Algorithm:      algorithm,
-		SigningMethod:  signingMethod,
-		SymmetricKey:   symmetricKey,
-		PrivateKeyPath: privateKeyPath,
-		PublicKeyPath:  publicKeyPath,
+		Algorithm:         algorithm,
+		SigningMethod:     signingMethod,
+		SymmetricKey:      symmetricKey,
+		PrivateKeyPath:    privateKeyPath,
+		PublicKeyPath:     publicKeyPath,
+		Issuer:            accessIssuer,
+		Audience:          accessAudience,
+		AllowedAlgorithms: accessAllowedAlgorithms,
+		RequiredClaims:    accessRequiredClaims,
+		RevocationEnabled: accessRevocationEnabled,
+		RotationEnabled:   refreshRotationEnabled,
 		AccessToken: AccessTokenConfig{
-			Duration:          accessDuration,
-			MaxLifetime:       accessMaxLifetime,
-			Issuer:            accessIssuer,
-			Audience:          accessAudience,
-			AllowedAlgorithms: accessAllowedAlgorithms,
-			RequiredClaims:    accessRequiredClaims,
-			RevocationEnabled: accessRevocationEnabled,
+			Duration:    accessDuration,
+			MaxLifetime: accessMaxLifetime,
 		},
 		RefreshToken: RefreshTokenConfig{
-			Duration:          refreshDuration,
-			MaxLifetime:       refreshMaxLifetime,
-			ReuseInterval:     refreshReuseInterval,
-			RotationEnabled:   refreshRotationEnabled,
-			RevocationEnabled: refreshRevocationEnabled,
+			Duration:      refreshDuration,
+			MaxLifetime:   refreshMaxLifetime,
+			ReuseInterval: refreshReuseInterval,
 		},
 	}
 }
 
 func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 	return GourdianTokenConfig{
-		Algorithm:      "HS256",
-		SigningMethod:  Symmetric,
-		SymmetricKey:   symmetricKey,
-		PrivateKeyPath: "",
-		PublicKeyPath:  "",
+		Algorithm:         "HS256",
+		SigningMethod:     Symmetric,
+		SymmetricKey:      symmetricKey,
+		PrivateKeyPath:    "",
+		PublicKeyPath:     "",
+		Issuer:            "",
+		Audience:          nil,
+		AllowedAlgorithms: []string{"HS256"},
+		RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "rls"},
+		RevocationEnabled: false,
+		RotationEnabled:   false,
 		AccessToken: AccessTokenConfig{
-			Duration:          30 * time.Minute,
-			MaxLifetime:       24 * time.Hour,
-			Issuer:            "",
-			Audience:          nil,
-			AllowedAlgorithms: []string{"HS256"},
-			RequiredClaims:    []string{"jti", "sub", "exp", "iat", "typ", "rls"},
-			RevocationEnabled: false,
+			Duration:    30 * time.Minute,
+			MaxLifetime: 24 * time.Hour,
 		},
 		RefreshToken: RefreshTokenConfig{
-			Duration:          7 * 24 * time.Hour,
-			MaxLifetime:       30 * 24 * time.Hour,
-			ReuseInterval:     time.Minute,
-			RotationEnabled:   false,
-			RevocationEnabled: false,
+			Duration:      7 * 24 * time.Hour,
+			MaxLifetime:   30 * 24 * time.Hour,
+			ReuseInterval: time.Minute,
 		},
 	}
 }
 
 type AccessTokenClaims struct {
-	ID        uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
-	Subject   uuid.UUID `json:"sub"` // Subject (user UUID)
-	SessionID uuid.UUID `json:"sid"` // Session identifier (UUIDv4)
-	Username  string    `json:"usr"` // Human-readable username
-	Issuer    string    `json:"iss"` // Issuer identifier (e.g., "auth.example.com")
-	Audience  []string  `json:"aud"` // Intended audience (e.g., ["api.example.com"])
-	Roles     []string  `json:"rls"` // Authorization roles
-	IssuedAt  time.Time `json:"iat"` // Issuance timestamp (UTC)
-	ExpiresAt time.Time `json:"exp"` // Expiration timestamp (UTC)
-	NotBefore time.Time `json:"nbf"` // Not before timestamp (optional)
-	TokenType TokenType `json:"typ"` // Fixed value "access"
+	ID                uuid.UUID `json:"jti"` // Unique token identifier (UUIDv4)
+	Subject           uuid.UUID `json:"sub"` // Subject (user UUID)
+	SessionID         uuid.UUID `json:"sid"` // Session identifier (UUIDv4)
+	Username          string    `json:"usr"` // Human-readable username
+	Issuer            string    `json:"iss"` // Issuer identifier (e.g., "auth.example.com")
+	Audience          []string  `json:"aud"` // Intended audience (e.g., ["api.example.com"])
+	Roles             []string  `json:"rls"` // Authorization roles
+	IssuedAt          time.Time `json:"iat"` // Issuance timestamp (UTC)
+	ExpiresAt         time.Time `json:"exp"` // Expiration timestamp (UTC)
+	NotBefore         time.Time `json:"nbf"` // Not before timestamp (optional)
+	MaxLifetimeExpiry time.Time `json:"mle"`
+	TokenType         TokenType `json:"typ"` // Fixed value "access"
 }
 
 type RefreshTokenClaims struct {
-	ID        uuid.UUID `json:"jti"` // Unique token identifier
-	Subject   uuid.UUID `json:"sub"` // Subject (user UUID)
-	SessionID uuid.UUID `json:"sid"` // Session identifier
-	Username  string    `json:"usr"` // Human-readable username
-	Issuer    string    `json:"iss"` // Issuer identifier (e.g., "auth.example.com")
-	Audience  []string  `json:"aud"` // Intended audience (e.g., ["api.example.com"])
-	IssuedAt  time.Time `json:"iat"` // Issuance timestamp
-	ExpiresAt time.Time `json:"exp"` // Expiration timestamp
-	NotBefore time.Time `json:"nbf"` // Not before timestamp (optional)
-	TokenType TokenType `json:"typ"` // Fixed value "refresh"
+	ID                uuid.UUID `json:"jti"` // Unique token identifier
+	Subject           uuid.UUID `json:"sub"` // Subject (user UUID)
+	SessionID         uuid.UUID `json:"sid"` // Session identifier
+	Username          string    `json:"usr"` // Human-readable username
+	Issuer            string    `json:"iss"` // Issuer identifier (e.g., "auth.example.com")
+	Audience          []string  `json:"aud"` // Intended audience (e.g., ["api.example.com"])
+	IssuedAt          time.Time `json:"iat"` // Issuance timestamp
+	ExpiresAt         time.Time `json:"exp"` // Expiration timestamp
+	NotBefore         time.Time `json:"nbf"` // Not before timestamp (optional)
+	MaxLifetimeExpiry time.Time `json:"mle"`
+	TokenType         TokenType `json:"typ"` // Fixed value "refresh"
 }
 
 type AccessTokenResponse struct {
-	Subject   uuid.UUID `json:"sub"` // User UUID
-	SessionID uuid.UUID `json:"sid"` // Session UUID
-	Token     string    `json:"tok"` // Signed JWT string
-	Issuer    string    `json:"iss"` // Issuer identifier
-	Username  string    `json:"usr"` // Username
-	Roles     []string  `json:"rls"` // Authorization roles
-	Audience  []string  `json:"aud"` // Intended audience
-	IssuedAt  time.Time `json:"iat"` // Issuance timestamp (RFC3339)
-	ExpiresAt time.Time `json:"exp"` // Expiration timestamp (RFC3339)
-	NotBefore time.Time `json:"nbf"` // Not before timestamp (optional)
+	Subject           uuid.UUID `json:"sub"` // User UUID
+	SessionID         uuid.UUID `json:"sid"` // Session UUID
+	Token             string    `json:"tok"` // Signed JWT string
+	Issuer            string    `json:"iss"` // Issuer identifier
+	Username          string    `json:"usr"` // Username
+	Roles             []string  `json:"rls"` // Authorization roles
+	Audience          []string  `json:"aud"` // Intended audience
+	IssuedAt          time.Time `json:"iat"` // Issuance timestamp (RFC3339)
+	ExpiresAt         time.Time `json:"exp"` // Expiration timestamp (RFC3339)
+	NotBefore         time.Time `json:"nbf"` // Not before timestamp (optional)
+	MaxLifetimeExpiry time.Time `json:"mle"` // Maximum lifetime expiry timestamp (RFC3339)
+	TokenType         TokenType `json:"typ"` // Fixed value "access"
 }
 
 type RefreshTokenResponse struct {
-	Subject   uuid.UUID `json:"sub"` // User UUID
-	SessionID uuid.UUID `json:"sid"` // Session UUID
-	Token     string    `json:"tok"` // Signed JWT string
-	Issuer    string    `json:"iss"` // Issuer identifier
-	Username  string    `json:"usr"` // Username
-	Audience  []string  `json:"aud"` // Intended audience
-	NotBefore time.Time `json:"nbf"` // Not before timestamp
-	ExpiresAt time.Time `json:"exp"` // Expiration timestamp
-	IssuedAt  time.Time `json:"iat"` // Issuance timestamp
+	Subject           uuid.UUID `json:"sub"` // User UUID
+	SessionID         uuid.UUID `json:"sid"` // Session UUID
+	Token             string    `json:"tok"` // Signed JWT string
+	Issuer            string    `json:"iss"` // Issuer identifier
+	Username          string    `json:"usr"` // Username
+	Audience          []string  `json:"aud"` // Intended audience
+	NotBefore         time.Time `json:"nbf"` // Not before timestamp
+	ExpiresAt         time.Time `json:"exp"` // Expiration timestamp
+	IssuedAt          time.Time `json:"iat"` // Issuance timestamp
+	MaxLifetimeExpiry time.Time `json:"mle"` // Maximum lifetime expiry timestamp (RFC3339)
+	TokenType         TokenType `json:"typ"` // Fixed value "access"
 }
 
 type GourdianTokenMaker interface {
@@ -212,8 +215,7 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	}
 
 	// Check Redis requirements
-	if (config.RefreshToken.RotationEnabled || config.RefreshToken.RevocationEnabled ||
-		config.AccessToken.RevocationEnabled) && redisOpts == nil {
+	if (config.RotationEnabled || config.RevocationEnabled) && redisOpts == nil {
 		return nil, fmt.Errorf("redis options required for token rotation/revocation")
 	}
 
@@ -222,8 +224,7 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	}
 
 	// Initialize Redis client if any feature requiring Redis is enabled
-	if config.RefreshToken.RotationEnabled || config.RefreshToken.RevocationEnabled ||
-		config.AccessToken.RevocationEnabled {
+	if config.RotationEnabled || config.RevocationEnabled {
 		maker.redisClient = redis.NewClient(redisOpts)
 
 		// Verify Redis connection with the provided context
@@ -232,10 +233,10 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 		}
 
 		// Set up background cleanup if needed
-		if config.RefreshToken.RotationEnabled {
+		if config.RotationEnabled {
 			go maker.cleanupRotatedTokens(ctx)
 		}
-		if config.RefreshToken.RevocationEnabled || config.AccessToken.RevocationEnabled {
+		if config.RevocationEnabled {
 			go maker.cleanupRevokedTokens(ctx)
 		}
 	}
@@ -260,9 +261,8 @@ func NewGourdianTokenMakerWithDefaults(
 ) (GourdianTokenMaker, error) {
 	config := DefaultGourdianTokenConfig(symmetricKey)
 	if redisOpts != nil {
-		config.AccessToken.RevocationEnabled = true
-		config.RefreshToken.RevocationEnabled = true
-		config.RefreshToken.RotationEnabled = true
+		config.RevocationEnabled = true
+		config.RotationEnabled = true
 	}
 	return NewGourdianTokenMaker(ctx, config, redisOpts)
 }
@@ -296,8 +296,8 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		Issuer:    maker.config.AccessToken.Issuer,
-		Audience:  maker.config.AccessToken.Audience,
+		Issuer:    maker.config.Issuer,
+		Audience:  maker.config.Audience,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(maker.config.AccessToken.Duration),
 		TokenType: AccessToken,
@@ -345,8 +345,8 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 		Subject:   userID,
 		Username:  username,
 		SessionID: sessionID,
-		Issuer:    maker.config.AccessToken.Issuer,   // Using same issuer as access token
-		Audience:  maker.config.AccessToken.Audience, // Using same audience as access token
+		Issuer:    maker.config.Issuer,
+		Audience:  maker.config.Audience,
 		IssuedAt:  now,
 		ExpiresAt: now.Add(maker.config.RefreshToken.Duration),
 		TokenType: RefreshToken,
@@ -375,7 +375,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 
 func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
 
-	if maker.config.AccessToken.RevocationEnabled && maker.redisClient != nil {
+	if maker.config.RevocationEnabled && maker.redisClient != nil {
 
 		exists, err := maker.redisClient.Exists(ctx, "revoked:access:"+tokenString).Result()
 		if err != nil {
@@ -428,7 +428,7 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 
 func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error) {
 
-	if maker.config.RefreshToken.RevocationEnabled && maker.redisClient != nil {
+	if maker.config.RevocationEnabled && maker.redisClient != nil {
 
 		exists, err := maker.redisClient.Exists(ctx, "revoked:refresh:"+tokenString).Result()
 		if err != nil {
@@ -467,7 +467,7 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 }
 
 func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) error {
-	if !maker.config.AccessToken.RevocationEnabled || maker.redisClient == nil {
+	if !maker.config.RevocationEnabled || maker.redisClient == nil {
 		return fmt.Errorf("access token revocation is not enabled")
 	}
 
@@ -495,7 +495,7 @@ func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) erro
 }
 
 func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) error {
-	if !maker.config.RefreshToken.RevocationEnabled || maker.redisClient == nil {
+	if !maker.config.RevocationEnabled || maker.redisClient == nil {
 		return fmt.Errorf("refresh token revocation is not enabled")
 	}
 
@@ -523,7 +523,7 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 }
 
 func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error) {
-	if !maker.config.RefreshToken.RotationEnabled {
+	if !maker.config.RotationEnabled {
 		return nil, fmt.Errorf("token rotation not enabled")
 	}
 
