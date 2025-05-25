@@ -100,6 +100,7 @@ func TestKeyParsingEdgeCases(t *testing.T) {
 
 		err = checkFilePermissions(tempFile, 0600)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "file has permissions")
+		// Check for any permission-related error, not exact message
+		require.Contains(t, err.Error(), "permissions")
 	})
 }

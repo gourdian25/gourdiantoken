@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -89,3 +91,79 @@ func TestTokenVerificationEdgeCases(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+func TestValidateAlgorithmAndMethod(t *testing.T) {
+	tests := []struct {
+		name      string
+		algorithm string
+		method    SigningMethod
+		wantErr   bool
+	}{
+		{"Valid HS256", "HS256", Symmetric, false},
+		{"Valid RS256", "RS256", Asymmetric, false},
+		{"Invalid HS256 with Asymmetric", "HS256", Asymmetric, true},
+		{"Invalid RS256 with Symmetric", "RS256", Symmetric, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := GourdianTokenConfig{
+				Algorithm:     tt.algorithm,
+				SigningMethod: tt.method,
+			}
+			err := validateAlgorithmAndMethod(&config)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestGetUnixTime(t *testing.T) {
+	now := time.Now().Unix()
+	tests := []struct {
+		name  string
+		input interface{}
+		want  int64
+	}{
+		{"Float64", float64(now), now},
+		{"Int64", int64(now), now},
+		{"Int", int(now), now},
+		{"JSON Number", json.Number(fmt.Sprintf("%d", now)), now},
+		{"Invalid Type", "not a number", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getUnixTime(tt.input)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// func TestContextCancellation(t *testing.T) {
+// 	config := DefaultGourdianTokenConfig(testSymmetricKey)
+// 	config.RevocationEnabled = true
+// 	config.RotationEnabled = true
+
+// 	ctx, cancel := context.WithCancel(context.Background())
+// 	cancel() // Immediately cancel the context
+
+// 	// Test NewGourdianTokenMaker with cancelled context
+// 	_, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+// 	require.Error(t, err)
+// 	require.Contains(t, err.Error(), "context canceled")
+
+// 	// Test token operations with cancelled context
+// 	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+// 	require.NoError(t, err)
+
+// 	cancelledCtx, cancel := context.WithCancel(context.Background())
+// 	cancel()
+
+// 	_, err = maker.CreateAccessToken(cancelledCtx, uuid.New(), "user", []string{"admin"}, uuid.New())
+// 	require.Error(t, err)
+// 	require.Contains(t, err.Error(), "context canceled")
+// }

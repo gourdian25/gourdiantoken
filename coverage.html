@@ -55,7 +55,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (61.3%)</option>
+				<option value="file0">github.com/gourdian25/gourdiantoken/gourdiantoken.go (65.2%)</option>
 				
 				</select>
 			</div>
@@ -961,14 +961,14 @@ func validateConfig(config *GourdianTokenConfig) error <span class="cov8" title=
 func validateAlgorithmAndMethod(config *GourdianTokenConfig) error <span class="cov8" title="1">{
         switch config.SigningMethod </span>{
         case Symmetric:<span class="cov8" title="1">
-                if !strings.HasPrefix(config.Algorithm, "HS") </span><span class="cov0" title="0">{
+                if !strings.HasPrefix(config.Algorithm, "HS") </span><span class="cov8" title="1">{
                         return fmt.Errorf("algorithm %s not compatible with symmetric signing", config.Algorithm)
                 }</span>
         case Asymmetric:<span class="cov8" title="1">
                 if !strings.HasPrefix(config.Algorithm, "RS") &amp;&amp;
                         !strings.HasPrefix(config.Algorithm, "ES") &amp;&amp;
                         !strings.HasPrefix(config.Algorithm, "PS") &amp;&amp;
-                        config.Algorithm != "EdDSA" </span><span class="cov0" title="0">{
+                        config.Algorithm != "EdDSA" </span><span class="cov8" title="1">{
                         return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
                 }</span>
         }
@@ -1279,32 +1279,32 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required 
         <span class="cov8" title="1">return nil</span>
 }
 
-func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) <span class="cov0" title="0">{
+func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) <span class="cov8" title="1">{
         block, _ := pem.Decode(pemBytes)
         if block == nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to parse PEM block containing the private key")
         }</span>
 
-        <span class="cov0" title="0">priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+        <span class="cov8" title="1">priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
         if err != nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to parse EdDSA private key: %w", err)
         }</span>
 
-        <span class="cov0" title="0">eddsaPriv, ok := priv.(ed25519.PrivateKey)
+        <span class="cov8" title="1">eddsaPriv, ok := priv.(ed25519.PrivateKey)
         if !ok </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("not a valid EdDSA private key")
         }</span>
 
-        <span class="cov0" title="0">return eddsaPriv, nil</span>
+        <span class="cov8" title="1">return eddsaPriv, nil</span>
 }
 
-func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) <span class="cov0" title="0">{
+func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) <span class="cov8" title="1">{
         block, _ := pem.Decode(pemBytes)
         if block == nil </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("failed to parse PEM block containing the public key")
         }</span>
 
-        <span class="cov0" title="0">pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+        <span class="cov8" title="1">pub, err := x509.ParsePKIXPublicKey(block.Bytes)
         if err != nil </span><span class="cov0" title="0">{
                 cert, err := x509.ParseCertificate(block.Bytes)
                 if err != nil </span><span class="cov0" title="0">{
@@ -1317,16 +1317,16 @@ func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) <span class
                 <span class="cov0" title="0">return eddsaPub, nil</span>
         }
 
-        <span class="cov0" title="0">eddsaPub, ok := pub.(ed25519.PublicKey)
+        <span class="cov8" title="1">eddsaPub, ok := pub.(ed25519.PublicKey)
         if !ok </span><span class="cov0" title="0">{
                 return nil, fmt.Errorf("not a valid EdDSA public key")
         }</span>
-        <span class="cov0" title="0">return eddsaPub, nil</span>
+        <span class="cov8" title="1">return eddsaPub, nil</span>
 }
 
 func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) <span class="cov8" title="1">{
         block, _ := pem.Decode(pemBytes)
-        if block == nil </span><span class="cov0" title="0">{
+        if block == nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("failed to parse PEM block containing the RSA private key")
         }</span>
 
@@ -1432,7 +1432,7 @@ func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) <span clas
                 }</span>
                 <span class="cov8" title="1">return key, nil</span>
         }
-        <span class="cov0" title="0">return key, nil</span>
+        <span class="cov8" title="1">return key, nil</span>
 }
 
 func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) <span class="cov8" title="1">{
@@ -1468,7 +1468,7 @@ func checkFilePermissions(path string, requiredPerm os.FileMode) error <span cla
         }</span>
 
         <span class="cov8" title="1">actualPerm := info.Mode().Perm()
-        if actualPerm&amp;^requiredPerm != 0 </span><span class="cov0" title="0">{
+        if actualPerm&amp;^requiredPerm != 0 </span><span class="cov8" title="1">{
                 return fmt.Errorf("file %s has permissions %#o, expected %#o", path, actualPerm, requiredPerm)
         }</span>
 
@@ -1481,9 +1481,9 @@ func getUnixTime(claim interface{}) int64 <span class="cov8" title="1">{
                 return int64(v)</span>
         case int64:<span class="cov8" title="1">
                 return v</span>
-        case int:<span class="cov0" title="0">
+        case int:<span class="cov8" title="1">
                 return int64(v)</span>
-        case json.Number:<span class="cov0" title="0">
+        case json.Number:<span class="cov8" title="1">
                 i, _ := v.Int64()
                 return i</span>
         default:<span class="cov8" title="1">

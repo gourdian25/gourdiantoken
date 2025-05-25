@@ -11,7 +11,6 @@ import (
 )
 
 func TestConcurrentTokenOperations(t *testing.T) {
-	config := DefaultGourdianTokenConfig(testSymmetricKey)
 	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
 	require.NoError(t, err)
 
@@ -48,15 +47,20 @@ func TestConcurrentTokenOperations(t *testing.T) {
 		wg.Wait()
 	})
 
-	// Test concurrent rotation
+	// In the concurrent rotation test, modify the maker creation to ensure fresh config
 	t.Run("Concurrent Rotation", func(t *testing.T) {
+		// Create a new maker with fresh config for this test
+		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RotationEnabled = true
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		require.NoError(t, err)
+
 		refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, "user", sessionID)
 		require.NoError(t, err)
 
-		// Only one rotation should succeed
 		var successCount int
 		var mu sync.Mutex
+		var wg sync.WaitGroup
 
 		for i := 0; i < 5; i++ {
 			wg.Add(1)
