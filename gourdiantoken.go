@@ -903,6 +903,9 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 		if !v.NotBefore.IsZero() {
 			mapClaims["nbf"] = v.NotBefore.Unix()
 		}
+		if !v.MaxLifetimeExpiry.IsZero() {
+			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
+		}
 		return mapClaims
 	case RefreshTokenClaims:
 		mapClaims := jwt.MapClaims{
@@ -918,6 +921,9 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 		}
 		if !v.NotBefore.IsZero() {
 			mapClaims["nbf"] = v.NotBefore.Unix()
+		}
+		if !v.MaxLifetimeExpiry.IsZero() {
+			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
 		}
 		return mapClaims
 	default:
@@ -1020,6 +1026,8 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 	iat := getUnixTime(claims["iat"])
 	exp := getUnixTime(claims["exp"])
 	nbf := getUnixTime(claims["nbf"])
+	mle := getUnixTime(claims["mle"])
+
 	if iat == 0 || exp == 0 {
 		return nil, fmt.Errorf("invalid timestamp format")
 	}
@@ -1039,6 +1047,11 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 
 	if nbf != 0 {
 		accessClaims.NotBefore = time.Unix(nbf, 0)
+	}
+
+	// Only set MaxLifetimeExpiry if mle exists and is valid
+	if mle != 0 {
+		accessClaims.MaxLifetimeExpiry = time.Unix(mle, 0)
 	}
 
 	return accessClaims, nil
@@ -1096,6 +1109,7 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 	iat := getUnixTime(claims["iat"])
 	exp := getUnixTime(claims["exp"])
 	nbf := getUnixTime(claims["nbf"])
+	mle := getUnixTime(claims["mle"])
 
 	if iat == 0 || exp == 0 {
 		return nil, fmt.Errorf("invalid timestamp format")
@@ -1115,6 +1129,11 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 
 	if nbf != 0 {
 		refreshClaims.NotBefore = time.Unix(nbf, 0)
+	}
+
+	// Only set MaxLifetimeExpiry if mle exists and is valid
+	if mle != 0 {
+		refreshClaims.MaxLifetimeExpiry = time.Unix(mle, 0)
 	}
 
 	return refreshClaims, nil
