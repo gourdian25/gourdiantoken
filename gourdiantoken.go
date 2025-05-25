@@ -219,14 +219,14 @@ func DefaultGourdianTokenMaker(
 		PublicKeyPath:            "",
 		Issuer:                   "gourdian.com",
 		Audience:                 nil,
-		AllowedAlgorithms:        []string{"HS256"},
+		AllowedAlgorithms:        []string{"HS256", "RS256", "ES256"},
 		RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
 		SigningMethod:            Symmetric,
 		AccessExpiryDuration:     30 * time.Minute,
 		AccessMaxLifetimeExpiry:  24 * time.Hour,
 		RefreshExpiryDuration:    7 * 24 * time.Hour,
 		RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
-		RefreshReuseInterval:     time.Minute,
+		RefreshReuseInterval:     5 * time.Minute,
 	}
 
 	if redisOpts != nil {
@@ -526,6 +526,17 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 		return nil, fmt.Errorf("token reused too soon")
 	}
 
+	// Enforce reuse interval
+	if maker.config.RefreshReuseInterval > 0 {
+		ttl, err := maker.redisClient.TTL(ctx, "rotated:"+oldToken).Result()
+		if err == nil && ttl > 0 {
+			remaining := time.Duration(ttl) * time.Second
+			if remaining > maker.config.RefreshReuseInterval {
+				return nil, fmt.Errorf("token reused too soon, wait %v", remaining)
+			}
+		}
+	}
+
 	newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID)
 	if err != nil {
 		return nil, err
@@ -646,6 +657,22 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 }
 
 func (maker *JWTMaker) initializeSigningMethod() error {
+
+	// Check if configured algorithm is in allowed list if specified
+	if len(maker.config.AllowedAlgorithms) > 0 {
+		allowed := false
+		for _, alg := range maker.config.AllowedAlgorithms {
+			if alg == maker.config.Algorithm {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("configured algorithm %s not in allowed algorithms list",
+				maker.config.Algorithm)
+		}
+	}
+
 	switch maker.config.Algorithm {
 	case "HS256":
 		maker.signingMethod = jwt.SigningMethodHS256
@@ -778,6 +805,45 @@ func validateConfig(config *GourdianTokenConfig) error {
 		return fmt.Errorf("unsupported signing method: %s, supports %s and %s",
 			config.SigningMethod, Symmetric, Asymmetric)
 	}
+
+	// Validate token durations make sense
+	if config.AccessExpiryDuration <= 0 {
+		return fmt.Errorf("access token duration must be positive")
+	}
+	if config.AccessMaxLifetimeExpiry > 0 &&
+		config.AccessExpiryDuration > config.AccessMaxLifetimeExpiry {
+		return fmt.Errorf("access token duration exceeds max lifetime")
+	}
+
+	if config.RefreshExpiryDuration <= 0 {
+		return fmt.Errorf("refresh token duration must be positive")
+	}
+	if config.RefreshMaxLifetimeExpiry > 0 &&
+		config.RefreshExpiryDuration > config.RefreshMaxLifetimeExpiry {
+		return fmt.Errorf("refresh token duration exceeds max lifetime")
+	}
+
+	if config.RefreshReuseInterval < 0 {
+		return fmt.Errorf("refresh reuse interval cannot be negative")
+	}
+
+	// Reject weak algorithms
+	weakAlgorithms := map[string]bool{
+		"HS256": false, // Considered strong enough with proper key size
+		"none":  true,
+	}
+	if weak, ok := weakAlgorithms[config.Algorithm]; ok && weak {
+		return fmt.Errorf("algorithm %s is too weak for production use", config.Algorithm)
+	}
+
+	// // Validate allowed algorithms if specified
+	// if len(config.AllowedAlgorithms) > 0 {
+	// 	for _, alg := range config.AllowedAlgorithms {
+	// 		if !isSupportedAlgorithm(alg) {
+	// 			return fmt.Errorf("unsupported algorithm in allowed list: %s", alg)
+	// 		}
+	// 	}
+	// }
 
 	return nil
 }
@@ -1021,21 +1087,14 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 }
 
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error {
-	// Base required claims for all tokens
-	baseRequired := []string{"jti", "sub", "sid", "usr", "iat", "exp", "typ"}
-
-	// Add token-type specific required claims
-	if expectedType == AccessToken {
-		baseRequired = append(baseRequired, "rls")
+	// Base required claims
+	baseRequired := map[TokenType][]string{
+		AccessToken:  {"jti", "sub", "sid", "usr", "iat", "exp", "typ", "rls"},
+		RefreshToken: {"jti", "sub", "sid", "usr", "iat", "exp", "typ"},
 	}
 
-	// Add config-specified required claims
-	if len(required) > 0 {
-		baseRequired = append(baseRequired, required...)
-	}
-
-	// Check all required claims exist
-	for _, claim := range baseRequired {
+	// Check all required claims
+	for _, claim := range append(baseRequired[expectedType], required...) {
 		if _, ok := claims[claim]; !ok {
 			return fmt.Errorf("missing required claim: %s", claim)
 		}
@@ -1060,6 +1119,14 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required 
 	if iat, ok := claims["iat"].(float64); ok {
 		if time.Unix(int64(iat), 0).After(time.Now()) {
 			return fmt.Errorf("token issued in the future")
+		}
+	}
+
+	// Check max lifetime if present in claims
+	if mle, ok := claims["mle"].(float64); ok {
+		maxExpiry := time.Unix(int64(mle), 0)
+		if time.Now().After(maxExpiry) {
+			return fmt.Errorf("token exceeded maximum lifetime")
 		}
 	}
 
