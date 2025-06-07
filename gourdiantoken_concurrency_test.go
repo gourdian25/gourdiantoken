@@ -12,7 +12,7 @@ import (
 )
 
 func TestConcurrentTokenOperations(t *testing.T) {
-	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
+	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisClient())
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -53,7 +53,7 @@ func TestConcurrentTokenOperations(t *testing.T) {
 		// Create a new maker with fresh config for this test
 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 		require.NoError(t, err)
 
 		refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, "user", sessionID)

@@ -26,7 +26,7 @@ import (
 )
 
 func redisTestClient(t *testing.T) *redis.Client {
-	client := redis.NewClient(testRedisOptions())
+	client := testRedisClient()
 	_, err := client.Ping(context.Background()).Result()
 	if err != nil {
 		t.Skip("Redis not available, skipping test")
@@ -252,7 +252,7 @@ func TestSecurityScenarios(t *testing.T) {
 			}
 		}()
 
-		maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
+		maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisClient())
 		require.NoError(t, err)
 
 		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"role"}, uuid.New())
@@ -279,7 +279,7 @@ func TestSecurityScenarios(t *testing.T) {
 
 func TestCreateAndVerifyRefreshToken(t *testing.T) {
 	// Setup symmetric maker
-	symmetricMaker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
+	symmetricMaker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisClient())
 	require.NoError(t, err)
 
 	// Setup asymmetric maker
@@ -295,7 +295,7 @@ func TestCreateAndVerifyRefreshToken(t *testing.T) {
 		RefreshExpiryDuration:    24 * time.Hour,
 		RefreshMaxLifetimeExpiry: 7 * 24 * time.Hour,
 	}
-	asymmetricMaker, err := NewGourdianTokenMaker(context.Background(), asymmetricConfig, testRedisOptions())
+	asymmetricMaker, err := NewGourdianTokenMaker(context.Background(), asymmetricConfig, testRedisClient())
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -350,7 +350,7 @@ func TestCreateAndVerifyRefreshToken(t *testing.T) {
 		// Create a token with very short lifetime
 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RefreshExpiryDuration = time.Millisecond
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 		require.NoError(t, err)
 
 		resp, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
@@ -478,7 +478,7 @@ func TestDefaultConfig(t *testing.T) {
 
 	t.Run("Invalid Key Length", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig("short")
-		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		_, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "symmetric key must be at least 32 bytes")
 	})
@@ -488,7 +488,7 @@ func TestTokenRotation_EdgeCases(t *testing.T) {
 	t.Run("Rotation with Disabled Config", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RotationEnabled = false
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 		require.NoError(t, err)
 
 		resp, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
@@ -502,7 +502,7 @@ func TestTokenRotation_EdgeCases(t *testing.T) {
 	t.Run("Rotation with Invalid Token", func(t *testing.T) {
 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RotationEnabled = true
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 		require.NoError(t, err)
 
 		_, err = maker.RotateRefreshToken(context.Background(), "invalid.token.string")
@@ -514,7 +514,7 @@ func TestTokenRotation_EdgeCases(t *testing.T) {
 		config := DefaultGourdianTokenConfig(testSymmetricKey)
 		config.RotationEnabled = true
 		config.RefreshExpiryDuration = time.Millisecond // Very short expiration
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 		require.NoError(t, err)
 
 		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
@@ -544,7 +544,7 @@ func TestTokenRotation_ReuseInterval(t *testing.T) {
 	config.RefreshExpiryDuration = 30 * time.Minute
 	config.RefreshMaxLifetimeExpiry = time.Hour
 
-	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 	require.NoError(t, err)
 
 	token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
@@ -570,7 +570,7 @@ func TestTokenRotation_ReuseInterval(t *testing.T) {
 
 func TestTokenClaimsValidation(t *testing.T) {
 	config := DefaultGourdianTokenConfig(testSymmetricKey)
-	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 	require.NoError(t, err)
 
 	// Common claims that satisfy all required claims

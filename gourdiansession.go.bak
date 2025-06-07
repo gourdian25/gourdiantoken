@@ -1,0 +1,320 @@
+// File: gourdiansession.go
+
+package gourdiantoken
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+)
+
+const (
+	sessionPrefix      = "session:"
+	userSessionsPrefix = "user_sessions:"
+)
+
+// Session represents an active user session
+type Session struct {
+	ID           uuid.UUID `json:"id"`            // Unique session ID
+	UserID       uuid.UUID `json:"user_id"`       // Associated user ID
+	Username     string    `json:"username"`      // Human-readable username
+	IPAddress    string    `json:"ip_address"`    // Client IP address
+	UserAgent    string    `json:"user_agent"`    // Client user agent
+	CreatedAt    time.Time `json:"created_at"`    // When session was created
+	LastActivity time.Time `json:"last_activity"` // When session was last active
+	IsActive     bool      `json:"is_active"`     // Whether session is currently active
+	Metadata     string    `json:"metadata"`      // Additional session metadata (JSON)
+}
+
+// SessionManager manages user sessions with Redis backend
+type SessionManager struct {
+	redisClient *redis.Client
+	config      SessionConfig
+}
+
+// SessionConfig contains configuration for session management
+type SessionConfig struct {
+	SessionTTL            time.Duration // How long sessions remain active
+	InactiveSessionTTL    time.Duration // How long inactive sessions are kept
+	MaxSessionsPerUser    int           // Maximum concurrent sessions per user (0 = unlimited)
+	EnableIPRotationCheck bool          // Check for IP changes during session validation
+}
+
+// DefaultSessionConfig returns a secure default configuration
+func DefaultSessionConfig() SessionConfig {
+	return SessionConfig{
+		SessionTTL:            24 * time.Hour,     // Active sessions expire after 24h
+		InactiveSessionTTL:    7 * 24 * time.Hour, // Inactive sessions kept for 7 days
+		MaxSessionsPerUser:    5,                  // Allow 5 concurrent sessions per user
+		EnableIPRotationCheck: true,               // Check for IP changes
+	}
+}
+
+// NewSessionManager creates a new session manager
+func NewSessionManager(redisClient *redis.Client, config SessionConfig) *SessionManager {
+	return &SessionManager{
+		redisClient: redisClient,
+		config:      config,
+	}
+}
+
+// CreateSession creates a new session and stores it in Redis
+func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, username, ip, userAgent, metadata string) (*Session, error) {
+	// Check if we need to enforce session limits
+	if sm.config.MaxSessionsPerUser > 0 {
+		count, err := sm.CountUserSessions(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to count user sessions: %w", err)
+		}
+		if count >= sm.config.MaxSessionsPerUser {
+			// Find oldest session to remove
+			sessions, err := sm.GetUserSessions(ctx, userID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get user sessions: %w", err)
+			}
+
+			// Sort by last activity (oldest first)
+			sortSessionsByActivity(sessions)
+
+			// Remove excess sessions
+			for i := 0; i <= count-sm.config.MaxSessionsPerUser; i++ {
+				if i < len(sessions) {
+					if err := sm.DeleteSession(ctx, sessions[i].ID); err != nil {
+						return nil, fmt.Errorf("failed to clean up old sessions: %w", err)
+					}
+				}
+			}
+		}
+	}
+
+	sessionID := uuid.New()
+	now := time.Now()
+
+	session := &Session{
+		ID:           sessionID,
+		UserID:       userID,
+		Username:     username,
+		IPAddress:    ip,
+		UserAgent:    userAgent,
+		CreatedAt:    now,
+		LastActivity: now,
+		IsActive:     true,
+		Metadata:     metadata,
+	}
+
+	// Store session data
+	sessionKey := sessionPrefix + sessionID.String()
+	userSessionsKey := userSessionsPrefix + userID.String()
+
+	// Use pipeline for atomic operations
+	pipe := sm.redisClient.TxPipeline()
+
+	// Store session data
+	sessionJSON, err := json.Marshal(session)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal session: %w", err)
+	}
+	pipe.Set(ctx, sessionKey, sessionJSON, sm.config.SessionTTL)
+
+	// Add to user's session set
+	pipe.SAdd(ctx, userSessionsKey, sessionID.String())
+	pipe.Expire(ctx, userSessionsKey, sm.config.InactiveSessionTTL)
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, fmt.Errorf("failed to store session: %w", err)
+	}
+
+	return session, nil
+}
+
+// GetSession retrieves a session by ID
+func (sm *SessionManager) GetSession(ctx context.Context, sessionID uuid.UUID) (*Session, error) {
+	sessionKey := sessionPrefix + sessionID.String()
+	sessionJSON, err := sm.redisClient.Get(ctx, sessionKey).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, fmt.Errorf("session not found")
+		}
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+
+	var session Session
+	if err := json.Unmarshal([]byte(sessionJSON), &session); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
+	}
+
+	return &session, nil
+}
+
+// UpdateSessionActivity updates the last activity time for a session
+func (sm *SessionManager) UpdateSessionActivity(ctx context.Context, sessionID uuid.UUID, ip string) error {
+	session, err := sm.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	// Check for IP change if enabled
+	if sm.config.EnableIPRotationCheck && session.IPAddress != ip {
+		return fmt.Errorf("session IP address changed from %s to %s", session.IPAddress, ip)
+	}
+
+	session.LastActivity = time.Now()
+	session.IPAddress = ip
+
+	sessionKey := sessionPrefix + sessionID.String()
+	sessionJSON, err := json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("failed to marshal session: %w", err)
+	}
+
+	return sm.redisClient.Set(ctx, sessionKey, sessionJSON, sm.config.SessionTTL).Err()
+}
+
+// DeleteSession removes a session
+func (sm *SessionManager) DeleteSession(ctx context.Context, sessionID uuid.UUID) error {
+	session, err := sm.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+
+	// Use pipeline for atomic operations
+	pipe := sm.redisClient.TxPipeline()
+
+	// Remove session data
+	pipe.Del(ctx, sessionPrefix+sessionID.String())
+
+	// Remove from user's session set
+	pipe.SRem(ctx, userSessionsPrefix+session.UserID.String(), sessionID.String())
+
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+// GetUserSessions returns all sessions for a user
+func (sm *SessionManager) GetUserSessions(ctx context.Context, userID uuid.UUID) ([]*Session, error) {
+	userSessionsKey := userSessionsPrefix + userID.String()
+	sessionIDs, err := sm.redisClient.SMembers(ctx, userSessionsKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user sessions: %w", err)
+	}
+
+	var sessions []*Session
+	for _, sessionID := range sessionIDs {
+		session, err := sm.GetSession(ctx, uuid.MustParse(sessionID))
+		if err != nil {
+			// Skip invalid sessions but continue with others
+			continue
+		}
+		sessions = append(sessions, session)
+	}
+
+	return sessions, nil
+}
+
+// CountUserSessions returns the number of active sessions for a user
+func (sm *SessionManager) CountUserSessions(ctx context.Context, userID uuid.UUID) (int, error) {
+	userSessionsKey := userSessionsPrefix + userID.String()
+	count, err := sm.redisClient.SCard(ctx, userSessionsKey).Result()
+	return int(count), err
+}
+
+// CleanupInactiveSessions removes expired sessions
+func (sm *SessionManager) CleanupInactiveSessions(ctx context.Context) error {
+	var cursor uint64
+	var count int64
+	batchSize := int64(100)
+
+	for {
+		keys, nextCursor, err := sm.redisClient.Scan(ctx, cursor, sessionPrefix+"*", batchSize).Result()
+		if err != nil {
+			return fmt.Errorf("failed to scan sessions: %w", err)
+		}
+
+		for _, key := range keys {
+			ttl, err := sm.redisClient.TTL(ctx, key).Result()
+			if err != nil {
+				continue
+			}
+
+			// If key has expired or is about to expire
+			if ttl <= 0 {
+				sessionID := key[len(sessionPrefix):]
+				session, err := sm.GetSession(ctx, uuid.MustParse(sessionID))
+				if err != nil {
+					continue
+				}
+
+				// Remove from user's session set
+				if err := sm.redisClient.SRem(ctx, userSessionsPrefix+session.UserID.String(), sessionID).Err(); err != nil {
+					continue
+				}
+
+				// Delete the session key
+				if err := sm.redisClient.Del(ctx, key).Err(); err != nil {
+					continue
+				}
+
+				count++
+			}
+		}
+
+		if nextCursor == 0 {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	return nil
+}
+
+// InvalidateAllUserSessions terminates all sessions for a user
+func (sm *SessionManager) InvalidateAllUserSessions(ctx context.Context, userID uuid.UUID) error {
+	sessions, err := sm.GetUserSessions(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	for _, session := range sessions {
+		if err := sm.DeleteSession(ctx, session.ID); err != nil {
+			// Continue with next session even if one fails
+			continue
+		}
+	}
+
+	return nil
+}
+
+// sortSessionsByActivity sorts sessions by last activity (oldest first)
+func sortSessionsByActivity(sessions []*Session) {
+	for i := 0; i < len(sessions); i++ {
+		for j := i + 1; j < len(sessions); j++ {
+			if sessions[i].LastActivity.After(sessions[j].LastActivity) {
+				sessions[i], sessions[j] = sessions[j], sessions[i]
+			}
+		}
+	}
+}
+
+
+type TokenStorage interface {
+    // Revocation
+    IsAccessTokenRevoked(ctx context.Context, tokenID string) (bool, error)
+    RevokeAccessToken(ctx context.Context, tokenID string, expiry time.Time) error
+    IsRefreshTokenRevoked(ctx context.Context, tokenID string) (bool, error)
+    RevokeRefreshToken(ctx context.Context, tokenID string, expiry time.Time) error
+    
+    // Rotation
+    IsRefreshTokenRotated(ctx context.Context, tokenID string) (bool, error)
+    RotateRefreshToken(ctx context.Context, oldTokenID string, newTokenID string, maxLifetime time.Time) error
+    
+    // Cleanup
+    CleanupRevokedTokens(ctx context.Context) error
+    CleanupRotatedTokens(ctx context.Context) error
+    
+    // Optional
+    Close() error
+}

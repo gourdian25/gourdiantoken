@@ -22,7 +22,7 @@ func TestFullTokenLifecycle_Symmetric(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 	require.NoError(t, err)
 
 	// Create test data
@@ -116,7 +116,7 @@ func TestFullTokenLifecycle_Asymmetric(t *testing.T) {
 		RefreshReuseInterval:     5 * time.Minute,
 	}
 
-	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 	require.NoError(t, err)
 
 	// Create test data
