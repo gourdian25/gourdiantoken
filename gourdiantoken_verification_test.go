@@ -154,14 +154,14 @@ func TestContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Immediately cancel the context
 
-		_, err := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+		_, err := NewGourdianTokenMaker(ctx, config, testRedisClient())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "context canceled")
 	})
 
 	// Test token operations with cancelled context
 	t.Run("Token operations with cancelled context", func(t *testing.T) {
-		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+		maker, err := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 		require.NoError(t, err)
 
 		// Test CreateAccessToken with cancelled context

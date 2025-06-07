@@ -388,18 +388,19 @@ type JWTMaker struct {
 // Parameters:
 //   - ctx: Context for cancellation/timeout
 //   - config: Complete token configuration
-//   - redisOpts: Redis connection options (required for revocation/rotation)
+//   - redisClient: Redis client for revocation/rotation (can be nil if features disabled)
 //
 // Example:
 //
 //	config := DefaultGourdianTokenConfig("my-secret-key")
-//	maker, err := NewGourdianTokenMaker(context.Background(), config, &redis.Options{
+//	redisClient := redis.NewClient(&redis.Options{
 //	    Addr: "localhost:6379",
 //	})
+//	maker, err := NewGourdianTokenMaker(context.Background(), config, redisClient)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisOpts *redis.Options) (GourdianTokenMaker, error) {
+func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redisClient *redis.Client) (GourdianTokenMaker, error) {
 	// Check context cancellation first
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
@@ -415,17 +416,17 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 	}
 
 	// Check Redis requirements
-	if (config.RotationEnabled || config.RevocationEnabled) && redisOpts == nil {
-		return nil, fmt.Errorf("redis options required for token rotation/revocation")
+	if (config.RotationEnabled || config.RevocationEnabled) && redisClient == nil {
+		return nil, fmt.Errorf("redis client required for token rotation/revocation")
 	}
 
 	maker := &JWTMaker{
 		config: config,
 	}
 
-	// Initialize Redis client if any feature requiring Redis is enabled
+	// Set Redis client if any feature requiring Redis is enabled
 	if config.RotationEnabled || config.RevocationEnabled {
-		maker.redisClient = redis.NewClient(redisOpts)
+		maker.redisClient = redisClient
 
 		// Verify Redis connection with the provided context
 		if _, err := maker.redisClient.Ping(ctx).Result(); err != nil {
@@ -462,24 +463,25 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, redi
 // DefaultGourdianTokenMaker creates a token maker with secure defaults.
 //
 // This convenience constructor uses HMAC-SHA256 with the provided symmetric key
-// and optional Redis connection for advanced features.
+// and optional Redis client for advanced features.
 //
 // Parameters:
 //   - ctx: Context for cancellation/timeout
 //   - symmetricKey: Base64-encoded secret key (minimum 32 bytes)
-//   - redisOpts: Optional Redis connection options
+//   - redisClient: Optional Redis client
 //
 // Example:
 //
+//	redisClient := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
 //	maker, err := DefaultGourdianTokenMaker(
 //	    context.Background(),
 //	    "my-very-secure-base64-encoded-secret-key",
-//	    &redis.Options{Addr: "localhost:6379"},
+//	    redisClient,
 //	)
 func DefaultGourdianTokenMaker(
 	ctx context.Context,
 	symmetricKey string,
-	redisOpts *redis.Options,
+	redisClient *redis.Client,
 ) (GourdianTokenMaker, error) {
 	config := GourdianTokenConfig{
 		RevocationEnabled:        false,
@@ -500,11 +502,11 @@ func DefaultGourdianTokenMaker(
 		RefreshReuseInterval:     5 * time.Minute,
 	}
 
-	if redisOpts != nil {
+	if redisClient != nil {
 		config.RevocationEnabled = true
 		config.RotationEnabled = true
 	}
-	return NewGourdianTokenMaker(ctx, config, redisOpts)
+	return NewGourdianTokenMaker(ctx, config, redisClient)
 }
 
 // CreateAccessToken generates a new signed access token with the given user attributes.

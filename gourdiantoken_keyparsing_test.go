@@ -175,7 +175,7 @@ func TestRevocationFlow(t *testing.T) {
 	config := DefaultGourdianTokenConfig("test-key-123456789012345678901234")
 	config.RevocationEnabled = true
 
-	maker, _ := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	maker, _ := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 
 	// Create and verify token
 	token, _ := maker.CreateAccessToken(context.Background(), uuid.New(), "user1", []string{"admin"}, uuid.New())

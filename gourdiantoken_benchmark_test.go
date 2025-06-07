@@ -121,15 +121,15 @@ func BenchmarkRedisTokenRotation(b *testing.B) {
 	config.RotationEnabled = true
 
 	testCases := []struct {
-		name      string
-		redisOpts *redis.Options
+		name        string
+		redisClient *redis.Client
 	}{
-		{"LocalRedis", testRedisOptions()},
+		{"LocalRedis", testRedisClient()},
 	}
 
 	for _, tc := range testCases {
 		b.Run(tc.name, func(b *testing.B) {
-			maker, err := NewGourdianTokenMaker(context.Background(), config, tc.redisOpts)
+			maker, err := NewGourdianTokenMaker(context.Background(), config, tc.redisClient)
 			if err != nil {
 				b.Fatalf("Failed to create token maker: %v", err)
 			}
@@ -169,7 +169,7 @@ func BenchmarkTokenRevocation(b *testing.B) {
 
 	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 	config.RevocationEnabled = true
-	maker, _ := NewGourdianTokenMaker(context.Background(), config, testRedisOptions())
+	maker, _ := NewGourdianTokenMaker(context.Background(), config, testRedisClient())
 
 	userID := uuid.New()
 	username := "benchuser"
@@ -313,12 +313,12 @@ func BenchmarkVerifyRefreshToken(b *testing.B) {
 }
 
 func BenchmarkRotateRefreshToken_RedisReuseInterval(b *testing.B) {
-	opts := testRedisOptions()
+	redisClient := testRedisClient()
 	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 	config.RotationEnabled = true
 	config.RefreshReuseInterval = 2 * time.Second
 
-	maker, err := NewGourdianTokenMaker(context.Background(), config, opts)
+	maker, err := NewGourdianTokenMaker(context.Background(), config, redisClient)
 	require.NoError(b, err)
 
 	userID := uuid.New()
@@ -336,11 +336,11 @@ func BenchmarkRotateRefreshToken_RedisReuseInterval(b *testing.B) {
 }
 
 func BenchmarkRevokeAndVerifyToken_Redis(b *testing.B) {
-	opts := testRedisOptions()
+	redisClient := testRedisClient()
 	config := DefaultGourdianTokenConfig("test-secret-32-bytes-long-1234567890")
 	config.RevocationEnabled = true
 
-	maker, err := NewGourdianTokenMaker(context.Background(), config, opts)
+	maker, err := NewGourdianTokenMaker(context.Background(), config, redisClient)
 	require.NoError(b, err)
 
 	userID := uuid.New()
@@ -449,7 +449,7 @@ func BenchmarkRotateRefreshTokenParallel(b *testing.B) {
 	ctx := context.Background()
 	config := DefaultGourdianTokenConfig(testSymmetricKey)
 	config.RotationEnabled = true
-	maker, _ := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+	maker, _ := NewGourdianTokenMaker(ctx, config, testRedisClient())
 
 	userID := uuid.New()
 	sessionID := uuid.New()
@@ -467,7 +467,7 @@ func BenchmarkTokenRevocationParallel(b *testing.B) {
 	ctx := context.Background()
 	config := DefaultGourdianTokenConfig(testSymmetricKey)
 	config.RevocationEnabled = true
-	maker, _ := NewGourdianTokenMaker(ctx, config, testRedisOptions())
+	maker, _ := NewGourdianTokenMaker(ctx, config, testRedisClient())
 
 	userID := uuid.New()
 	sessionID := uuid.New()

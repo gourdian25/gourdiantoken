@@ -8,6 +8,7 @@
 ├── go.mod
 ├── go.sum
 ├── goReleaser.txt
+├── gourdiansession.go.bak
 ├── gourdiantoken.go
 ├── gourdiantoken_benchmark_test.go
 ├── gourdiantoken_claims_test.go
@@ -25,4 +26,4 @@
 ├── tree.txt
 └── version.go
 
-1 directory, 25 files
+1 directory, 26 files
