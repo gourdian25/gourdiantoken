@@ -28,6 +28,14 @@ func testRedisOptions() *redis.Options {
 	}
 }
 
+func testRedisClient() *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:     "127.0.0.1:6379",
+		Password: "GourdianRedisSecret",
+		DB:       0,
+	})
+}
+
 func TestRevocationErrors(t *testing.T) {
 	// Setup Redis if available
 	client := redis.NewClient(testRedisOptions())
@@ -80,7 +88,7 @@ func TestRevocationErrors(t *testing.T) {
 		},
 	}
 
-	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
+	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisClient())
 	require.NoError(t, err)
 
 	for _, tt := range tests {
@@ -133,7 +141,7 @@ func TestRotationErrors(t *testing.T) {
 		},
 	}
 
-	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisOptions())
+	maker, err := DefaultGourdianTokenMaker(context.Background(), testSymmetricKey, testRedisClient())
 	require.NoError(t, err)
 
 	for _, tt := range tests {
@@ -150,7 +158,7 @@ func TestRedisConnectionErrors(t *testing.T) {
 	tests := []struct {
 		name        string
 		config      GourdianTokenConfig
-		redisOpts   *redis.Options
+		redisClient *redis.Client
 		expectedErr string
 	}{
 		{
@@ -163,8 +171,8 @@ func TestRedisConnectionErrors(t *testing.T) {
 				AccessExpiryDuration:  30 * time.Minute,
 				RefreshExpiryDuration: 24 * time.Hour,
 			},
-			redisOpts:   nil,
-			expectedErr: "redis options required",
+			redisClient: nil,
+			expectedErr: "redis client required",
 		},
 		{
 			name: "Invalid Redis connection",
@@ -176,14 +184,14 @@ func TestRedisConnectionErrors(t *testing.T) {
 				AccessExpiryDuration:  30 * time.Minute,
 				RefreshExpiryDuration: 24 * time.Hour,
 			},
-			redisOpts:   &redis.Options{Addr: "invalid-redis-url:9999"},
+			redisClient: redis.NewClient(&redis.Options{Addr: "invalid-redis-url:9999"}),
 			expectedErr: "redis connection failed",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewGourdianTokenMaker(context.Background(), tt.config, tt.redisOpts)
+			_, err := NewGourdianTokenMaker(context.Background(), tt.config, tt.redisClient)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.expectedErr)
 		})
