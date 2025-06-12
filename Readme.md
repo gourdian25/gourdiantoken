@@ -221,10 +221,10 @@ func main() {
 	key := "your-32-byte-secret-key-must-be-secure"
 
 	// 1. Load default HMAC-based configuration
-	config := gourdiantoken.DefaultgourdiantokenConfig(key)
+	config := gourdiantoken.DefaultGourdianTokenConfig(key)
 
 	// 2. Create the token manager (Redis is nil here, so revocation/rotation are disabled)
-	maker, err := gourdiantoken.NewgourdiantokenMaker(context.Background(), config, nil)
+	maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, nil)
 	if err != nil {
 		panic(fmt.Errorf("token maker initialization failed: %w", err))
 	}
@@ -276,40 +276,33 @@ import (
 
 func main() {
 	// 1. Configure Redis (used for revocation and rotation)
-	redisOpts := &redis.Options{
+	redisClient := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379", // Update if using Docker, cloud, etc.
 		Password: "",
 		DB:       0,
-	}
+	})
 
 	// 2. Define a complete asymmetric token configuration
-	config := gourdiantoken.gourdiantokenConfig{
-		Algorithm:      "RS256",
-		SigningMethod:  gourdiantoken.Asymmetric,
-		PrivateKeyPath: "/path/to/private.pem",  // Replace with real path
-		PublicKeyPath:  "/path/to/public.pem",   // Replace with real path
-
-		AccessToken: gourdiantoken.AccessTokenConfig{
-			Duration:           30 * time.Minute,
-			MaxLifetime:        24 * time.Hour,
-			Issuer:             "myapp.com",
-			Audience:           []string{"api.myapp.com"},
-			AllowedAlgorithms:  []string{"RS256"},
-			RequiredClaims:     []string{"jti", "sub", "exp", "iat", "typ", "rls"},
-			RevocationEnabled:  true, // Enables Redis-based access token revocation
-		},
-
-		RefreshToken: gourdiantoken.RefreshTokenConfig{
-			Duration:           7 * 24 * time.Hour,
-			MaxLifetime:        30 * 24 * time.Hour,
-			ReuseInterval:      5 * time.Minute,  // Prevents replay attacks
-			RotationEnabled:    true,             // Enables refresh token rotation
-			RevocationEnabled:  true,             // Enables refresh token revocation
-		},
+	config := gourdiantoken.GourdianTokenConfig{
+		Algorithm:                "RS256",
+		SigningMethod:            gourdiantoken.Asymmetric,
+		PrivateKeyPath:           "/path/to/private.pem",  // Replace with real path
+		PublicKeyPath:            "/path/to/public.pem",   // Replace with real path
+		Issuer:                   "myapp.com",
+		Audience:                 []string{"api.myapp.com"},
+		AllowedAlgorithms:        []string{"RS256"},
+		RequiredClaims:           []string{"jti", "sub", "exp", "iat", "typ", "rls"},
+		AccessExpiryDuration:     30 * time.Minute,
+		AccessMaxLifetimeExpiry:  24 * time.Hour,
+		RefreshExpiryDuration:    7 * 24 * time.Hour,
+		RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+		RefreshReuseInterval:     5 * time.Minute,
+		RotationEnabled:          true,
+		RevocationEnabled:        true,
 	}
 
 	// 3. Initialize the token maker with Redis-enabled features
-	maker, err := gourdiantoken.NewgourdiantokenMaker(context.Background(), config, redisOpts)
+	maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, redisClient)
 	if err != nil {
 		panic(fmt.Errorf("failed to initialize token maker: %w", err))
 	}
