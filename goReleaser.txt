@@ -45,5 +45,6 @@ goreleaser release --clean
     • writing                                        file=dist/artifacts.json
   • announcing
   • release succeeded after 3s
+
   • thanks for using goreleaser!
 logan@WarHammer ~/gourdiantoken (master)> 

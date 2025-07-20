@@ -165,6 +165,7 @@ gourdiantoken provides a complete JWT-based authentication system with a focus o
 gourdiantoken delivers enterprise-grade performance across all operations:
 
 **Token Operations (Lower is better)**
+
 | Operation          | Algorithm   | Ops/sec  | Latency  | Allocs/op |
 |--------------------|-------------|----------|----------|-----------|
 | Create Access      | HS256       | 115,879  | 10.5µs   | 71        |
@@ -174,21 +175,24 @@ gourdiantoken delivers enterprise-grade performance across all operations:
 | Token Rotation     | Redis       | 1,023    | 1.16ms   | 183       |
 
 **Concurrent Performance**
+
 ```text
 BenchmarkCreateAccessTokenParallel-8      175,258 ops | 6.7µs/op | 72 allocs/op
 BenchmarkVerifyAccessTokenParallel-8      184,347 ops | 7.4µs/op | 98 allocs/op
 ```
 
 **Key Size Impact**
+
 | Algorithm   | Key Size | Verify Latency |
 |-------------|----------|----------------|
 | RSA         | 1024     | 26µs           |
-| RSA         | 2048     | 47.9µs         | 
+| RSA         | 2048     | 47.9µs         |
 | RSA         | 4096     | 376µs          |
 | ECDSA       | P256     | 88.5µs         |
 | ECDSA       | P384     | 754µs          |
 
 **Full Benchmark Results:**
+
 ```text
 BenchmarkCreateAccessToken/Symmetric-8        115,879 ops | 10,531 ns/op | 5,924 B/op | 71 allocs/op
 BenchmarkVerifyAccessToken/Symmetric-8         94,226 ops | 12,824 ns/op | 5,272 B/op | 95 allocs/op
@@ -243,51 +247,51 @@ This example demonstrates how to use gourdiantoken with a secure 32-byte symmetr
 package main
 
 import (
-	"context"
-	"fmt"
-	"time"
+ "context"
+ "fmt"
+ "time"
 
-	"github.com/gourdian25/gourdiantoken"
-	"github.com/google/uuid"
+ "github.com/gourdian25/gourdiantoken"
+ "github.com/google/uuid"
 )
 
 func main() {
-	// Use a securely generated 32-byte secret key (base64 recommended)
-	key := "your-32-byte-secret-key-must-be-secure"
+ // Use a securely generated 32-byte secret key (base64 recommended)
+ key := "your-32-byte-secret-key-must-be-secure"
 
-	// 1. Load default HMAC configuration
-	config := gourdiantoken.DefaultGourdianTokenConfig(key)
+ // 1. Load default HMAC configuration
+ config := gourdiantoken.DefaultGourdianTokenConfig(key)
 
-	// 2. Create token maker (nil Redis client disables advanced features)
-	maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, nil)
-	if err != nil {
-		panic(fmt.Errorf("token maker initialization failed: %w", err))
-	}
+ // 2. Create token maker (nil Redis client disables advanced features)
+ maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, nil)
+ if err != nil {
+  panic(fmt.Errorf("token maker initialization failed: %w", err))
+ }
 
-	// 3. Generate user and session IDs
-	userID := uuid.New()
-	sessionID := uuid.New()
+ // 3. Generate user and session IDs
+ userID := uuid.New()
+ sessionID := uuid.New()
 
-	// 4. Create access token with user identity and roles
-	accessToken, err := maker.CreateAccessToken(
-		context.Background(),
-		userID,
-		"john_doe",
-		[]string{"user", "admin"},
-		sessionID,
-	)
-	if err != nil {
-		panic(fmt.Errorf("failed to create access token: %w", err))
-	}
+ // 4. Create access token with user identity and roles
+ accessToken, err := maker.CreateAccessToken(
+  context.Background(),
+  userID,
+  "john_doe",
+  []string{"user", "admin"},
+  sessionID,
+ )
+ if err != nil {
+  panic(fmt.Errorf("failed to create access token: %w", err))
+ }
 
-	// 5. Verify the token and extract claims
-	claims, err := maker.VerifyAccessToken(context.Background(), accessToken.Token)
-	if err != nil {
-		panic(fmt.Errorf("token verification failed: %w", err))
-	}
+ // 5. Verify the token and extract claims
+ claims, err := maker.VerifyAccessToken(context.Background(), accessToken.Token)
+ if err != nil {
+  panic(fmt.Errorf("token verification failed: %w", err))
+ }
 
-	fmt.Printf("✅ Verified token for user %s (ID: %s) with roles %v\n", 
-		claims.Username, claims.Subject, claims.Roles)
+ fmt.Printf("✅ Verified token for user %s (ID: %s) with roles %v\n", 
+  claims.Username, claims.Subject, claims.Roles)
 }
 ```
 
@@ -301,94 +305,94 @@ This example shows a production-ready setup with RSA signing and Redis for token
 package main
 
 import (
-	"context"
-	"fmt"
-	"time"
+ "context"
+ "fmt"
+ "time"
 
-	"github.com/gourdian25/gourdiantoken"
-	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
+ "github.com/gourdian25/gourdiantoken"
+ "github.com/google/uuid"
+ "github.com/redis/go-redis/v9"
 )
 
 func main() {
-	// 1. Configure Redis for token management
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
-	})
+ // 1. Configure Redis for token management
+ redisClient := redis.NewClient(&redis.Options{
+  Addr:     "localhost:6379",
+  Password: "",
+  DB:       0,
+ })
 
-	// 2. Create custom configuration
-	config := gourdiantoken.GourdianTokenConfig{
-		Algorithm:                "RS256",
-		SigningMethod:            gourdiantoken.Asymmetric,
-		PrivateKeyPath:           "/path/to/private.pem",
-		PublicKeyPath:            "/path/to/public.pem",
-		Issuer:                   "myapp.com",
-		Audience:                 []string{"api.myapp.com"},
-		AllowedAlgorithms:        []string{"RS256"},
-		RequiredClaims:           []string{"jti", "sub", "exp", "iat", "typ", "rls"},
-		AccessExpiryDuration:     30 * time.Minute,
-		AccessMaxLifetimeExpiry:  24 * time.Hour,
-		RefreshExpiryDuration:    7 * 24 * time.Hour,
-		RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
-		RefreshReuseInterval:     5 * time.Minute,
-		RotationEnabled:          true,
-		RevocationEnabled:        true,
-	}
+ // 2. Create custom configuration
+ config := gourdiantoken.GourdianTokenConfig{
+  Algorithm:                "RS256",
+  SigningMethod:            gourdiantoken.Asymmetric,
+  PrivateKeyPath:           "/path/to/private.pem",
+  PublicKeyPath:            "/path/to/public.pem",
+  Issuer:                   "myapp.com",
+  Audience:                 []string{"api.myapp.com"},
+  AllowedAlgorithms:        []string{"RS256"},
+  RequiredClaims:           []string{"jti", "sub", "exp", "iat", "typ", "rls"},
+  AccessExpiryDuration:     30 * time.Minute,
+  AccessMaxLifetimeExpiry:  24 * time.Hour,
+  RefreshExpiryDuration:    7 * 24 * time.Hour,
+  RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+  RefreshReuseInterval:     5 * time.Minute,
+  RotationEnabled:          true,
+  RevocationEnabled:        true,
+ }
 
-	// 3. Initialize token maker
-	maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, redisClient)
-	if err != nil {
-		panic(fmt.Errorf("failed to initialize token maker: %w", err))
-	}
+ // 3. Initialize token maker
+ maker, err := gourdiantoken.NewGourdianTokenMaker(context.Background(), config, redisClient)
+ if err != nil {
+  panic(fmt.Errorf("failed to initialize token maker: %w", err))
+ }
 
-	// 4. Generate user credentials
-	userID := uuid.New()
-	sessionID := uuid.New()
+ // 4. Generate user credentials
+ userID := uuid.New()
+ sessionID := uuid.New()
 
-	// 5. Create token pair
-	accessToken, err := maker.CreateAccessToken(
-		context.Background(),
-		userID,
-		"alice",
-		[]string{"user", "admin"},
-		sessionID,
-	)
-	if err != nil {
-		panic(err)
-	}
+ // 5. Create token pair
+ accessToken, err := maker.CreateAccessToken(
+  context.Background(),
+  userID,
+  "alice",
+  []string{"user", "admin"},
+  sessionID,
+ )
+ if err != nil {
+  panic(err)
+ }
 
-	refreshToken, err := maker.CreateRefreshToken(
-		context.Background(),
-		userID,
-		"alice",
-		sessionID,
-	)
-	if err != nil {
-		panic(err)
-	}
+ refreshToken, err := maker.CreateRefreshToken(
+  context.Background(),
+  userID,
+  "alice",
+  sessionID,
+ )
+ if err != nil {
+  panic(err)
+ }
 
-	// 6. Verify tokens
-	accessClaims, err := maker.VerifyAccessToken(context.Background(), accessToken.Token)
-	if err != nil {
-		panic(err)
-	}
+ // 6. Verify tokens
+ accessClaims, err := maker.VerifyAccessToken(context.Background(), accessToken.Token)
+ if err != nil {
+  panic(err)
+ }
 
-	refreshClaims, err := maker.VerifyRefreshToken(context.Background(), refreshToken.Token)
-	if err != nil {
-		panic(err)
-	}
+ refreshClaims, err := maker.VerifyRefreshToken(context.Background(), refreshToken.Token)
+ if err != nil {
+  panic(err)
+ }
 
-	fmt.Printf("🔐 Access Token (expires: %s)\n", accessClaims.ExpiresAt)
-	fmt.Printf("🔄 Refresh Token (expires: %s)\n", refreshClaims.ExpiresAt)
+ fmt.Printf("🔐 Access Token (expires: %s)\n", accessClaims.ExpiresAt)
+ fmt.Printf("🔄 Refresh Token (expires: %s)\n", refreshClaims.ExpiresAt)
 
-	// 7. Demonstrate token rotation
-	newRefreshToken, err := maker.RotateRefreshToken(context.Background(), refreshToken.Token)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("🆕 Rotated Refresh Token: %s\n", newRefreshToken.Token)
+ // 7. Demonstrate token rotation
+ newRefreshToken, err := maker.RotateRefreshToken(context.Background(), refreshToken.Token)
+ if err != nil {
+  panic(err)
+ }
+ fmt.Printf("🆕 Rotated Refresh Token: %s\n", newRefreshToken.Token)
 }
 ```
 
@@ -454,7 +458,7 @@ key := "your-32-byte-secure-hmac-key"
 config := gourdiantoken.DefaultGourdianTokenConfig(key)
 ```
 
-#### 🛡️ Defaults:
+#### 🛡️ Defaults
 
 | Setting                      | Value                |
 |------------------------------|----------------------|
@@ -765,7 +769,7 @@ Refresh token rotation enhances security by **ensuring every refresh token is si
 // Rotate and invalidate the old refresh token
 newToken, err := maker.RotateRefreshToken(ctx, oldRefreshToken)
 if err != nil {
-	log.Println("Replay attack or expired token!")
+ log.Println("Replay attack or expired token!")
 }
 ```
 
@@ -809,7 +813,7 @@ gourdiantoken supports a wide variety of industry-standard cryptographic algorit
 
 gourdiantoken verifies that **all essential claims** are present and valid before considering a token trustworthy.
 
-#### Required claims per token type:
+#### Required claims per token type
 
 | Claim  | Access Token | Refresh Token |
 |--------|--------------|---------------|
@@ -864,6 +868,7 @@ Benchmarks conducted on **AWS t3.xlarge (4 vCPUs, 16GB RAM)** using Go 1.21, wit
 ### 🔍 Performance Characteristics
 
 #### 🚀 Symmetric (HMAC) Operations
+
 - **Blazing fast** for both creation and verification
 - Ideal for:
   - Microservices architectures
@@ -871,6 +876,7 @@ Benchmarks conducted on **AWS t3.xlarge (4 vCPUs, 16GB RAM)** using Go 1.21, wit
   - Serverless functions
 
 #### 🔐 Asymmetric (RSA/ECDSA) Operations
+
 - **Verification is 20-50x faster than creation**
 - Recommended patterns:
   - Issue tokens centrally (slow operation)
@@ -878,6 +884,7 @@ Benchmarks conducted on **AWS t3.xlarge (4 vCPUs, 16GB RAM)** using Go 1.21, wit
   - Use key rotation for long-lived tokens
 
 #### 🏗️ Redis-Enhanced Features
+
 - **Token rotation adds ~1-2ms** overhead
 - **Revocation checks add ~0.9ms** per verification
 - Best practices:
@@ -890,12 +897,14 @@ Benchmarks conducted on **AWS t3.xlarge (4 vCPUs, 16GB RAM)** using Go 1.21, wit
 ### 🏆 Performance Recommendations
 
 1. **For Maximum Throughput**
+
    ```go
    config := gourdiantoken.DefaultGourdianTokenConfig("strong-32-byte-secret")
    config.AccessExpiryDuration = 15 * time.Minute  // Shorter TTL = less verification load
    ```
 
 2. **Balanced Security**
+
    ```go
    config := gourdiantoken.NewGourdianTokenConfig(
        gourdiantoken.Asymmetric,
@@ -907,6 +916,7 @@ Benchmarks conducted on **AWS t3.xlarge (4 vCPUs, 16GB RAM)** using Go 1.21, wit
    ```
 
 3. **Redis Optimization**
+
    ```go
    redisClient := redis.NewClient(&redis.Options{
        Addr:     "redis-cluster.example.com:6379",
@@ -915,6 +925,7 @@ Benchmarks conducted on **AWS t3.xlarge (4 vCPUs, 16GB RAM)** using Go 1.21, wit
    ```
 
 4. **Concurrency Patterns**
+
    ```go
    // Pre-warm the maker in your application startup
    maker, _ := gourdiantoken.NewGourdianTokenMaker(ctx, config, redisClient)
@@ -926,6 +937,7 @@ Benchmarks conducted on **AWS t3.xlarge (4 vCPUs, 16GB RAM)** using Go 1.21, wit
 ### 🧠 Advanced Techniques
 
 #### 🔄 Batch Token Verification
+
 ```go
 func batchVerify(ctx context.Context, maker GourdianTokenMaker, tokens []string) ([]*AccessTokenClaims, error) {
     var wg sync.WaitGroup
@@ -949,6 +961,7 @@ func batchVerify(ctx context.Context, maker GourdianTokenMaker, tokens []string)
 ```
 
 #### 🗝️ Key Rotation Strategy
+
 ```go
 // Implement key rotation by periodically creating new makers
 func rotateKeys() {
@@ -994,7 +1007,6 @@ config := gourdiantoken.NewGourdianTokenConfig(
     // ... other params
     )
 ```
-
 
 ## 🧪 Bonus Use Cases (Quick Ideas)
 
@@ -1137,13 +1149,13 @@ The `gourdiantokenMaker` interface defines a complete contract for secure, exten
 
 ```go
 type gourdiantokenMaker interface {
-	CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
-	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
-	VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
-	VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error)
-	RevokeAccessToken(ctx context.Context, token string) error
-	RevokeRefreshToken(ctx context.Context, token string) error
-	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
+ CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
+ CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
+ VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
+ VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error)
+ RevokeAccessToken(ctx context.Context, token string) error
+ RevokeRefreshToken(ctx context.Context, token string) error
+ RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
 }
 ```
 
@@ -1273,28 +1285,28 @@ Implements **refresh token rotation**. Generates a new refresh token and invalid
 
 ```go
 func AuthFlowExample(maker gourdiantoken.gourdiantokenMaker) {
-	userID := uuid.New()
-	sessionID := uuid.New()
+ userID := uuid.New()
+ sessionID := uuid.New()
 
-	// 1. Create access + refresh tokens
-	access, _ := maker.CreateAccessToken(ctx, userID, "john", []string{"user"}, sessionID)
-	refresh, _ := maker.CreateRefreshToken(ctx, userID, "john", sessionID)
+ // 1. Create access + refresh tokens
+ access, _ := maker.CreateAccessToken(ctx, userID, "john", []string{"user"}, sessionID)
+ refresh, _ := maker.CreateRefreshToken(ctx, userID, "john", sessionID)
 
-	// 2. Verify access token
-	claims, err := maker.VerifyAccessToken(ctx, access.Token)
-	if err != nil {
-		log.Fatal("Access denied:", err)
-	}
-	fmt.Println("User roles:", claims.Roles)
+ // 2. Verify access token
+ claims, err := maker.VerifyAccessToken(ctx, access.Token)
+ if err != nil {
+  log.Fatal("Access denied:", err)
+ }
+ fmt.Println("User roles:", claims.Roles)
 
-	// 3. Rotate refresh token
-	newRefresh, err := maker.RotateRefreshToken(ctx, refresh.Token)
-	if err != nil {
-		log.Fatal("Rotation failed:", err)
-	}
+ // 3. Rotate refresh token
+ newRefresh, err := maker.RotateRefreshToken(ctx, refresh.Token)
+ if err != nil {
+  log.Fatal("Rotation failed:", err)
+ }
 
-	// 4. Revoke access on logout
-	_ = maker.RevokeAccessToken(ctx, access.Token)
+ // 4. Revoke access on logout
+ _ = maker.RevokeAccessToken(ctx, access.Token)
 }
 ```
 
