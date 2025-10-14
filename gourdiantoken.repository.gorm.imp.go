@@ -1,4 +1,4 @@
-// File: pkg/gourdiantoken/gourdiantoken.repository.gorm.imp.go
+// File: gourdiantoken.repository.gorm.imp.go
 
 package gourdiantoken
 

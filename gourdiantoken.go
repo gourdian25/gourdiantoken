@@ -1,4 +1,4 @@
-// File: pkg/gourdiantoken/gourdiantoken.go
+// File: gourdiantoken.go
 
 package gourdiantoken
 

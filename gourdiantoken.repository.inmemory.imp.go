@@ -1,4 +1,4 @@
-// File: pkg/gourdiantoken/gourdiantoken.repository.inmemory.imp.go
+// File: gourdiantoken.repository.inmemory.imp.go
 
 package gourdiantoken
 

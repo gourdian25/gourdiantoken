@@ -1,4 +1,4 @@
-// File: pkg/gourdiantoken/gourdiantoken.repository.redis.imp.go
+// File: gourdiantoken.repository.redis.imp.go
 
 package gourdiantoken
 
