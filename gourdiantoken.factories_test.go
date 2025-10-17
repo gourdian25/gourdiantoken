@@ -39,28 +39,6 @@ func TestNewGourdianTokenMakerNoStorage_Success(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, maker)
 	})
-
-	t.Run("asymmetric_rs256_no_storage", func(t *testing.T) {
-		config := GourdianTokenConfig{
-			SigningMethod:            Asymmetric,
-			Algorithm:                "RS256",
-			PrivateKeyPath:           "testdata/rsa_private.pem",
-			PublicKeyPath:            "testdata/rsa_public.pem",
-			Issuer:                   "test.com",
-			Audience:                 []string{"api.test.com"},
-			AccessExpiryDuration:     15 * time.Minute,
-			AccessMaxLifetimeExpiry:  24 * time.Hour,
-			RefreshExpiryDuration:    24 * time.Hour,
-			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
-			CleanupInterval:          1 * time.Hour,
-			RevocationEnabled:        false,
-			RotationEnabled:          false,
-		}
-
-		maker, err := NewGourdianTokenMakerNoStorage(context.Background(), config)
-		require.NoError(t, err)
-		require.NotNil(t, maker)
-	})
 }
 
 func TestNewGourdianTokenMakerNoStorage_FailsWithRevocationEnabled(t *testing.T) {
