@@ -8,6 +8,8 @@
 ├── cryptographic_test.go
 ├── docs.go
 ├── edge.case_test.go
+├── example
+│   └── example.go
 ├── go.mod
 ├── go.sum
 ├── goReleaser.txt
@@ -31,4 +33,4 @@
 ├── tree.txt
 └── version.go
 
-1 directory, 31 files
+2 directories, 32 files
