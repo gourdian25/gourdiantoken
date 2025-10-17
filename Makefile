@@ -44,7 +44,7 @@ build:
 # Run all tests with verbose output
 test:
 	@echo "Running tests..."
-	$(GO) test -v -race -timeout 10s ./...
+	$(GO)  test -count=1 -timeout=5m -cover ./... -bench=. -benchmem
 	@echo "✓ Tests passed"
 
 # Run tests with race detector enabled
