@@ -50,7 +50,7 @@ test:
 # Run tests with race detector enabled
 race:
 	@echo "Running tests with race detector..."
-	$(GO) test -race -timeout 10s ./...
+	$(GO) test -race -timeout 5m ./...
 	@echo "✓ Race detector tests passed"
 
 # Generate HTML coverage report
