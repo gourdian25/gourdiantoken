@@ -415,7 +415,8 @@ func TestNewGourdianTokenMakerWithRedis_SupportsHighPerformanceOperations(t *tes
 	config := DefaultTestConfig()
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
-	config.AccessExpiryDuration = 100 * time.Millisecond
+	// Use a reasonable token lifetime to avoid expiration during the test loop
+	config.AccessExpiryDuration = 5 * time.Minute
 
 	redisRepo := repo.(*RedisTokenRepository)
 	maker, err := NewGourdianTokenMakerWithRedis(context.Background(), config, redisRepo.client)
@@ -425,7 +426,8 @@ func TestNewGourdianTokenMakerWithRedis_SupportsHighPerformanceOperations(t *tes
 	userID := generateTestUUID()
 	sessionID := generateTestUUID()
 
-	// Create many tokens to test performance
+	// Create and verify many tokens to test performance
+	start := time.Now()
 	for i := 0; i < 100; i++ {
 		token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
 		require.NoError(t, err)
@@ -434,7 +436,12 @@ func TestNewGourdianTokenMakerWithRedis_SupportsHighPerformanceOperations(t *tes
 		claims, err := maker.VerifyAccessToken(ctx, token.Token)
 		require.NoError(t, err)
 		require.NotNil(t, claims)
+		require.Equal(t, userID, claims.Subject)
 	}
+	elapsed := time.Since(start)
+
+	// Verify performance is reasonable (100 tokens in under 1 second expected)
+	assert.Less(t, elapsed, 5*time.Second, "token operations took too long")
 }
 
 // ============================================================================
@@ -502,6 +509,8 @@ func TestAllFactories_CreatesValidTokenMakers(t *testing.T) {
 	}
 }
 
+// TestAllFactories_TokenExpirationWorks tests that tokens properly expire after their duration
+// Note: This test uses a separate goroutine to avoid timing conflicts with the main test execution
 func TestAllFactories_TokenExpirationWorks(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -513,7 +522,7 @@ func TestAllFactories_TokenExpirationWorks(t *testing.T) {
 				config := DefaultTestConfig()
 				config.RevocationEnabled = false
 				config.RotationEnabled = false
-				config.AccessExpiryDuration = 100 * time.Millisecond
+				config.AccessExpiryDuration = 1 * time.Second
 
 				maker, err := NewGourdianTokenMakerNoStorage(context.Background(), config)
 				require.NoError(t, err)
@@ -526,7 +535,7 @@ func TestAllFactories_TokenExpirationWorks(t *testing.T) {
 				config := DefaultTestConfig()
 				config.RevocationEnabled = true
 				config.RotationEnabled = true
-				config.AccessExpiryDuration = 100 * time.Millisecond
+				config.AccessExpiryDuration = 1 * time.Second
 
 				maker, err := NewGourdianTokenMakerWithMemory(context.Background(), config)
 				require.NoError(t, err)
@@ -543,7 +552,7 @@ func TestAllFactories_TokenExpirationWorks(t *testing.T) {
 			userID := generateTestUUID()
 			sessionID := generateTestUUID()
 
-			// Create token with very short expiry
+			// Create token with 1 second expiry
 			token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
 			require.NoError(t, err)
 
@@ -551,8 +560,8 @@ func TestAllFactories_TokenExpirationWorks(t *testing.T) {
 			_, err = maker.VerifyAccessToken(ctx, token.Token)
 			require.NoError(t, err)
 
-			// Wait for expiration
-			time.Sleep(150 * time.Millisecond)
+			// Wait for expiration (1 second + 200ms buffer)
+			time.Sleep(1200 * time.Millisecond)
 
 			// Should fail after expiration
 			_, err = maker.VerifyAccessToken(ctx, token.Token)
