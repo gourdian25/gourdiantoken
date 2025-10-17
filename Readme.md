@@ -546,18 +546,18 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 **Standard Claims:**
 ```json
 {
-  "jti": "123e4567-e89b-12d3-a456-426614174000",  // Token ID (UUIDv4)
-  "sub": "123e4567-e89b-12d3-a456-426614174000",  // User ID (UUIDv4)
-  "usr": "john.doe@example.com",                  // Username
-  "sid": "123e4567-e89b-12d3-a456-426614174000",  // Session ID (UUIDv4)
-  "iss": "auth.example.com",                      // Issuer
-  "aud": ["api.example.com"],                     // Audience
-  "iat": 1609459200,                              // Issued At
-  "exp": 1609460000,                              // Expires At
-  "nbf": 1609459200,                              // Not Before
-  "mle": 1609545600,                              // Max Lifetime Expiry
-  "typ": "access",                                // Token Type
-  "rls": ["user", "admin"]                        // Roles (required)
+  "jti": "123e4567-e89b-12d3-a456-426614174000",
+  "sub": "123e4567-e89b-12d3-a456-426614174000",
+  "usr": "john.doe@example.com",
+  "sid": "123e4567-e89b-12d3-a456-426614174000",
+  "iss": "auth.example.com",
+  "aud": ["api.example.com"],
+  "iat": 1609459200,
+  "exp": 1609460000,
+  "nbf": 1609459200,
+  "mle": 1609545600,
+  "typ": "access",
+  "rls": ["user", "admin"]
 }
 ```
 
@@ -630,7 +630,7 @@ err := maker.RevokeRefreshToken(ctx, refreshTokenString)
 ```
 
 **How It Works:**
-- Token hash stored in Redis with TTL matching remaining lifetime
+- Token hash stored in storage backend with TTL matching remaining lifetime
 - Verification checks revocation status before accepting token
 - Automatic cleanup removes expired revocations
 
@@ -875,3 +875,563 @@ func init() {
 
 // Login handler
 func loginHandler(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    // Authenticate user (your logic here)
+    userID := uuid.New()
+    username := "john.doe@example.com"
+    roles := []string{"user", "admin"}
+    sessionID := uuid.New()
+    
+    // Create token pair
+    accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+    if err != nil {
+        http.Error(w, "Failed to create access token", http.StatusInternalServerError)
+        return
+    }
+    
+    refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+    if err != nil {
+        http.Error(w, "Failed to create refresh token", http.StatusInternalServerError)
+        return
+    }
+    
+    // Set refresh token as HttpOnly cookie
+    http.SetCookie(w, &http.Cookie{
+        Name:     "refresh_token",
+        Value:    refreshToken.Token,
+        Path:     "/",
+        HttpOnly: true,
+        Secure:   true,
+        SameSite: http.SameSiteStrictMode,
+        Expires:  refreshToken.ExpiresAt,
+    })
+    
+    // Return access token in response
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "access_token": accessToken.Token,
+        "expires_at":   accessToken.ExpiresAt,
+        "token_type":   "Bearer",
+    })
+}
+
+// Auth middleware
+func authMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, "Missing authorization header", http.StatusUnauthorized)
+            return
+        }
+        
+        tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+        if tokenString == authHeader {
+            http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
+            return
+        }
+        
+        claims, err := maker.VerifyAccessToken(r.Context(), tokenString)
+        if err != nil {
+            http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+            return
+        }
+        
+        ctx := context.WithValue(r.Context(), "claims", claims)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+
+// Refresh token handler
+func refreshHandler(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    cookie, err := r.Cookie("refresh_token")
+    if err != nil {
+        http.Error(w, "Missing refresh token", http.StatusUnauthorized)
+        return
+    }
+    
+    newRefreshToken, err := maker.RotateRefreshToken(ctx, cookie.Value)
+    if err != nil {
+        if strings.Contains(err.Error(), "rotated") {
+            log.Printf("Token reuse detected from IP: %s", r.RemoteAddr)
+            http.Error(w, "Security violation detected", http.StatusForbidden)
+            return
+        }
+        http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
+        return
+    }
+    
+    claims, err := maker.VerifyRefreshToken(ctx, newRefreshToken.Token)
+    if err != nil {
+        http.Error(w, "Failed to verify new token", http.StatusInternalServerError)
+        return
+    }
+    
+    roles := []string{"user"} // Load from database
+    
+    newAccessToken, err := maker.CreateAccessToken(
+        ctx, claims.Subject, claims.Username, roles, claims.SessionID,
+    )
+    if err != nil {
+        http.Error(w, "Failed to create access token", http.StatusInternalServerError)
+        return
+    }
+    
+    http.SetCookie(w, &http.Cookie{
+        Name:     "refresh_token",
+        Value:    newRefreshToken.Token,
+        Path:     "/",
+        HttpOnly: true,
+        Secure:   true,
+        SameSite: http.SameSiteStrictMode,
+        Expires:  newRefreshToken.ExpiresAt,
+    })
+    
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "access_token": newAccessToken.Token,
+        "expires_at":   newAccessToken.ExpiresAt,
+        "token_type":   "Bearer",
+    })
+}
+
+// Logout handler
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+    
+    authHeader := r.Header.Get("Authorization")
+    accessToken := strings.TrimPrefix(authHeader, "Bearer ")
+    
+    cookie, err := r.Cookie("refresh_token")
+    if err == nil {
+        maker.RevokeRefreshToken(ctx, cookie.Value)
+    }
+    
+    if accessToken != "" {
+        maker.RevokeAccessToken(ctx, accessToken)
+    }
+    
+    http.SetCookie(w, &http.Cookie{
+        Name:     "refresh_token",
+        Value:    "",
+        Path:     "/",
+        HttpOnly: true,
+        Secure:   true,
+        MaxAge:   -1,
+    })
+    
+    w.WriteHeader(http.StatusOK)
+}
+
+func main() {
+    http.HandleFunc("/login", loginHandler)
+    http.HandleFunc("/refresh", refreshHandler)
+    http.HandleFunc("/logout", logoutHandler)
+    
+    http.Handle("/api/protected", authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        claims := r.Context().Value("claims").(*gourdiantoken.AccessTokenClaims)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "message": "Access granted",
+            "user":    claims.Username,
+            "roles":   claims.Roles,
+        })
+    })))
+    
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}
+```
+
+### Role-Based Access Control (RBAC)
+
+```go
+func requireRole(requiredRole string) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            claims := r.Context().Value("claims").(*gourdiantoken.AccessTokenClaims)
+            
+            hasRole := false
+            for _, role := range claims.Roles {
+                if role == requiredRole {
+                    hasRole = true
+                    break
+                }
+            }
+            
+            if !hasRole {
+                http.Error(w, "Insufficient permissions", http.StatusForbidden)
+                return
+            }
+            
+            next.ServeHTTP(w, r)
+        })
+    }
+}
+
+// Usage
+http.Handle("/admin", 
+    authMiddleware(
+        requireRole("admin")(
+            http.HandlerFunc(adminHandler),
+        ),
+    ),
+)
+```
+
+### Asymmetric Key Setup
+
+```go
+func setupAsymmetric() (gourdiantoken.GourdianTokenMaker, error) {
+    config := gourdiantoken.NewGourdianTokenConfig(
+        gourdiantoken.Asymmetric,
+        true, true,
+        []string{"api.example.com"},
+        []string{"RS256", "ES256"},
+        []string{"iss", "aud", "nbf", "mle"},
+        "RS256",
+        "",
+        "/secure/keys/private.pem",
+        "/secure/keys/public.pem",
+        "auth.example.com",
+        15*time.Minute, 24*time.Hour,
+        7*24*time.Hour, 30*24*time.Hour,
+        5*time.Minute, 6*time.Hour,
+    )
+    
+    ctx := context.Background()
+    return gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
+}
+```
+
+---
+
+## ⚡ Performance
+
+### Benchmark Results
+
+Benchmarks run on Intel i5-9300H @ 2.40GHz, Go 1.21:
+
+#### Token Creation
+
+| Algorithm | Operations/sec | Time/op | Memory/op | Allocs/op |
+|-----------|----------------|---------|-----------|-----------|
+| **HS256** | 159,226 | 7.4µs | 4.7 KB | 58 |
+| **HS384** | 138,393 | 7.8µs | 5.1 KB | 58 |
+| **HS512** | 147,939 | 7.7µs | 5.2 KB | 58 |
+| **RS256** | 987 | 1.26ms | 5.8 KB | 56 |
+| **RS512** | 970 | 1.32ms | 5.8 KB | 56 |
+| **ES256** | 28,281 | 47.8µs | 11.1 KB | 126 |
+| **ES384** | 4,261 | 256µs | 11.6 KB | 130 |
+
+#### Token Verification
+
+| Algorithm | Operations/sec | Time/op | Memory/op | Allocs/op |
+|-----------|----------------|---------|-----------|-----------|
+| **HS256** | 136,762 | 8.9µs | 3.9 KB | 75 |
+| **RS256** | 28,353 | 46.1µs | 5.2 KB | 80 |
+| **RS4096** | 3,459 | 381µs | 66.6 KB | 172 |
+| **ES256** | 13,358 | 80.0µs | 4.8 KB | 95 |
+| **ES384** | 1,712 | 705µs | 5.3 KB | 102 |
+
+#### Redis Operations
+
+| Operation | Operations/sec | Time/op | Memory/op |
+|-----------|----------------|---------|-----------|
+| **Token Rotation** | 1,724 | 683µs | 8.9 KB |
+| **Token Revocation** | 4,998 | 249µs | 4.2 KB |
+
+#### Concurrent Performance
+
+| Operation | Goroutines | Ops/sec | Time/op |
+|-----------|------------|---------|---------|
+| **Create Access (Parallel)** | 8 | 206,032 | 5.6µs |
+| **Verify Access (Parallel)** | 8 | 229,293 | 4.7µs |
+
+### Performance Tips
+
+1. **Algorithm Selection**
+   - Use **HS256** for development
+   - Use **ES256** for production balance
+   - Use **RS256** for legacy compatibility
+   - Avoid **RS4096** unless required
+
+2. **Redis Optimization**
+   ```go
+   redisClient := redis.NewClient(&redis.Options{
+       Addr:         "localhost:6379",
+       PoolSize:     100,
+       MinIdleConns: 10,
+       MaxRetries:   3,
+   })
+   ```
+
+3. **Connection Pooling (SQL)**
+   ```go
+   sqlDB, _ := db.DB()
+   sqlDB.SetMaxOpenConns(100)
+   sqlDB.SetMaxIdleConns(10)
+   sqlDB.SetConnMaxLifetime(time.Hour)
+   ```
+
+---
+
+## ✅ Best Practices
+
+### Key Management
+
+#### ✅ DO
+
+- Store keys in secret managers (AWS Secrets Manager, Vault)
+- Use environment variables, never hardcode
+- Rotate keys every 90 days
+- Use minimum 32 bytes for HMAC
+- Set file permissions to 0600 for private keys
+
+#### ❌ DON'T
+
+- Commit keys to version control
+- Use weak keys (< 32 bytes)
+- Share keys across environments
+- Store keys in plaintext
+
+### Token Lifetime Configuration
+
+| Environment | Access Token | Refresh Token |
+|-------------|--------------|---------------|
+| **Development** | 1 hour | 30 days |
+| **Staging** | 30 minutes | 7 days |
+| **Production** | 15 minutes | 7 days |
+| **High Security** | 5 minutes | 24 hours |
+
+### Runtime Security
+
+```go
+// HTTPS Enforcement
+server := &http.Server{
+    Addr:      ":443",
+    TLSConfig: tlsConfig,
+}
+server.ListenAndServeTLS("cert.pem", "key.pem")
+
+// Secure Cookies
+http.SetCookie(w, &http.Cookie{
+    Name:     "refresh_token",
+    Value:    token,
+    HttpOnly: true,
+    Secure:   true,
+    SameSite: http.SameSiteStrictMode,
+})
+```
+
+---
+
+## 📚 Examples
+
+### Simple REST API
+
+```go
+package main
+
+import (
+    "context"
+    "encoding/json"
+    "log"
+    "net/http"
+    "strings"
+
+    "github.com/gourdian25/gourdiantoken"
+    "github.com/google/uuid"
+)
+
+var maker gourdiantoken.GourdianTokenMaker
+
+func init() {
+    ctx := context.Background()
+    config := gourdiantoken.DefaultGourdianTokenConfig("my-secret-key-32-bytes-minimum")
+    var err error
+    maker, err = gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+
+func main() {
+    http.HandleFunc("/login", login)
+    http.HandleFunc("/protected", authMiddleware(protected))
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func login(w http.ResponseWriter, r *http.Request) {
+    token, _ := maker.CreateAccessToken(
+        r.Context(), uuid.New(), "user@example.com", []string{"user"}, uuid.New(),
+    )
+    json.NewEncoder(w).Encode(token)
+}
+
+func protected(w http.ResponseWriter, r *http.Request) {
+    claims := r.Context().Value("claims").(*gourdiantoken.AccessTokenClaims)
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "message": "Protected resource",
+        "user":    claims.Username,
+        "roles":   claims.Roles,
+    })
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+        claims, err := maker.VerifyAccessToken(r.Context(), token)
+        if err != nil {
+            http.Error(w, "Unauthorized", http.StatusUnauthorized)
+            return
+        }
+        ctx := context.WithValue(r.Context(), "claims", claims)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    }
+}
+```
+
+---
+
+## 🧪 Testing
+
+### Running Tests
+
+```bash
+# Run all tests
+go test ./...
+
+# Run with coverage
+go test -cover ./...
+
+# Generate HTML coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+```
+
+### Unit Test Example
+
+```go
+func TestTokenCreation(t *testing.T) {
+    ctx := context.Background()
+    config := gourdiantoken.DefaultGourdianTokenConfig("test-secret-key-32-bytes-long")
+    maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
+    
+    userID := uuid.New()
+    token, err := maker.CreateAccessToken(ctx, userID, "test", []string{"user"}, uuid.New())
+    
+    require.NoError(t, err)
+    assert.NotEmpty(t, token.Token)
+    assert.Equal(t, userID, token.Subject)
+}
+
+func TestTokenExpiration(t *testing.T) {
+    ctx := context.Background()
+    config := gourdiantoken.DefaultGourdianTokenConfig("test-key")
+    config.AccessExpiryDuration = 1 * time.Second
+    maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
+    
+    token, _ := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"user"}, uuid.New())
+    time.Sleep(2 * time.Second)
+    
+    _, err := maker.VerifyAccessToken(ctx, token.Token)
+    assert.Error(t, err)
+    assert.Contains(t, err.Error(), "expired")
+}
+
+func TestTokenRotation(t *testing.T) {
+    ctx := context.Background()
+    config := gourdiantoken.DefaultGourdianTokenConfig("test-key-32-bytes")
+    config.RotationEnabled = true
+    maker, _ := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
+    
+    refresh, _ := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+    newToken, err := maker.RotateRefreshToken(ctx, refresh.Token)
+    
+    require.NoError(t, err)
+    assert.NotEqual(t, refresh.Token, newToken.Token)
+    
+    _, err = maker.VerifyRefreshToken(ctx, refresh.Token)
+    assert.Error(t, err)
+}
+```
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Here's how:
+
+1. Fork the repository
+2. Create feature branch: `git checkout -b feature/amazing-feature`
+3. Make changes and write tests
+4. Run tests: `go test ./...`
+5. Format code: `go fmt ./...`
+6. Commit: `git commit -m "feat: add amazing feature"`
+7. Push and open Pull Request
+
+### Guidelines
+
+- Follow Go conventions
+- Maintain test coverage
+- Update documentation
+- Use conventional commits
+
+---
+
+## 📄 License
+
+MIT License - see [LICENSE](./LICENSE) file
+
+---
+
+## 🙏 Acknowledgments
+
+- [golang-jwt/jwt](https://github.com/golang-jwt/jwt) - JWT implementation
+- [google/uuid](https://github.com/google/uuid) - UUID support
+- [redis/go-redis](https://github.com/redis/go-redis) - Redis client
+- [gorm.io/gorm](https://github.com/go-gorm/gorm) - ORM framework
+- [mongodb/mongo-go-driver](https://github.com/mongodb/mongo-go-driver) - MongoDB driver
+
+---
+
+## 👥 Maintainers
+
+- [@gourdian25](https://github.com/gourdian25) - Creator & Lead
+- [@lordofthemind](https://github.com/lordofthemind) - Performance & Security
+
+---
+
+## 🔒 Security
+
+Report vulnerabilities privately via email. DO NOT open public issues for security concerns.
+
+### Security Features
+
+- ✅ Cryptographically secure generation
+- ✅ Algorithm confusion prevention
+- ✅ Replay attack detection
+- ✅ Automatic cleanup
+- ✅ Secure defaults
+
+---
+
+## 📚 Resources
+
+- [GoDoc](https://pkg.go.dev/github.com/gourdian25/gourdiantoken) - Full API docs
+- [RFC 7519](https://tools.ietf.org/html/rfc7519) - JWT Standard
+- [RFC 7515](https://tools.ietf.org/html/rfc7515) - JWS Standard
+- [RFC 7518](https://tools.ietf.org/html/rfc7518) - JWA Standard
+
+---
+
+<div align="center">
+
+**Made with ❤️ by the gourdiantoken team**
+
+[Documentation](https://pkg.go.dev/github.com/gourdian25/gourdiantoken) • 
+[Issues](https://github.com/gourdian25/gourdiantoken/issues) • 
+[Discussions](https://github.com/gourdian25/gourdiantoken/discussions)
+
+⭐ Star us on GitHub if you find this useful!
+
+</div>
