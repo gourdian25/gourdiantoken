@@ -1077,6 +1077,364 @@ http.Handle("/admin",
 )
 ```
 
+### Gin Framework Middleware
+
+For projects using [Gin](https://github.com/gin-gonic/gin), here are production-ready middleware implementations:
+
+#### Access Token Middleware
+
+```go
+package middleware
+
+import (
+    "context"
+    "errors"
+    "net/http"
+    "strings"
+
+    "github.com/gin-gonic/gin"
+    "github.com/gourdian25/gourdiantoken"
+)
+
+// AccessTokenMiddleware verifies JWT access tokens
+func AccessTokenMiddleware(tokenMaker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        var tokenString string
+
+        // Try cookie first (more secure for web apps)
+        cookieToken, err := c.Cookie("access_token")
+        if err == nil && cookieToken != "" {
+            tokenString = cookieToken
+        } else {
+            // Fallback to Authorization header
+            authHeader := c.GetHeader("Authorization")
+            if authHeader == "" {
+                c.JSON(http.StatusUnauthorized, gin.H{
+                    "error": "Access token is required",
+                })
+                c.Abort()
+                return
+            }
+            tokenString = authHeader
+        }
+
+        // Handle URL encoding
+        tokenString = strings.Replace(tokenString, "%2B", " ", 1)
+
+        // Remove Bearer prefix
+        if strings.HasPrefix(tokenString, "Bearer ") {
+            tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+        } else {
+            c.JSON(http.StatusUnauthorized, gin.H{
+                "error": "Invalid token format - must use Bearer scheme",
+            })
+            c.Abort()
+            return
+        }
+
+        // Verify token
+        claims, err := tokenMaker.VerifyAccessToken(c.Request.Context(), tokenString)
+        if err != nil {
+            var message string
+            switch {
+            case strings.Contains(err.Error(), "expired"):
+                message = "Token has expired"
+            case strings.Contains(err.Error(), "revoked"):
+                message = "Token has been revoked"
+            case strings.Contains(err.Error(), "rotated"):
+                message = "Token has been rotated"
+            default:
+                message = "Invalid token"
+            }
+
+            c.JSON(http.StatusUnauthorized, gin.H{"error": message})
+            c.Abort()
+            return
+        }
+
+        // Store claims in context
+        c.Set("user_id", claims.Subject.String())
+        c.Set("username", claims.Username)
+        c.Set("roles", claims.Roles)
+        c.Set("session_id", claims.SessionID.String())
+
+        c.Next()
+    }
+}
+
+// RefreshTokenMiddleware verifies JWT refresh tokens
+func RefreshTokenMiddleware(tokenMaker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        var tokenString string
+
+        // Try cookie first
+        cookieToken, err := c.Cookie("refresh_token")
+        if err == nil && cookieToken != "" {
+            tokenString = cookieToken
+        } else {
+            // Fallback to X-Refresh-Token header
+            refreshHeader := c.GetHeader("X-Refresh-Token")
+            if refreshHeader == "" {
+                c.JSON(http.StatusUnauthorized, gin.H{
+                    "error": "Refresh token is required",
+                })
+                c.Abort()
+                return
+            }
+            tokenString = refreshHeader
+        }
+
+        // Handle URL encoding
+        tokenString = strings.Replace(tokenString, "%2B", " ", 1)
+
+        // Remove Bearer prefix
+        if strings.HasPrefix(tokenString, "Bearer ") {
+            tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+        }
+
+        // Verify token
+        claims, err := tokenMaker.VerifyRefreshToken(c.Request.Context(), tokenString)
+        if err != nil {
+            var message string
+            switch {
+            case strings.Contains(err.Error(), "expired"):
+                message = "Refresh token has expired"
+            case strings.Contains(err.Error(), "revoked"):
+                message = "Refresh token has been revoked"
+            case strings.Contains(err.Error(), "rotated"):
+                message = "Refresh token has already been used"
+            default:
+                message = "Invalid refresh token"
+            }
+
+            c.JSON(http.StatusUnauthorized, gin.H{"error": message})
+            c.Abort()
+            return
+        }
+
+        // Store claims in context
+        c.Set("user_id", claims.Subject.String())
+        c.Set("username", claims.Username)
+        c.Set("session_id", claims.SessionID.String())
+        c.Set("refresh_token", tokenString)
+
+        c.Next()
+    }
+}
+
+// RequireRoles checks if user has any of the required roles
+func RequireRoles(requiredRoles ...string) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        // Get roles from context (set by AccessTokenMiddleware)
+        rolesValue, exists := c.Get("roles")
+        if !exists {
+            c.JSON(http.StatusForbidden, gin.H{
+                "error": "Authentication required",
+            })
+            c.Abort()
+            return
+        }
+
+        roles, ok := rolesValue.([]string)
+        if !ok {
+            c.JSON(http.StatusForbidden, gin.H{
+                "error": "Invalid authentication data",
+            })
+            c.Abort()
+            return
+        }
+
+        // Check if user has any required role
+        if len(requiredRoles) == 0 {
+            // No specific roles required, just authenticated
+            c.Next()
+            return
+        }
+
+        hasRole := false
+        for _, userRole := range roles {
+            for _, requiredRole := range requiredRoles {
+                if userRole == requiredRole {
+                    hasRole = true
+                    break
+                }
+            }
+            if hasRole {
+                break
+            }
+        }
+
+        if !hasRole {
+            c.JSON(http.StatusForbidden, gin.H{
+                "error":          "Insufficient permissions",
+                "required_roles": requiredRoles,
+            })
+            c.Abort()
+            return
+        }
+
+        c.Next()
+    }
+}
+```
+
+#### Usage with Gin
+
+```go
+package main
+
+import (
+    "context"
+    "time"
+
+    "github.com/gin-gonic/gin"
+    "github.com/gourdian25/gourdiantoken"
+    "github.com/redis/go-redis/v9"
+)
+
+func main() {
+    // Setup token maker
+    ctx := context.Background()
+    redisClient := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+    config := gourdiantoken.DefaultGourdianTokenConfig("secret-key-32-bytes")
+    config.RevocationEnabled = true
+    config.RotationEnabled = true
+    
+    maker, _ := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisClient)
+
+    // Setup Gin router
+    r := gin.Default()
+
+    // Public routes
+    r.POST("/login", loginHandler(maker))
+    r.POST("/register", registerHandler(maker))
+
+    // Protected routes (require authentication)
+    protected := r.Group("/api")
+    protected.Use(AccessTokenMiddleware(maker))
+    {
+        protected.GET("/profile", profileHandler)
+        protected.POST("/logout", logoutHandler(maker))
+    }
+
+    // Admin routes (require admin role)
+    admin := r.Group("/admin")
+    admin.Use(AccessTokenMiddleware(maker))
+    admin.Use(RequireRoles("admin"))
+    {
+        admin.GET("/users", listUsersHandler)
+        admin.DELETE("/users/:id", deleteUserHandler)
+    }
+
+    // Moderator or admin routes
+    moderation := r.Group("/moderate")
+    moderation.Use(AccessTokenMiddleware(maker))
+    moderation.Use(RequireRoles("admin", "moderator"))
+    {
+        moderation.POST("/content/:id/approve", approveContentHandler)
+    }
+
+    // Token refresh endpoint
+    r.POST("/refresh", RefreshTokenMiddleware(maker), refreshTokenHandler(maker))
+
+    r.Run(":8080")
+}
+
+func loginHandler(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        // Your login logic here
+        // Then create tokens:
+        userID := uuid.New()
+        sessionID := uuid.New()
+        
+        accessToken, _ := maker.CreateAccessToken(c, userID, "user@example.com", []string{"user"}, sessionID)
+        refreshToken, _ := maker.CreateRefreshToken(c, userID, "user@example.com", sessionID)
+        
+        // Set secure cookies
+        c.SetCookie("access_token", "Bearer "+accessToken.Token, 
+            int(time.Hour.Seconds()), "/", "", true, true)
+        c.SetCookie("refresh_token", "Bearer "+refreshToken.Token,
+            int(7*24*time.Hour.Seconds()), "/", "", true, true)
+        
+        c.JSON(http.StatusOK, gin.H{
+            "access_token": accessToken.Token,
+            "expires_at":   accessToken.ExpiresAt,
+        })
+    }
+}
+
+func profileHandler(c *gin.Context) {
+    userID, _ := c.Get("user_id")
+    username, _ := c.Get("username")
+    roles, _ := c.Get("roles")
+    
+    c.JSON(http.StatusOK, gin.H{
+        "user_id":  userID,
+        "username": username,
+        "roles":    roles,
+    })
+}
+
+func logoutHandler(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        // Get tokens from cookies
+        accessToken, _ := c.Cookie("access_token")
+        refreshToken, _ := c.Cookie("refresh_token")
+        
+        // Revoke both tokens
+        if accessToken != "" {
+            maker.RevokeAccessToken(c, strings.TrimPrefix(accessToken, "Bearer "))
+        }
+        if refreshToken != "" {
+            maker.RevokeRefreshToken(c, strings.TrimPrefix(refreshToken, "Bearer "))
+        }
+        
+        // Clear cookies
+        c.SetCookie("access_token", "", -1, "/", "", true, true)
+        c.SetCookie("refresh_token", "", -1, "/", "", true, true)
+        
+        c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+    }
+}
+
+func refreshTokenHandler(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
+    return func(c *gin.Context) {
+        oldToken, _ := c.Get("refresh_token")
+        
+        // Rotate refresh token
+        newRefreshToken, err := maker.RotateRefreshToken(c, oldToken.(string))
+        if err != nil {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Failed to refresh token"})
+            return
+        }
+        
+        // Get user info to create new access token
+        userID, _ := c.Get("user_id")
+        username, _ := c.Get("username")
+        sessionID, _ := c.Get("session_id")
+        
+        // Load roles from database (not in refresh token)
+        roles := []string{"user"} // Your logic here
+        
+        userUUID, _ := uuid.Parse(userID.(string))
+        sessionUUID, _ := uuid.Parse(sessionID.(string))
+        
+        newAccessToken, _ := maker.CreateAccessToken(c, userUUID, username.(string), roles, sessionUUID)
+        
+        // Update cookies
+        c.SetCookie("access_token", "Bearer "+newAccessToken.Token,
+            int(time.Hour.Seconds()), "/", "", true, true)
+        c.SetCookie("refresh_token", "Bearer "+newRefreshToken.Token,
+            int(7*24*time.Hour.Seconds()), "/", "", true, true)
+        
+        c.JSON(http.StatusOK, gin.H{
+            "access_token": newAccessToken.Token,
+            "expires_at":   newAccessToken.ExpiresAt,
+        })
+    }
+}
+```
+
 ### Asymmetric Key Setup
 
 ```go
@@ -1226,7 +1584,7 @@ http.SetCookie(w, &http.Cookie{
 
 ## 📚 Examples
 
-### Simple REST API
+### Example 1: Standard Library HTTP Server
 
 ```go
 package main
@@ -1287,6 +1645,141 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
         ctx := context.WithValue(r.Context(), "claims", claims)
         next.ServeHTTP(w, r.WithContext(ctx))
     }
+}
+```
+
+### Example 2: Microservices Architecture
+
+```go
+// Service A: Authentication Service (Creates tokens)
+package main
+
+import (
+    "context"
+    "github.com/gourdian25/gourdiantoken"
+    "github.com/redis/go-redis/v9"
+)
+
+func setupAuthService() gourdiantoken.GourdianTokenMaker {
+    ctx := context.Background()
+    redisClient := redis.NewClient(&redis.Options{Addr: "redis:6379"})
+    
+    config := gourdiantoken.DefaultGourdianTokenConfig("shared-secret-key")
+    config.Issuer = "auth.myapp.com"
+    config.Audience = []string{"api.myapp.com", "admin.myapp.com"}
+    config.RevocationEnabled = true
+    config.RotationEnabled = true
+    
+    maker, _ := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisClient)
+    return maker
+}
+
+// Service B: API Service (Only validates tokens)
+package main
+
+import (
+    "context"
+    "github.com/gourdian25/gourdiantoken"
+    "github.com/redis/go-redis/v9"
+)
+
+func setupAPIService() gourdiantoken.GourdianTokenMaker {
+    ctx := context.Background()
+    redisClient := redis.NewClient(&redis.Options{Addr: "redis:6379"})
+    
+    config := gourdiantoken.DefaultGourdianTokenConfig("shared-secret-key")
+    config.Issuer = "auth.myapp.com"
+    config.Audience = []string{"api.myapp.com"}
+    config.RevocationEnabled = true
+    
+    maker, _ := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisClient)
+    return maker
+}
+```
+
+### Example 3: Session Management System
+
+```go
+package main
+
+import (
+    "context"
+    "time"
+
+    "github.com/gourdian25/gourdiantoken"
+    "github.com/google/uuid"
+)
+
+type SessionManager struct {
+    maker gourdiantoken.GourdianTokenMaker
+}
+
+func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, username string, roles []string) (*Session, error) {
+    sessionID := uuid.New()
+    
+    accessToken, err := sm.maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+    if err != nil {
+        return nil, err
+    }
+    
+    refreshToken, err := sm.maker.CreateRefreshToken(ctx, userID, username, sessionID)
+    if err != nil {
+        return nil, err
+    }
+    
+    return &Session{
+        SessionID:    sessionID,
+        UserID:       userID,
+        AccessToken:  accessToken.Token,
+        RefreshToken: refreshToken.Token,
+        ExpiresAt:    refreshToken.ExpiresAt,
+        CreatedAt:    time.Now(),
+    }, nil
+}
+
+func (sm *SessionManager) RefreshSession(ctx context.Context, refreshTokenString string) (*Session, error) {
+    newRefreshToken, err := sm.maker.RotateRefreshToken(ctx, refreshTokenString)
+    if err != nil {
+        return nil, err
+    }
+    
+    claims, err := sm.maker.VerifyRefreshToken(ctx, newRefreshToken.Token)
+    if err != nil {
+        return nil, err
+    }
+    
+    roles := []string{"user"} // Load from database
+    
+    accessToken, err := sm.maker.CreateAccessToken(
+        ctx, claims.Subject, claims.Username, roles, claims.SessionID,
+    )
+    if err != nil {
+        return nil, err
+    }
+    
+    return &Session{
+        SessionID:    claims.SessionID,
+        UserID:       claims.Subject,
+        AccessToken:  accessToken.Token,
+        RefreshToken: newRefreshToken.Token,
+        ExpiresAt:    newRefreshToken.ExpiresAt,
+        CreatedAt:    time.Now(),
+    }, nil
+}
+
+func (sm *SessionManager) EndSession(ctx context.Context, accessToken, refreshToken string) error {
+    sm.maker.RevokeAccessToken(ctx, accessToken)
+    sm.maker.RevokeRefreshToken(ctx, refreshToken)
+    return nil
+}
+
+type Session struct {
+    SessionID    uuid.UUID
+    UserID       uuid.UUID
+    AccessToken  string
+    RefreshToken string
+    ExpiresAt    time.Time
+    CreatedAt    time.Time
 }
 ```
 
