@@ -1,6 +1,5 @@
 // File: concurrency_test.go
 
-
 package gourdiantoken
 
 import (

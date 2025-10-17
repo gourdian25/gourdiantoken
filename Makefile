@@ -72,7 +72,7 @@ coverage-summary:
 # Check coverage meets minimum threshold
 coverage-check:
 	@echo "Checking coverage meets $(COVERAGE_MIN)% threshold..."
-	@$(GO) test -coverprofile=coverage.out ./...
+	@$(GO) test -coverprofile=coverage.out .
 	@COVERAGE=$$($(GO) tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
 	if [ "$${COVERAGE%.*}" -lt $(COVERAGE_MIN) ]; then \
 		echo "✗ Coverage $${COVERAGE} is below $(COVERAGE_MIN)% threshold"; \

@@ -1,6 +1,5 @@
 // File: gourdiantoken.repository.redis.imp.go
 
-
 package gourdiantoken
 
 import (

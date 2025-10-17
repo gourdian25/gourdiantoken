@@ -1,6 +1,5 @@
 // File: token.rotate_test.go
 
-
 package gourdiantoken
 
 import (

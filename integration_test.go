@@ -1,6 +1,5 @@
 // File: integration_test.go
 
-
 package gourdiantoken
 
 import (

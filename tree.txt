@@ -13,6 +13,7 @@
 ├── go.sum
 ├── gourdiantoken.benchmark_test.go
 ├── gourdiantoken.factories.go
+├── gourdiantoken.factories_test.go
 ├── gourdiantoken.go
 ├── gourdiantoken.repository.gorm.imp.go
 ├── gourdiantoken.repository.inmemory.imp.go
@@ -31,4 +32,4 @@
 ├── tree.txt
 └── version.go
 
-2 directories, 30 files
+2 directories, 31 files

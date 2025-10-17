@@ -1,6 +1,5 @@
 // File: gourdiantoken.factories.go
 
-
 package gourdiantoken
 
 import (

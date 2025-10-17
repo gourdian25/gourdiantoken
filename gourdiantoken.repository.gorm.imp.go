@@ -1,6 +1,5 @@
 // File: gourdiantoken.repository.gorm.imp.go
 
-
 package gourdiantoken
 
 import (

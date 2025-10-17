@@ -1,6 +1,5 @@
 // File: cryptographic_test.go
 
-
 package gourdiantoken
 
 import (

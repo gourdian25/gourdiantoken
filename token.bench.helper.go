@@ -1,6 +1,5 @@
 // File: token.bench.helper.go
 
-
 package gourdiantoken
 
 import (

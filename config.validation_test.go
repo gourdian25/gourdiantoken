@@ -1,6 +1,5 @@
 // File: config.validation_test.go
 
-
 package gourdiantoken
 
 import (

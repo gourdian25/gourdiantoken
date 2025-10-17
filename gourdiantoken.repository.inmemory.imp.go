@@ -1,6 +1,5 @@
 // File: gourdiantoken.repository.inmemory.imp.go
 
-
 package gourdiantoken
 
 import (

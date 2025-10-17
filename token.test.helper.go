@@ -1,6 +1,5 @@
 // File: token.test.helper.go
 
-
 package gourdiantoken
 
 import (

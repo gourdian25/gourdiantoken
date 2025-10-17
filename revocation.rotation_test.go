@@ -1,6 +1,5 @@
 // File: revocation.rotation_test.go
 
-
 package gourdiantoken
 
 import (

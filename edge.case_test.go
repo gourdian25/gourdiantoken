@@ -1,6 +1,5 @@
 // File: edge.case_test.go
 
-
 package gourdiantoken
 
 import (

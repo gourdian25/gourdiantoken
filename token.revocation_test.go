@@ -1,6 +1,5 @@
 // File: token.revocation_test.go
 
-
 package gourdiantoken
 
 import (

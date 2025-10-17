@@ -1,6 +1,5 @@
 // File: gourdiantoken.benchmark_test.go
 
-
 package gourdiantoken
 
 import (

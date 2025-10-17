@@ -1,6 +1,5 @@
 // File: token.creation_test.go
 
-
 package gourdiantoken
 
 import (
