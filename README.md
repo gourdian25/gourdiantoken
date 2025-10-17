@@ -80,6 +80,7 @@ go get github.com/gourdian25/gourdiantoken@latest
 **Requirements**: Go 1.18 or higher
 
 **Optional Dependencies** (based on storage backend):
+
 ```bash
 # For Redis support
 go get github.com/redis/go-redis/v9
@@ -235,7 +236,7 @@ func main() {
 
 ### Core Components
 
-```
+``` txt
 ┌─────────────────────────────────────────────────────────────┐
 │                    GourdianTokenMaker                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
@@ -262,7 +263,7 @@ func main() {
 
 ### Token Lifecycle
 
-```
+``` txt
 ┌──────────┐
 │  Login   │
 └────┬─────┘
@@ -342,6 +343,7 @@ config := gourdiantoken.DefaultGourdianTokenConfig("your-secret-key")
 ```
 
 **Defaults:**
+
 - Algorithm: HS256
 - Access Token: 30 minutes (max 24 hours)
 - Refresh Token: 7 days (max 30 days)
@@ -375,12 +377,14 @@ config := gourdiantoken.NewGourdianTokenConfig(
 ### Configuration Examples
 
 #### Development (HMAC, No Storage)
+
 ```go
 config := gourdiantoken.DefaultGourdianTokenConfig("dev-secret-key-32-bytes-long")
 maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
 ```
 
 #### Production (RSA with Redis)
+
 ```go
 config := gourdiantoken.NewGourdianTokenConfig(
     gourdiantoken.Asymmetric, true, true,
@@ -397,6 +401,7 @@ maker, _ := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisClien
 ```
 
 #### High Security (EdDSA with MongoDB)
+
 ```go
 client, _ := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
 mongoDB := client.Database("auth")
@@ -434,12 +439,14 @@ maker, err := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
 ```
 
 **Features:**
+
 - No dependencies
 - No revocation/rotation support
 - Perfect for microservices that only verify tokens
 - Highest performance
 
 **Limitations:**
+
 - Cannot revoke tokens
 - Cannot rotate tokens
 - Config must have `RevocationEnabled` and `RotationEnabled` set to `false`
@@ -451,17 +458,20 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
 ```
 
 **Features:**
+
 - Built-in storage
 - Automatic cleanup
 - Thread-safe
 - Zero external dependencies
 
 **Best For:**
+
 - Development and testing
 - Single-instance applications
 - Prototyping
 
 **Limitations:**
+
 - Data lost on restart
 - Not suitable for distributed systems
 
@@ -478,12 +488,14 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisCli
 ```
 
 **Features:**
+
 - Sub-millisecond operations
 - Automatic TTL-based expiration
 - Distributed support via Redis Cluster
 - Built-in persistence options
 
 **Best For:**
+
 - Production systems
 - High-throughput APIs
 - Microservices architectures
@@ -499,6 +511,7 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithGorm(ctx, config, db)
 ```
 
 **Supported Databases:**
+
 - PostgreSQL (recommended)
 - MySQL/MariaDB
 - SQLite (development only)
@@ -506,12 +519,14 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithGorm(ctx, config, db)
 - CockroachDB
 
 **Features:**
+
 - ACID transactions
 - Complex queries
 - Automatic migrations
 - Connection pooling
 
 **Best For:**
+
 - Existing SQL infrastructure
 - Complex audit requirements
 - Enterprise applications
@@ -525,12 +540,14 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 ```
 
 **Features:**
+
 - Document-oriented storage
 - Automatic TTL indexes
 - Optional transactions (requires replica set)
 - Horizontal scaling via sharding
 
 **Best For:**
+
 - Document-based architectures
 - High write throughput
 - Flexible schemas
@@ -544,6 +561,7 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 **Purpose**: Short-lived credentials for API authorization
 
 **Standard Claims:**
+
 ```json
 {
   "jti": "123e4567-e89b-12d3-a456-426614174000",
@@ -562,6 +580,7 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 ```
 
 **Go Structure:**
+
 ```go
 type AccessTokenClaims struct {
     ID                uuid.UUID   `json:"jti"`
@@ -584,6 +603,7 @@ type AccessTokenClaims struct {
 **Purpose**: Long-lived credentials for obtaining new access tokens
 
 **Standard Claims:**
+
 ```json
 {
   "jti": "789e4567-e89b-12d3-a456-426614174999",
@@ -630,11 +650,13 @@ err := maker.RevokeRefreshToken(ctx, refreshTokenString)
 ```
 
 **How It Works:**
+
 - Token hash stored in storage backend with TTL matching remaining lifetime
 - Verification checks revocation status before accepting token
 - Automatic cleanup removes expired revocations
 
 **Use Cases:**
+
 - User logout
 - Security breach response
 - Account suspension
@@ -654,11 +676,13 @@ if err != nil {
 ```
 
 **Security Benefits:**
+
 - Prevents token replay attacks
 - Detects stolen tokens (multiple rotation attempts fail)
 - Limits blast radius of compromised tokens
 
 **How It Works:**
+
 1. Verify old token is valid
 2. Atomically mark old token as rotated (compare-and-swap)
 3. Create new token with fresh expiration
@@ -746,6 +770,7 @@ token, err := maker.CreateAccessToken(
 **Returns:** `*AccessTokenResponse` containing signed JWT and metadata
 
 **Validation:**
+
 - `userID` must not be `uuid.Nil`
 - `username` max 1024 characters
 - `roles` must contain at least one non-empty string
@@ -773,6 +798,7 @@ claims, err := maker.VerifyAccessToken(ctx, tokenString)
 ```
 
 **Validation Steps:**
+
 1. Check context cancellation
 2. Check revocation status (if enabled)
 3. Verify cryptographic signature
@@ -790,6 +816,7 @@ claims, err := maker.VerifyRefreshToken(ctx, tokenString)
 ```
 
 **Additional Checks:**
+
 - Token rotation status (if enabled)
 - Token type is "refresh"
 
@@ -802,6 +829,7 @@ err := maker.RevokeAccessToken(ctx, tokenString)
 ```
 
 **Requirements:**
+
 - `RevocationEnabled` must be `true`
 - Valid token repository configured
 
@@ -822,10 +850,12 @@ newToken, err := maker.RotateRefreshToken(ctx, oldTokenString)
 ```
 
 **Requirements:**
+
 - `RotationEnabled` must be `true`
 - Valid token repository configured
 
 **Process:**
+
 1. Verify old token
 2. Atomically mark as rotated (only first caller succeeds)
 3. Create new token
@@ -1513,6 +1543,7 @@ Benchmarks run on Intel i5-9300H @ 2.40GHz, Go 1.21:
    - Avoid **RS4096** unless required
 
 2. **Redis Optimization**
+
    ```go
    redisClient := redis.NewClient(&redis.Options{
        Addr:         "localhost:6379",
@@ -1523,6 +1554,7 @@ Benchmarks run on Intel i5-9300H @ 2.40GHz, Go 1.21:
    ```
 
 3. **Connection Pooling (SQL)**
+
    ```go
    sqlDB, _ := db.DB()
    sqlDB.SetMaxOpenConns(100)
@@ -1921,8 +1953,8 @@ Report vulnerabilities privately via email. DO NOT open public issues for securi
 
 **Made with ❤️ by the gourdiantoken team**
 
-[Documentation](https://pkg.go.dev/github.com/gourdian25/gourdiantoken) • 
-[Issues](https://github.com/gourdian25/gourdiantoken/issues) • 
+[Documentation](https://pkg.go.dev/github.com/gourdian25/gourdiantoken) •
+[Issues](https://github.com/gourdian25/gourdiantoken/issues) •
 [Discussions](https://github.com/gourdian25/gourdiantoken/discussions)
 
 ⭐ Star us on GitHub if you find this useful!
