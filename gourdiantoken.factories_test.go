@@ -341,7 +341,7 @@ func TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository(t *t
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), false)
+	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), true)
 	require.NoError(t, err)
 
 	// The returned maker should have transactions enabled
