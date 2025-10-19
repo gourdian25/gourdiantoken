@@ -377,7 +377,7 @@ func NewGourdianTokenMakerWithGorm(ctx context.Context, config GourdianTokenConf
 //	}
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
-func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenConfig, mongoDB *mongo.Database) (GourdianTokenMaker, error) {
+func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenConfig, mongoDB *mongo.Database, transactionsEnabled bool) (GourdianTokenMaker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -386,8 +386,8 @@ func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenCon
 		return nil, fmt.Errorf("mongo database instance cannot be nil")
 	}
 
-	// Create MongoDB-based repository with transactions enabled
-	tokenRepo, err := NewMongoTokenRepository(mongoDB, true)
+	// Create MongoDB-based repository with configurable transaction usage
+	tokenRepo, err := NewMongoTokenRepository(mongoDB, transactionsEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize MongoDB token repository: %w", err)
 	}

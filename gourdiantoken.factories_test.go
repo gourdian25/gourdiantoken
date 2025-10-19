@@ -296,7 +296,7 @@ func TestNewGourdianTokenMakerWithMongo_AllRepositories(t *testing.T) {
 			config.RotationEnabled = true
 
 			mongoRepo := repo.(*MongoTokenRepository)
-			maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database())
+			maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), false)
 			require.NoError(t, err)
 			require.NotNil(t, maker)
 		})
@@ -308,7 +308,7 @@ func TestNewGourdianTokenMakerWithMongo_NilDatabaseFails(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil)
+	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "database instance cannot be nil")
 }
@@ -326,7 +326,7 @@ func TestNewGourdianTokenMakerWithMongo_FailsWithCancelledContext(t *testing.T) 
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	_, err := NewGourdianTokenMakerWithMongo(ctx, config, mongoRepo.revokedCollection.Database())
+	_, err := NewGourdianTokenMakerWithMongo(ctx, config, mongoRepo.revokedCollection.Database(), false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
@@ -341,7 +341,7 @@ func TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository(t *t
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database())
+	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), false)
 	require.NoError(t, err)
 
 	// The returned maker should have transactions enabled
