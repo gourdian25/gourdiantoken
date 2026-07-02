@@ -6,6 +6,8 @@
 ├── concurrency_test.go
 ├── config.validation_test.go
 ├── cryptographic_test.go
+├── docs/
+│   └── suggest-improvements-in-this-moonlit-pearl-agent-a99dd5e3620b03111.md
 ├── docs.go
 ├── edge.case_test.go
 ├── example/
@@ -22,7 +24,6 @@
 ├── gourdiantoken.repository.redis.imp.go
 ├── gourdiantoken.repository_test.go
 ├── integration_test.go
-├── repository.factories.go.bak
 ├── revocation.rotation_test.go
 ├── token.bench.helper.go
 ├── token.creation_test.go
@@ -32,4 +33,4 @@
 ├── token.verification_test.go
 └── version.go
 
-1 directories, 31 files
+2 directories, 31 files
