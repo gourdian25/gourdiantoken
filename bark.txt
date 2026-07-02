@@ -1,4 +1,5 @@
 .
+├── CLAUDE.md
 ├── LICENSE
 ├── Makefile
 ├── README.md
@@ -31,4 +32,4 @@
 ├── token.verification_test.go
 └── version.go
 
-1 directories, 30 files
+1 directories, 31 files
