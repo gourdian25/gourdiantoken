@@ -1,3 +1,5 @@
+# File: Makefile
+
 .PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install
 
 # Variables

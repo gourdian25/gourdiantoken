@@ -7,8 +7,8 @@
 ├── cryptographic_test.go
 ├── docs.go
 ├── edge.case_test.go
-├── example
-│   └── example.go
+├── example/
+│   └── example.go
 ├── go.mod
 ├── go.sum
 ├── gourdiantoken.benchmark_test.go
@@ -29,7 +29,6 @@
 ├── token.rotate_test.go
 ├── token.test.helper.go
 ├── token.verification_test.go
-├── tree.txt
 └── version.go
 
-2 directories, 31 files
+1 directories, 30 files
