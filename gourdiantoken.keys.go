@@ -16,6 +16,16 @@ import (
 	"os"
 )
 
+// decodePEMBlock decodes a PEM block, returning a descriptive error if decoding fails.
+// Shared by all six key parser functions below.
+func decodePEMBlock(pemBytes []byte, description string) (*pem.Block, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, fmt.Errorf("failed to parse PEM block containing the %s", description)
+	}
+	return block, nil
+}
+
 // parseEdDSAPrivateKey parses an Ed25519 private key from PEM-encoded bytes.
 // Supports PKCS#8 format.
 //
@@ -38,9 +48,9 @@ import (
 //	MC4CAQAwBQYDK2VwBCIEIJ+DYvh6SEqVTm50DFtMDoQikTmiCqirVv9mWG9qfSnF
 //	-----END PRIVATE KEY-----
 func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) {
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		return nil, fmt.Errorf("failed to parse PEM block containing the private key")
+	block, err := decodePEMBlock(pemBytes, "private key")
+	if err != nil {
+		return nil, err
 	}
 
 	priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
@@ -76,9 +86,9 @@ func parseEdDSAPrivateKey(pemBytes []byte) (ed25519.PrivateKey, error) {
 //	MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=
 //	-----END PUBLIC KEY-----
 func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) {
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		return nil, fmt.Errorf("failed to parse PEM block containing the public key")
+	block, err := decodePEMBlock(pemBytes, "public key")
+	if err != nil {
+		return nil, err
 	}
 
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
@@ -127,9 +137,9 @@ func parseEdDSAPublicKey(pemBytes []byte) (ed25519.PublicKey, error) {
 //	MIIEpAIBAAKCAQEA...
 //	-----END RSA PRIVATE KEY-----
 func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		return nil, fmt.Errorf("failed to parse PEM block containing the RSA private key")
+	block, err := decodePEMBlock(pemBytes, "RSA private key")
+	if err != nil {
+		return nil, err
 	}
 
 	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
@@ -190,9 +200,9 @@ func parseRSAPrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 //	MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
 //	-----END PUBLIC KEY-----
 func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		return nil, fmt.Errorf("failed to parse PEM block containing the RSA public key")
+	block, err := decodePEMBlock(pemBytes, "RSA public key")
+	if err != nil {
+		return nil, err
 	}
 
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
@@ -258,9 +268,9 @@ func parseRSAPublicKey(pemBytes []byte) (*rsa.PublicKey, error) {
 //	MHcCAQEEIIGlRFzR...
 //	-----END EC PRIVATE KEY-----
 func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		return nil, fmt.Errorf("failed to parse PEM block containing the ECDSA private key")
+	block, err := decodePEMBlock(pemBytes, "ECDSA private key")
+	if err != nil {
+		return nil, err
 	}
 
 	key, err := x509.ParseECPrivateKey(block.Bytes)
@@ -298,9 +308,9 @@ func parseECDSAPrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 //	MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
 //	-----END PUBLIC KEY-----
 func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		return nil, fmt.Errorf("failed to parse PEM block containing the ECDSA public key")
+	block, err := decodePEMBlock(pemBytes, "ECDSA public key")
+	if err != nil {
+		return nil, err
 	}
 
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)

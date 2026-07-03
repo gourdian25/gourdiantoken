@@ -287,6 +287,49 @@ func DefaultGourdianTokenMaker(
 	return NewGourdianTokenMaker(ctx, config, tokenRepo)
 }
 
+// validateUserAndUsername validates the userID/username preconditions shared by
+// CreateAccessToken and CreateRefreshToken.
+func validateUserAndUsername(userID uuid.UUID, username string) error {
+	if userID == uuid.Nil {
+		return fmt.Errorf("invalid user ID: cannot be empty")
+	}
+	if len(username) > 1024 {
+		return fmt.Errorf("username too long: max 1024 characters")
+	}
+	return nil
+}
+
+// newTokenID generates a new random token ID, centralizing the uuid.NewRandom error path.
+func newTokenID() (uuid.UUID, error) {
+	tokenID, err := uuid.NewRandom()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to generate token ID: %w", err)
+	}
+	return tokenID, nil
+}
+
+// signClaims builds map claims via toMapClaims and signs the resulting JWT, checking
+// for context cancellation before the CPU-intensive signing operation.
+func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, tokenType TokenType) (string, error) {
+	mapClaims, err := toMapClaims(claims)
+	if err != nil {
+		return "", fmt.Errorf("failed to build claims: %w", err)
+	}
+	token := jwt.NewWithClaims(maker.signingMethod, mapClaims)
+
+	// Check context before CPU-intensive signing operation
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("context canceled before signing: %w", err)
+	}
+
+	signedToken, err := token.SignedString(maker.privateKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign %s token: %w", tokenType, err)
+	}
+
+	return signedToken, nil
+}
+
 // CreateAccessToken generates a new signed access token with the specified claims.
 // Access tokens are short-lived and include user identity, session, and authorization roles.
 //
@@ -363,14 +406,11 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
 
-	if userID == uuid.Nil {
-		return nil, fmt.Errorf("invalid user ID: cannot be empty")
+	if err := validateUserAndUsername(userID, username); err != nil {
+		return nil, err
 	}
 	if len(roles) == 0 {
 		return nil, fmt.Errorf("at least one role must be provided")
-	}
-	if len(username) > 1024 {
-		return nil, fmt.Errorf("username too long: max 1024 characters")
 	}
 
 	// Validate roles are non-empty strings
@@ -380,9 +420,9 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		}
 	}
 
-	tokenID, err := uuid.NewRandom()
+	tokenID, err := newTokenID()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate token ID: %w", err)
+		return nil, err
 	}
 
 	now := time.Now()
@@ -401,20 +441,9 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		TokenType:         AccessToken,
 	}
 
-	mapClaims, err := toMapClaims(claims)
+	signedToken, err := maker.signClaims(ctx, claims, AccessToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build claims: %w", err)
-	}
-	token := jwt.NewWithClaims(maker.signingMethod, mapClaims)
-
-	// Check context before CPU-intensive signing operation
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context canceled before signing: %w", err)
-	}
-
-	signedToken, err := token.SignedString(maker.privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign access token: %w", err)
+		return nil, err
 	}
 
 	response := &AccessTokenResponse{
@@ -517,16 +546,13 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
 
-	if userID == uuid.Nil {
-		return nil, fmt.Errorf("invalid user ID: cannot be empty")
-	}
-	if len(username) > 1024 {
-		return nil, fmt.Errorf("username too long: max 1024 characters")
+	if err := validateUserAndUsername(userID, username); err != nil {
+		return nil, err
 	}
 
-	tokenID, err := uuid.NewRandom()
+	tokenID, err := newTokenID()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate token ID: %w", err)
+		return nil, err
 	}
 
 	now := time.Now()
@@ -544,20 +570,9 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 		TokenType:         RefreshToken,
 	}
 
-	mapClaims, err := toMapClaims(claims)
+	signedToken, err := maker.signClaims(ctx, claims, RefreshToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build claims: %w", err)
-	}
-	token := jwt.NewWithClaims(maker.signingMethod, mapClaims)
-
-	// Check context before CPU-intensive signing operation
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context canceled before signing: %w", err)
-	}
-
-	signedToken, err := token.SignedString(maker.privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign refresh token: %w", err)
+		return nil, err
 	}
 
 	response := &RefreshTokenResponse{
@@ -575,6 +590,72 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 	}
 
 	return response, nil
+}
+
+// parseAndValidateToken performs the revocation check, the rotation check (for refresh
+// tokens only), signature/structure verification, and required-claims validation shared
+// by VerifyAccessToken and VerifyRefreshToken.
+func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString string, tokenType TokenType) (jwt.MapClaims, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context canceled: %w", err)
+	}
+
+	if maker.config.RevocationEnabled && maker.tokenRepo != nil {
+		revoked, err := maker.tokenRepo.IsTokenRevoked(ctx, tokenType, tokenString)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check token revocation: %w", err)
+		}
+		if revoked {
+			return nil, fmt.Errorf("token has been revoked")
+		}
+	}
+
+	if tokenType == RefreshToken && maker.config.RotationEnabled && maker.tokenRepo != nil {
+		rotated, err := maker.tokenRepo.IsTokenRotated(ctx, tokenString)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check token rotation: %w", err)
+		}
+		if rotated {
+			return nil, fmt.Errorf("token has been rotated and is no longer valid")
+		}
+	}
+
+	// Verify token signature and basic structure
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Check context during parsing
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context canceled during parsing: %w", err)
+		}
+
+		if token.Method.Alg() != maker.signingMethod.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return maker.publicKey, nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("invalid token: %w", err)
+	}
+
+	if !token.Valid {
+		return nil, fmt.Errorf("token failed validation")
+	}
+
+	// Check context before claims processing
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context canceled during claims processing: %w", err)
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf("invalid token claims")
+	}
+
+	if err := validateTokenClaims(claims, tokenType, maker.config.RequiredClaims); err != nil {
+		return nil, err
+	}
+
+	return claims, nil
 }
 
 // VerifyAccessToken validates an access token and returns its claims if valid.
@@ -656,65 +737,12 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 //	    })
 //	}
 func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context canceled: %w", err)
-	}
-
-	if maker.config.RevocationEnabled && maker.tokenRepo != nil {
-		revoked, err := maker.tokenRepo.IsTokenRevoked(ctx, AccessToken, tokenString)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check token revocation: %w", err)
-		}
-		if revoked {
-			return nil, fmt.Errorf("token has been revoked")
-		}
-	}
-
-	// Verify token signature and basic structure
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Check context during parsing
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("context canceled during parsing: %w", err)
-		}
-
-		if token.Method.Alg() != maker.signingMethod.Alg() {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return maker.publicKey, nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("invalid token: %w", err)
-	}
-
-	if !token.Valid {
-		return nil, fmt.Errorf("token failed validation")
-	}
-
-	// Check context before claims processing
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context canceled during claims processing: %w", err)
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok || !token.Valid {
-		return nil, fmt.Errorf("invalid token claims")
-	}
-
-	if err := validateTokenClaims(claims, AccessToken, maker.config.RequiredClaims); err != nil {
-		return nil, err
-	}
-
-	accessClaims, err := mapToAccessClaims(claims)
+	claims, err := maker.parseAndValidateToken(ctx, tokenString, AccessToken)
 	if err != nil {
 		return nil, err
 	}
 
-	if _, ok := claims["rls"]; !ok {
-		return nil, fmt.Errorf("missing roles claim in access token")
-	}
-
-	return accessClaims, nil
+	return mapToAccessClaims(claims)
 }
 
 // VerifyRefreshToken validates a refresh token and returns its claims if valid.
@@ -790,65 +818,57 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 //
 //	// Old token is now invalid, use new token
 func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context canceled: %w", err)
-	}
-
-	if maker.config.RevocationEnabled && maker.tokenRepo != nil {
-		revoked, err := maker.tokenRepo.IsTokenRevoked(ctx, RefreshToken, tokenString)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check token revocation: %w", err)
-		}
-		if revoked {
-			return nil, fmt.Errorf("token has been revoked")
-		}
-	}
-
-	if maker.config.RotationEnabled && maker.tokenRepo != nil {
-		rotated, err := maker.tokenRepo.IsTokenRotated(ctx, tokenString)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check token rotation: %w", err)
-		}
-		if rotated {
-			return nil, fmt.Errorf("token has been rotated and is no longer valid")
-		}
-	}
-
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		// Check context during parsing
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("context canceled during parsing: %w", err)
-		}
-
-		if token.Method.Alg() != maker.signingMethod.Alg() {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return maker.publicKey, nil
-	})
-
+	claims, err := maker.parseAndValidateToken(ctx, tokenString, RefreshToken)
 	if err != nil {
-		return nil, fmt.Errorf("invalid token: %w", err)
-	}
-
-	if !token.Valid {
-		return nil, fmt.Errorf("token failed validation")
-	}
-
-	// Check context before claims processing
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context canceled during claims processing: %w", err)
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok || !token.Valid {
-		return nil, fmt.Errorf("invalid token claims")
-	}
-
-	if err := validateTokenClaims(claims, RefreshToken, maker.config.RequiredClaims); err != nil {
 		return nil, err
 	}
 
 	return mapToRefreshClaims(claims)
+}
+
+// revokeToken parses token to extract its expiration, then marks it revoked in the
+// repository. Shared by RevokeAccessToken and RevokeRefreshToken.
+func (maker *JWTMaker) revokeToken(ctx context.Context, tokenType TokenType, token string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context canceled: %w", err)
+	}
+
+	if !maker.config.RevocationEnabled || maker.tokenRepo == nil {
+		return fmt.Errorf("%s token revocation is not enabled", tokenType)
+	}
+
+	// Parse the token to extract expiration time
+	parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
+		// Check context during parsing
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("context canceled during parsing: %w", err)
+		}
+		return maker.publicKey, nil
+	})
+	if err != nil {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+	if !parsed.Valid {
+		return fmt.Errorf("token failed validation")
+	}
+
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		return fmt.Errorf("invalid token claims")
+	}
+
+	exp := getUnixTime(claims["exp"])
+	if exp == 0 {
+		return fmt.Errorf("token missing exp claim")
+	}
+	ttl := time.Until(time.Unix(exp, 0))
+
+	// Check context before database operation
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context canceled before revocation: %w", err)
+	}
+
+	return maker.tokenRepo.MarkTokenRevoke(ctx, tokenType, token, ttl)
 }
 
 // RevokeAccessToken marks an access token as revoked, preventing its further use.
@@ -925,46 +945,7 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 //	    log.Printf("Failed to revoke refresh token: %v", err)
 //	}
 func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context canceled: %w", err)
-	}
-
-	if !maker.config.RevocationEnabled || maker.tokenRepo == nil {
-		return fmt.Errorf("access token revocation is not enabled")
-	}
-
-	// Parse the token to extract expiration time
-	parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
-		// Check context during parsing
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("context canceled during parsing: %w", err)
-		}
-		return maker.publicKey, nil
-	})
-	if err != nil {
-		return fmt.Errorf("invalid token: %w", err)
-	}
-	if !parsed.Valid {
-		return fmt.Errorf("token failed validation")
-	}
-
-	claims, ok := parsed.Claims.(jwt.MapClaims)
-	if !ok {
-		return fmt.Errorf("invalid token claims")
-	}
-
-	exp := getUnixTime(claims["exp"])
-	if exp == 0 {
-		return fmt.Errorf("token missing exp claim")
-	}
-	ttl := time.Until(time.Unix(exp, 0))
-
-	// Check context before database operation
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context canceled before revocation: %w", err)
-	}
-
-	return maker.tokenRepo.MarkTokenRevoke(ctx, AccessToken, token, ttl)
+	return maker.revokeToken(ctx, AccessToken, token)
 }
 
 // RevokeRefreshToken marks a refresh token as revoked, preventing its further use.
@@ -1034,45 +1015,7 @@ func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) erro
 //
 //	// User must re-authenticate on all devices
 func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context canceled: %w", err)
-	}
-
-	if !maker.config.RevocationEnabled || maker.tokenRepo == nil {
-		return fmt.Errorf("refresh token revocation is not enabled")
-	}
-
-	parsed, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
-		// Check context during parsing
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("context canceled during parsing: %w", err)
-		}
-		return maker.publicKey, nil
-	})
-	if err != nil {
-		return fmt.Errorf("invalid token: %w", err)
-	}
-	if !parsed.Valid {
-		return fmt.Errorf("token failed validation")
-	}
-
-	claims, ok := parsed.Claims.(jwt.MapClaims)
-	if !ok {
-		return fmt.Errorf("invalid token claims")
-	}
-
-	exp := getUnixTime(claims["exp"])
-	if exp == 0 {
-		return fmt.Errorf("token missing exp claim")
-	}
-	ttl := time.Until(time.Unix(exp, 0))
-
-	// Check context before database operation
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("context canceled before revocation: %w", err)
-	}
-
-	return maker.tokenRepo.MarkTokenRevoke(ctx, RefreshToken, token, ttl)
+	return maker.revokeToken(ctx, RefreshToken, token)
 }
 
 // RotateRefreshToken exchanges an old refresh token for a new one with extended expiration.

@@ -253,32 +253,28 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 	}
 }
 
-// mapToAccessClaims converts JWT MapClaims to strongly-typed AccessTokenClaims.
-// Performs type checking and validation of all fields.
-//
-// Conversions:
-//   - String UUIDs → uuid.UUID
-//   - Unix timestamps → time.Time
-//   - String token type → TokenType
-//   - Interface arrays → string arrays
-//
-// Validation:
-//   - All UUIDs must be valid
-//   - Roles must be non-empty array of strings
-//   - Timestamps must be valid numbers
-//   - Required fields must be present
-//
-// Parameters:
-//   - claims: JWT MapClaims from parsed token
-//
-// Returns:
-//   - *AccessTokenClaims: Strongly-typed claims structure
-//   - error: If any field is invalid or missing
-//
-// Notes:
-//   - Used internally during token verification
-//   - Handles various JSON number types (float64, int, json.Number)
-func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
+// commonClaims holds the claim fields shared by AccessTokenClaims and RefreshTokenClaims.
+// TokenType is deliberately excluded: mapToAccessClaims and mapToRefreshClaims report
+// different error text for a missing/invalid "typ" claim, so each caller extracts it itself.
+type commonClaims struct {
+	ID                uuid.UUID
+	Subject           uuid.UUID
+	SessionID         uuid.UUID
+	Username          string
+	Issuer            string
+	Audience          []string
+	IssuedAt          time.Time
+	ExpiresAt         time.Time
+	NotBefore         time.Time
+	MaxLifetimeExpiry time.Time
+}
+
+// extractCommonClaims extracts and validates the jti/sub/sid/usr/iss/aud/timestamp
+// fields common to both AccessTokenClaims and RefreshTokenClaims, using a safe checked
+// pattern throughout. This also tightens the "iss" claim to require a string type,
+// consistent with how jti/sub/sid are already handled (previously issuer silently
+// became "" via an unchecked type assertion instead of erroring on a bad claim).
+func extractCommonClaims(claims jwt.MapClaims) (*commonClaims, error) {
 	jti, ok := claims["jti"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid token ID type: expected string")
@@ -311,7 +307,16 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		return nil, fmt.Errorf("invalid username type: expected string")
 	}
 
-	issuer, _ := claims["iss"].(string)
+	// iss is not part of baseRequired (it's only mandatory when the caller's config
+	// lists it in RequiredClaims, enforced upstream by validateTokenClaims), so an
+	// absent iss claim is not an error here — only a present-but-wrong-typed one is.
+	var issuer string
+	if rawIssuer, present := claims["iss"]; present {
+		issuer, ok = rawIssuer.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid issuer type: expected string")
+		}
+	}
 
 	var audience []string
 	if aud, ok := claims["aud"]; ok {
@@ -328,6 +333,68 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		case []string:
 			audience = v
 		}
+	}
+
+	iat := getUnixTime(claims["iat"])
+	exp := getUnixTime(claims["exp"])
+	nbf := getUnixTime(claims["nbf"])
+	mle := getUnixTime(claims["mle"])
+
+	if iat == 0 || exp == 0 {
+		return nil, fmt.Errorf("invalid timestamp format")
+	}
+
+	common := &commonClaims{
+		ID:        tokenID,
+		Subject:   userID,
+		SessionID: sessionID,
+		Username:  username,
+		Issuer:    issuer,
+		Audience:  audience,
+		IssuedAt:  time.Unix(iat, 0),
+		ExpiresAt: time.Unix(exp, 0),
+	}
+
+	if nbf != 0 {
+		common.NotBefore = time.Unix(nbf, 0)
+	}
+
+	if mle != 0 {
+		common.MaxLifetimeExpiry = time.Unix(mle, 0)
+	}
+
+	return common, nil
+}
+
+// mapToAccessClaims converts JWT MapClaims to strongly-typed AccessTokenClaims.
+// Performs type checking and validation of all fields.
+//
+// Conversions:
+//   - String UUIDs → uuid.UUID
+//   - Unix timestamps → time.Time
+//   - String token type → TokenType
+//   - Interface arrays → string arrays
+//
+// Validation:
+//   - All UUIDs must be valid
+//   - Roles must be non-empty array of strings
+//   - Timestamps must be valid numbers
+//   - Required fields must be present
+//
+// Parameters:
+//   - claims: JWT MapClaims from parsed token
+//
+// Returns:
+//   - *AccessTokenClaims: Strongly-typed claims structure
+//   - error: If any field is invalid or missing
+//
+// Notes:
+//   - Used internally during token verification
+//   - Handles various JSON number types (float64, int, json.Number)
+func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
+	common, err := extractCommonClaims(claims)
+	if err != nil {
+		return nil, err
 	}
 
 	rolesInterface, ok := claims["rls"]
@@ -361,34 +428,19 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		return nil, fmt.Errorf("invalid token type: expected string")
 	}
 
-	iat := getUnixTime(claims["iat"])
-	exp := getUnixTime(claims["exp"])
-	nbf := getUnixTime(claims["nbf"])
-	mle := getUnixTime(claims["mle"])
-
-	if iat == 0 || exp == 0 {
-		return nil, fmt.Errorf("invalid timestamp format")
-	}
-
 	accessClaims := &AccessTokenClaims{
-		ID:        tokenID,
-		Subject:   userID,
-		Username:  username,
-		SessionID: sessionID,
-		Issuer:    issuer,
-		Audience:  audience,
-		IssuedAt:  time.Unix(iat, 0),
-		ExpiresAt: time.Unix(exp, 0),
-		TokenType: TokenType(typ),
-		Roles:     roles,
-	}
-
-	if nbf != 0 {
-		accessClaims.NotBefore = time.Unix(nbf, 0)
-	}
-
-	if mle != 0 {
-		accessClaims.MaxLifetimeExpiry = time.Unix(mle, 0)
+		ID:                common.ID,
+		Subject:           common.Subject,
+		Username:          common.Username,
+		SessionID:         common.SessionID,
+		Issuer:            common.Issuer,
+		Audience:          common.Audience,
+		IssuedAt:          common.IssuedAt,
+		ExpiresAt:         common.ExpiresAt,
+		NotBefore:         common.NotBefore,
+		MaxLifetimeExpiry: common.MaxLifetimeExpiry,
+		TokenType:         TokenType(typ),
+		Roles:             roles,
 	}
 
 	return accessClaims, nil
@@ -420,43 +472,9 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 //   - Used internally during token verification
 //   - Does not include roles (refresh tokens don't have roles)
 func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
-	tokenID, err := uuid.Parse(claims["jti"].(string))
+	common, err := extractCommonClaims(claims)
 	if err != nil {
-		return nil, fmt.Errorf("invalid token ID: %w", err)
-	}
-
-	userID, err := uuid.Parse(claims["sub"].(string))
-	if err != nil {
-		return nil, fmt.Errorf("invalid user ID: %w", err)
-	}
-
-	sessionID, err := uuid.Parse(claims["sid"].(string))
-	if err != nil {
-		return nil, fmt.Errorf("invalid session ID: %w", err)
-	}
-
-	username, ok := claims["usr"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid username type: expected string")
-	}
-
-	issuer, _ := claims["iss"].(string)
-
-	var audience []string
-	if aud, ok := claims["aud"]; ok {
-		switch v := aud.(type) {
-		case string:
-			audience = []string{v}
-		case []interface{}:
-			audience = make([]string, 0, len(v))
-			for _, a := range v {
-				if aStr, ok := a.(string); ok {
-					audience = append(audience, aStr)
-				}
-			}
-		case []string:
-			audience = v
-		}
+		return nil, err
 	}
 
 	typ, ok := claims["typ"].(string)
@@ -468,33 +486,18 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 		return nil, fmt.Errorf("invalid token type: expected 'refresh'")
 	}
 
-	iat := getUnixTime(claims["iat"])
-	exp := getUnixTime(claims["exp"])
-	nbf := getUnixTime(claims["nbf"])
-	mle := getUnixTime(claims["mle"])
-
-	if iat == 0 || exp == 0 {
-		return nil, fmt.Errorf("invalid timestamp format")
-	}
-
 	refreshClaims := &RefreshTokenClaims{
-		ID:        tokenID,
-		Subject:   userID,
-		Username:  username,
-		SessionID: sessionID,
-		Issuer:    issuer,
-		Audience:  audience,
-		IssuedAt:  time.Unix(iat, 0),
-		ExpiresAt: time.Unix(exp, 0),
-		TokenType: TokenType(typ),
-	}
-
-	if nbf != 0 {
-		refreshClaims.NotBefore = time.Unix(nbf, 0)
-	}
-
-	if mle != 0 {
-		refreshClaims.MaxLifetimeExpiry = time.Unix(mle, 0)
+		ID:                common.ID,
+		Subject:           common.Subject,
+		Username:          common.Username,
+		SessionID:         common.SessionID,
+		Issuer:            common.Issuer,
+		Audience:          common.Audience,
+		IssuedAt:          common.IssuedAt,
+		ExpiresAt:         common.ExpiresAt,
+		NotBefore:         common.NotBefore,
+		MaxLifetimeExpiry: common.MaxLifetimeExpiry,
+		TokenType:         TokenType(typ),
 	}
 
 	return refreshClaims, nil
