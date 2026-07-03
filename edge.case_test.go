@@ -573,7 +573,9 @@ func TestBoundaryConditions(t *testing.T) {
 			TokenType:         AccessToken,
 		}
 
-		jwtToken := jwt.NewWithClaims(maker.signingMethod, toMapClaims(expiredClaims))
+		expiredMapClaims, err := toMapClaims(expiredClaims)
+		require.NoError(t, err)
+		jwtToken := jwt.NewWithClaims(maker.signingMethod, expiredMapClaims)
 		expiredToken, err := jwtToken.SignedString(maker.privateKey)
 		require.NoError(t, err)
 

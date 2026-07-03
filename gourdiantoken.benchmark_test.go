@@ -137,7 +137,7 @@ func BenchmarkClaimsConversion(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = toMapClaims(claims)
+		_, _ = toMapClaims(claims)
 	}
 }
 

@@ -311,7 +311,8 @@ func TestTokenClaims_Mapping(t *testing.T) {
 			TokenType:         AccessToken,
 		}
 
-		mapClaims := toMapClaims(claims)
+		mapClaims, err := toMapClaims(claims)
+		require.NoError(t, err)
 
 		assert.Equal(t, tokenID.String(), mapClaims["jti"])
 		assert.Equal(t, userID.String(), mapClaims["sub"])
@@ -346,7 +347,8 @@ func TestTokenClaims_Mapping(t *testing.T) {
 			TokenType:         RefreshToken,
 		}
 
-		mapClaims := toMapClaims(claims)
+		mapClaims, err := toMapClaims(claims)
+		require.NoError(t, err)
 
 		assert.Equal(t, tokenID.String(), mapClaims["jti"])
 		assert.Equal(t, userID.String(), mapClaims["sub"])

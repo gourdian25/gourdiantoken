@@ -62,6 +62,22 @@ const (
 	Asymmetric SigningMethod = "asymmetric"
 )
 
+// Claim key constants for the standard claims referenced by GourdianTokenConfig.RequiredClaims.
+const (
+	// ClaimIssuer is the JWT "iss" claim key.
+	ClaimIssuer = "iss"
+
+	// ClaimAudience is the JWT "aud" claim key.
+	ClaimAudience = "aud"
+
+	// ClaimNotBefore is the JWT "nbf" claim key.
+	ClaimNotBefore = "nbf"
+
+	// ClaimMaxLifetimeExpiry is the "mle" (max lifetime expiry) claim key, a gourdiantoken-specific
+	// absolute expiry claim distinct from the standard "exp" claim.
+	ClaimMaxLifetimeExpiry = "mle"
+)
+
 // GourdianTokenConfig holds the configuration for token generation, validation, and lifecycle management.
 // All duration fields must be positive values. Zero or negative durations will cause validation errors.
 //
@@ -767,7 +783,8 @@ type GourdianTokenMaker interface {
 // Lifecycle:
 //   - Create with NewGourdianTokenMaker or DefaultGourdianTokenMaker
 //   - Automatically starts background cleanup goroutines if rotation/revocation enabled
-//   - Cleanup goroutines stop when the maker is garbage collected
+//   - Cleanup goroutines run for the lifetime of the process; there is currently no
+//     way to stop them once started (see Close(), added in a later release)
 type JWTMaker struct {
 	// config holds the immutable configuration for token operations.
 	config GourdianTokenConfig
@@ -786,6 +803,10 @@ type JWTMaker struct {
 
 	// cleanupCancel cancels background cleanup goroutines.
 	cleanupCancel context.CancelFunc
+
+	// logf receives error reports from background cleanup goroutines.
+	// Defaults to a fmt.Printf-based logger; no public setter exists yet.
+	logf func(format string, args ...any)
 }
 
 // NewGourdianTokenMaker creates a new GourdianTokenMaker with the specified configuration and token repository.
@@ -876,11 +897,12 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, toke
 
 	// Check repository requirements
 	if (config.RotationEnabled || config.RevocationEnabled) && tokenRepo == nil {
-		return nil, fmt.Errorf("token repository required for token rotation/revocation")
+		return nil, fmt.Errorf("token repository required: RotationEnabled=%v, RevocationEnabled=%v", config.RotationEnabled, config.RevocationEnabled)
 	}
 
 	maker := &JWTMaker{
 		config: config,
+		logf:   func(format string, args ...any) { fmt.Printf(format, args...) },
 	}
 
 	// Set repository if any feature requiring it is enabled
@@ -1138,7 +1160,11 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 		TokenType:         AccessToken,
 	}
 
-	token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
+	mapClaims, err := toMapClaims(claims)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build claims: %w", err)
+	}
+	token := jwt.NewWithClaims(maker.signingMethod, mapClaims)
 
 	// Check context before CPU-intensive signing operation
 	if err := ctx.Err(); err != nil {
@@ -1277,7 +1303,11 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID,
 		TokenType:         RefreshToken,
 	}
 
-	token := jwt.NewWithClaims(maker.signingMethod, toMapClaims(claims))
+	mapClaims, err := toMapClaims(claims)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build claims: %w", err)
+	}
+	token := jwt.NewWithClaims(maker.signingMethod, mapClaims)
 
 	// Check context before CPU-intensive signing operation
 	if err := ctx.Err(); err != nil {
@@ -1417,7 +1447,7 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 	}
 
 	if !token.Valid {
-		return nil, fmt.Errorf("invalid token: %v", err)
+		return nil, fmt.Errorf("token failed validation")
 	}
 
 	// Check context before claims processing
@@ -1560,7 +1590,7 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 	}
 
 	if !token.Valid {
-		return nil, fmt.Errorf("invalid token: %v", err)
+		return nil, fmt.Errorf("token failed validation")
 	}
 
 	// Check context before claims processing
@@ -1670,8 +1700,11 @@ func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) erro
 		}
 		return maker.publicKey, nil
 	})
-	if err != nil || !parsed.Valid {
+	if err != nil {
 		return fmt.Errorf("invalid token: %w", err)
+	}
+	if !parsed.Valid {
+		return fmt.Errorf("token failed validation")
 	}
 
 	claims, ok := parsed.Claims.(jwt.MapClaims)
@@ -1775,8 +1808,11 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 		}
 		return maker.publicKey, nil
 	})
-	if err != nil || !parsed.Valid {
+	if err != nil {
 		return fmt.Errorf("invalid token: %w", err)
+	}
+	if !parsed.Valid {
+		return fmt.Errorf("token failed validation")
 	}
 
 	claims, ok := parsed.Claims.(jwt.MapClaims)
@@ -1936,7 +1972,7 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 
 	claims, err := maker.VerifyRefreshToken(ctx, oldToken)
 	if err != nil {
-		return nil, fmt.Errorf("invalid token: %w", err)
+		return nil, err
 	}
 
 	// Check context before database operations
@@ -1983,12 +2019,14 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 //   - Logs errors but continues operation
 //
 // Parameters:
-//   - ctx: Context for cancellation (cancelled when maker is garbage collected)
+//   - ctx: Context for cancellation. Currently only cancelled on a construction-time
+//     error path inside NewGourdianTokenMaker; once construction succeeds there is no
+//     caller-accessible way to stop this goroutine (see Close(), added in a later release).
 //
 // Notes:
 //   - Started automatically by NewGourdianTokenMaker
 //   - Should not be called directly
-//   - Errors are logged to stdout (implement custom logging as needed)
+//   - Errors are reported via the maker's logf hook (defaults to stdout)
 func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 	ticker := time.NewTicker(maker.config.CleanupInterval)
 	defer ticker.Stop()
@@ -2005,7 +2043,7 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 			// Create a timeout context for cleanup operation
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := maker.tokenRepo.CleanupExpiredRotatedTokens(cleanupCtx); err != nil {
-				fmt.Printf("Error cleaning up rotated tokens: %v\n", err)
+				maker.logf("Error cleaning up rotated tokens: %v\n", err)
 			}
 			cancel()
 		}
@@ -2028,12 +2066,14 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 //   - Logs errors but continues operation
 //
 // Parameters:
-//   - ctx: Context for cancellation (cancelled when maker is garbage collected)
+//   - ctx: Context for cancellation. Currently only cancelled on a construction-time
+//     error path inside NewGourdianTokenMaker; once construction succeeds there is no
+//     caller-accessible way to stop this goroutine (see Close(), added in a later release).
 //
 // Notes:
 //   - Started automatically by NewGourdianTokenMaker
 //   - Should not be called directly
-//   - Errors are logged to stdout (implement custom logging as needed)
+//   - Errors are reported via the maker's logf hook (defaults to stdout)
 func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 	ticker := time.NewTicker(maker.config.CleanupInterval)
 	defer ticker.Stop()
@@ -2051,7 +2091,7 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 				// Create a timeout context for cleanup operation
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				if err := maker.tokenRepo.CleanupExpiredRevokedTokens(cleanupCtx, tokenType); err != nil {
-					fmt.Printf("Error cleaning up revoked %s tokens: %v\n", tokenType, err)
+					maker.logf("Error cleaning up revoked %s tokens: %v\n", tokenType, err)
 				}
 				cancel()
 			}
@@ -2458,11 +2498,11 @@ func validateAlgorithmAndMethod(config *GourdianTokenConfig) error {
 // Notes:
 //   - Used internally during token creation
 //   - Should not be called directly by users
-func toMapClaims(claims interface{}) jwt.MapClaims {
+func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 	switch v := claims.(type) {
 	case AccessTokenClaims:
 		if len(v.Roles) == 0 {
-			panic("at least one role must be provided")
+			return nil, fmt.Errorf("at least one role must be provided")
 		}
 		mapClaims := jwt.MapClaims{
 			"jti": v.ID.String(),
@@ -2482,7 +2522,7 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 		if !v.MaxLifetimeExpiry.IsZero() {
 			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
 		}
-		return mapClaims
+		return mapClaims, nil
 	case RefreshTokenClaims:
 		mapClaims := jwt.MapClaims{
 			"jti": v.ID.String(),
@@ -2501,9 +2541,9 @@ func toMapClaims(claims interface{}) jwt.MapClaims {
 		if !v.MaxLifetimeExpiry.IsZero() {
 			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
 		}
-		return mapClaims
+		return mapClaims, nil
 	default:
-		panic(fmt.Sprintf("unsupported claims type: %T", claims))
+		return nil, fmt.Errorf("unsupported claims type: %T", claims)
 	}
 }
 
