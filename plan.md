@@ -1,5 +1,92 @@
 # gourdiantoken Improvement Plan (Consolidated, Verification Pass 3)
 
+## ⚠️ IMPLEMENTATION STATUS — READ THIS FIRST BEFORE DOING ANYTHING ELSE
+
+**Phases 0, 1, 2, and 3 are DONE, committed, and verified.** Only **Phase 4** and **Phase 5** remain. Do not re-do the file split or re-apply the Phase 1-3 fixes described below — they're already in the tree. This section is the handoff note for continuing in a new environment/session.
+
+### Where things stand
+
+- **Branch:** `dev#manish#major_fixes` (not `dev#manish#remove_uuid` — that's only for Phase 5, not yet created).
+- **Latest commit at handoff time:** `35ea31c` ("feat: add error handling and cleanup functionality; introduce new interfaces and improve token management"), with `74aad25` and `8a873c4` immediately before it covering the rest of Phases 1-3. Working tree was clean at handoff (all changes committed by the repo's auto-commit tooling — commits were not made explicitly via `git commit` by the assistant, since this session's operating instructions are to never commit unless the user asks; some external hook in this repo appears to auto-commit after each edit round).
+- **The 6-way file split (Phase 2a) already happened.** `gourdiantoken.go` no longer exists. The single 3262-line file is now:
+  - `gourdiantoken.config.go` — TokenType/SigningMethod/claim-key consts, GourdianTokenConfig, NewGourdianTokenConfig (now deprecated), DefaultGourdianTokenConfig
+  - `gourdiantoken.claims.go` — AccessTokenClaims, RefreshTokenClaims, AccessTokenResponse, RefreshTokenResponse
+  - `gourdiantoken.interfaces.go` — TokenRepository, GourdianTokenMaker, **GourdianTokenMakerCloser (new)**
+  - `gourdiantoken.maker.go` — JWTMaker struct (now has `logf`/`closeOnce` fields), constructors, Create/Verify/Revoke/Rotate methods and their extracted shared helpers, cleanup goroutines, key init, hashToken, **Option/WithLogger/Close() (new)**
+  - `gourdiantoken.validation.go` — validateConfig, validateAlgorithmAndMethod, toMapClaims, mapToAccessClaims, mapToRefreshClaims, validateTokenClaims, **commonClaims/extractCommonClaims (new)**
+  - `gourdiantoken.keys.go` — 6 key parsers (now sharing `decodePEMBlock`), checkFilePermissions, getUnixTime, PEM/ASN.1 structs
+  - `gourdiantoken.errors.go` — **new file**, sentinel errors (Phase 3a)
+  - New test files: `gourdiantoken.errors_test.go` (sentinel-error `errors.Is` tests), `gourdiantoken.close_test.go` (Close() idempotency + goroutine-stop tests)
+  - `token.test.helper.go`/`token.bench.helper.go` were renamed to `_test.go`-suffixed (Phase 1) — testify is confirmed no longer a direct dependency for consumers.
+- Re-run `wc -l gourdiantoken.*.go` and `grep -n '^func\|^type' gourdiantoken.maker.go` etc. to get fresh line numbers before touching Phase 4 — don't trust any line number in the Phase 1-3 sections below, they're historical and some are already stale relative to current HEAD.
+
+### Verification baseline in this environment (may differ in the new one)
+
+- `go build ./...`, `go vet ./...`, `gofmt -l .` / `goimports -l .` all clean.
+- Full non-live-service test sweep passes with **zero unexpected failures**. The only failures observed, consistently, across every verification run in this environment, are these 6 — all because this sandbox has no local Redis/MongoDB/PostgreSQL (see `CLAUDE.md` for the exact connection strings they expect):
+  - `TestNewGourdianTokenMakerWithGorm_FailsWithCancelledContext`
+  - `TestNewGourdianTokenMakerWithGorm_SupportsRevocationAndRotation`
+  - `TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository`
+  - `TestNewGourdianTokenMakerWithMongo_FailsWithCancelledContext`
+  - `TestNewGourdianTokenMakerWithRedis_FailsWithCancelledContext`
+  - `TestNewGourdianTokenMakerWithRedis_SupportsHighPerformanceOperations`
+  - **If a new environment has live Redis/MongoDB/PostgreSQL available, run the full suite there** — Phase 4 item 1 (the Mongo duplicate-key fix) genuinely needs a live MongoDB with `useTransactions=true` to verify the regression test actually exercises the fix; it could not be verified in this environment and is one of the two reasons Phase 4 wasn't started.
+- Race detector (`go test -race`) clean on all Memory/Concurrency/Close/sentinel-error tests.
+
+### Setting up Redis/PostgreSQL/MongoDB in the new environment
+
+Three local services are needed, all with **hardcoded, non-configurable** connection details baked into `token.test.helper_test.go` (not env vars — no docker-compose file exists in this repo, per `CLAUDE.md`):
+
+| Service | Connection details | Notes |
+|---|---|---|
+| **Redis** | `localhost:6379`, password `redis_password`, DB index `15` | Any recent Redis image works |
+| **PostgreSQL** | `host=localhost user=postgres_user password=postgres_password dbname=postgres_db port=5432 sslmode=disable` | User/db must already exist; GORM auto-migrates the `revoked_tokens`/`rotated_tokens` tables itself (`db.AutoMigrate` in `NewGormTokenRepository`) — no manual schema needed |
+| **MongoDB** | `mongodb://root:mongo_password@localhost:27017`, database `gourdian_test` | **Must run as a replica set**, even a single-node one — plain standalone MongoDB doesn't support transactions, and Phase 4 item 1 (the fix that's up next) specifically needs `useTransactions=true` to work |
+
+Quickest way to stand these up with Docker:
+
+```bash
+# Redis
+docker run -d --name gourdian-redis -p 6379:6379 redis:7 redis-server --requirepass redis_password
+
+# PostgreSQL
+docker run -d --name gourdian-postgres -p 5432:5432 \
+  -e POSTGRES_USER=postgres_user -e POSTGRES_PASSWORD=postgres_password -e POSTGRES_DB=postgres_db \
+  postgres:16
+
+# MongoDB — single-node replica set (required for transactions)
+docker run -d --name gourdian-mongo -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=mongo_password \
+  mongo:7 --replSet rs0
+# then initialize the replica set once it's up:
+docker exec -it gourdian-mongo mongosh -u root -p mongo_password --authenticationDatabase admin \
+  --eval 'rs.initiate()'
+```
+
+Once all three are reachable, confirm with `make test` (or `go test -count=1 -timeout=5m -cover ./... -bench=. -benchmem`) and `make race`. Expect **zero failures** — the 6 tests listed in the "Verification baseline" section above should all pass with these services up, confirming Phase 1-3's changes didn't regress anything backend-specific, before starting Phase 4.
+
+### Deviations from the plan text below, discovered during implementation (already applied — don't redo, just be aware)
+
+1. **`extractCommonClaims`'s `iss` handling is narrower than first drafted.** The plan (2b item 5) says to apply a "checked pattern" to `iss` like jti/sub/sid. A first attempt made `iss` unconditionally required (erroring if the key is absent), which broke 2 existing tests (`TestTokenClaims_Mapping/empty_roles_in_access_token` and `.../wrong_token_type_in_refresh_claims`) that construct claims maps without an `iss` key to isolate testing other checks. **Fixed to:** only error when `iss` is *present but not a string*; an absent `iss` claim still silently becomes `""`, matching that `iss` is not part of `baseRequired` and is only mandatory when a caller's `RequiredClaims` config lists it (enforced upstream in `validateTokenClaims`, unaffected). See the comment left in `extractCommonClaims` in `gourdiantoken.validation.go`.
+2. **Doc-comment placement bug, self-inflicted and fixed.** Several `Edit` calls that inserted new shared helpers (`validateUserAndUsername`/`newTokenID`/`signClaims` before `CreateAccessToken`; `parseAndValidateToken` before `VerifyAccessToken`; `revokeToken` before `RevokeAccessToken`; `decodePEMBlock` before `parseEdDSAPrivateKey`; `commonClaims`/`extractCommonClaims` before `mapToAccessClaims`) initially landed the new function **inside** the existing doc comment block of the function below it (no blank-line separator), which silently reattached that doc comment to the new helper and left the original exported function undocumented. All were caught via `gofmt -l`/`goimports -l` flagging the files plus `go doc` spot-checks, and fixed by moving each new block to sit after the *previous* function's closing brace instead. **If you add more shared helpers in Phase 4/5, verify placement the same way** (`go doc . JWTMaker.<Method>` should show the real doc text, not a generic one-liner) — this class of bug is easy to reintroduce with the same edit pattern.
+3. **`Option`/`WithLogger` (Phase 3b) was threaded through all 6 constructors, not just `NewGourdianTokenMaker`.** The plan only explicitly names `NewGourdianTokenMaker`, but says "passed to the constructors" (plural), so `opts ...Option` was added to `NewGourdianTokenMakerNoStorage`, `WithMemory`, `WithGorm`, `WithMongo`, `WithRedis`, and `DefaultGourdianTokenMaker` too, all forwarding to `NewGourdianTokenMaker(ctx, config, tokenRepo, opts...)`. This is additive/backward-compatible (trailing variadic param).
+4. **Rotated-token wording unification (3a) done via `fmt.Errorf("%w", ErrTokenRotated)`** at both `parseAndValidateToken` (was "token has been rotated and is no longer valid") and `RotateRefreshToken` (was already "token has been rotated"). Both now read exactly "token has been rotated". Confirmed all 18 pre-existing test assertions (substring-matching "token has been rotated") still pass.
+5. **The `token.verification_test.go` 3-way `strings.Contains` conversion (3a) resolved to `context.Canceled`, not a new gourdiantoken sentinel.** Traced the actual code path: `MemoryTokenRepository.IsTokenRevoked` never checks `ctx` at all, so the "revocation" substring in the original fuzzy OR-check was speculative/unreachable with the Memory backend under test — the real and only failure path is the top-level `ctx.Err()` check in `parseAndValidateToken`, which wraps the stdlib `context.Canceled` sentinel. Converted to `assert.ErrorIs(t, err, context.Canceled)`.
+
+### What's left: Phase 4 and Phase 5 (see full details further below, unchanged from the verified plan)
+
+**Phase 4 — repository backend fixes.** Not started. Four items, in order of priority:
+1. Mongo `MarkTokenRotatedAtomic` duplicate-key fix — **needs live MongoDB with transactions to verify**, could not be done in this environment. The fix itself (move `mongo.IsDuplicateKeyError` detection out of the transaction callback to the outer boundary) is fully specified below and doesn't require guessing — just needs a real MongoDB to run the regression test against (`useTransactions=true`), per `CLAUDE.md`'s connection string (`mongodb://root:mongo_password@localhost:27017`, db `gourdian_test`).
+2. `RotateRefreshToken` unrecoverable-lockout bug — doc-comment-only fix, no live service needed, safe to do in any environment.
+3. Redis TTL floor — doc-comment-only fix on the `TokenRepository` interface, no live service needed.
+4. Mongo `Close(ctx)` vs. others' bare `Close()` — flag only (already confirmed non-interface-breaking, see Phase 4 item 4 below), plus add test coverage for Gorm/Redis/Mongo `Close()` — **the Gorm/Redis tests need live services**; only Mongo... actually all three need live services. None of item 4's test-coverage work could be done in this environment either.
+
+Given items 1 and 4 need live infra this sandbox doesn't have, **the most a no-live-service environment can do for Phase 4 is items 2 and 3 (pure doc-comment changes) plus writing (but not running/verifying) the Mongo regression test and the three Close() tests for later execution.** A new environment with `docker compose` access for Redis/MongoDB/PostgreSQL should do all of Phase 4 properly, including running the regression tests.
+
+**Phase 5 — UUID → string migration.** Not started, and per the plan's own design decision, must not start until Phase 4 ships — lands on a new `dev#manish#remove_uuid` branch (doesn't exist yet), separate v2.0.0 module path. Fully specified below; no blockers, but it's a large mechanical change — re-verify every line reference against current source before touching it, per the "Before you start" section's own instructions.
+
+---
+
 Scope: the `gourdiantoken` Go library at repo root (package `gourdiantoken`). Excludes bark.txt/.bark.toml tooling entirely.
 
 This is a merged plan built from three passes: an initial research pass, a follow-up that re-verified every claim line-by-line, and a third pass (this one) that re-verified **every remaining claim against current source** using three parallel read-only explorations covering Phase 1, Phase 2/3, and Phase 4/5 respectively, plus one manual spot-check. Nearly everything held up exactly. Where this pass found a factual error, a missing item, or a new finding, it's called out explicitly below with a **[Verified 2026-07-03]** or **[Correction]** tag rather than silently rewritten — per this document's own stated policy of expanding rather than silently fixing.
@@ -31,7 +118,7 @@ This applies with extra force to Phase 2 (the file split) and Phase 5 (the UUID 
 
 ---
 
-## Phase 0 — Baseline safety net (prerequisite, do first)
+## Phase 0 — Baseline safety net (prerequisite, do first) ✅ DONE
 
 Before any refactor, confirm test coverage is adequate to catch regressions during the mechanical file split and dedup work.
 
@@ -45,7 +132,7 @@ Before any refactor, confirm test coverage is adequate to catch regressions duri
 
 ---
 
-## Phase 1 — Safe, isolated fixes (patch release, v1.0.8)
+## Phase 1 — Safe, isolated fixes (patch release, v1.0.8) ✅ DONE (all 10 items, committed)
 
 All behavior-preserving-or-additive, zero public API surface change. Land as one PR.
 
@@ -123,7 +210,7 @@ All behavior-preserving-or-additive, zero public API surface change. Land as one
 
 ---
 
-## Phase 2 — Internal refactors (patch release, v1.0.9), behavior-preserving
+## Phase 2 — Internal refactors (patch release, v1.0.9), behavior-preserving ✅ DONE (2a file split + 2b dedup, committed; see deviation notes #1-2 at top of doc)
 
 Land 2a and 2b as **separate commits** so a regression is easy to bisect between "changed behavior" and "moved code."
 
@@ -179,7 +266,7 @@ Validate every dedup step with `go test ./...` — this is 100% behavior-preserv
 
 ---
 
-## Phase 3 — Public API additions (minor release, v1.1.0)
+## Phase 3 — Public API additions (minor release, v1.1.0) ✅ DONE (3a+3b+3c, committed; see deviation notes #3-5 at top of doc)
 
 ### 3a. Sentinel errors
 
@@ -266,7 +353,7 @@ func (maker *JWTMaker) Close() error {
 
 ---
 
-## Phase 4 — Repository backend fixes (ship with Phase 3, or as v1.1.1 immediately after)
+## Phase 4 — Repository backend fixes (ship with Phase 3, or as v1.1.1 immediately after) ⬜ NOT STARTED — up next
 
 Sequenced after Phase 3 since item 1 references error-boundary conventions consistent with the sentinel-error work.
 
@@ -297,7 +384,7 @@ Sequenced after Phase 3 since item 1 references error-boundary conventions consi
 
 ---
 
-## Phase 5 — UUID → string migration (major release, v2.0.0, separate from v1.x)
+## Phase 5 — UUID → string migration (major release, v2.0.0, separate from v1.x) ⬜ NOT STARTED — blocked on Phase 4 shipping first
 
 Ships on the `dev#manish#remove_uuid` branch, strictly after Phases 0-4 land as v1.x. Breaking by definition (exported struct field types plus 2 interface method signatures change), so it needs its own major version and, per Go modules convention, a new module path (`/v2`).
 
@@ -354,13 +441,15 @@ Ships on the `dev#manish#remove_uuid` branch, strictly after Phases 0-4 land as 
 
 ## Release sequencing
 
-| Release | Contents |
-|---|---|
-| v1.0.8 (patch) | Phase 1 |
-| v1.0.9 (patch) | Phase 2 (2a then 2b as separate commits) |
-| v1.1.0 (minor) | Phase 3 (3a + 3b + 3c) |
-| v1.1.1 (patch) or bundled with v1.1.0 | Phase 4 |
-| v2.0.0 (major) | Phase 5, on `dev#manish#remove_uuid`, strictly after v1.x above stabilizes |
+| Release | Contents | Status |
+|---|---|---|
+| v1.0.8 (patch) | Phase 1 | ✅ done, on `dev#manish#major_fixes` |
+| v1.0.9 (patch) | Phase 2 (2a then 2b as separate commits) | ✅ done, on `dev#manish#major_fixes` |
+| v1.1.0 (minor) | Phase 3 (3a + 3b + 3c) | ✅ done, on `dev#manish#major_fixes` |
+| v1.1.1 (patch) or bundled with v1.1.0 | Phase 4 | ⬜ not started — needs live Redis/MongoDB/PostgreSQL for full verification |
+| v2.0.0 (major) | Phase 5, on `dev#manish#remove_uuid`, strictly after v1.x above stabilizes | ⬜ not started — branch not yet created |
+
+Note these version numbers (v1.0.8 etc.) are the plan's proposed tags, not yet actually tagged/released — no `git tag` or `make release` has been run. All Phase 1-3 work so far lives as regular commits on `dev#manish#major_fixes`, not yet merged to `dev`/`master` or tagged.
 
 Each phase is independently shippable. Phases 1-2 could go out as a single patch release if preferred; Phase 3 as a minor release with a CHANGELOG entry and doc updates; Phase 4 as a follow-on patch/minor depending on whether anything in item 4 ends up needing an interface change (it doesn't — confirmed `TokenRepository` has no `Close()` today, see Phase 4 item 4).
 
