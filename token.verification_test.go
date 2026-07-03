@@ -745,10 +745,7 @@ func TestVerifyAccessToken_ContextCancellation_WithRepository(t *testing.T) {
 		claims, err := maker.VerifyAccessToken(ctx, response.Token)
 		assert.Error(t, err)
 		assert.Nil(t, claims)
-		// The error could be from the repository context check
-		assert.True(t, strings.Contains(err.Error(), "context") ||
-			strings.Contains(err.Error(), "canceled") ||
-			strings.Contains(err.Error(), "revocation"))
+		assert.ErrorIs(t, err, context.Canceled)
 	})
 }
 

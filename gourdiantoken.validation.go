@@ -583,7 +583,7 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required 
 	if mle, ok := claims["mle"].(float64); ok {
 		maxExpiry := time.Unix(int64(mle), 0)
 		if time.Now().After(maxExpiry) {
-			return fmt.Errorf("token exceeded maximum lifetime")
+			return fmt.Errorf("%w", ErrTokenMaxLifetimeExceeded)
 		}
 	}
 

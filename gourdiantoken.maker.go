@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -46,8 +47,37 @@ type JWTMaker struct {
 	cleanupCancel context.CancelFunc
 
 	// logf receives error reports from background cleanup goroutines.
-	// Defaults to a fmt.Printf-based logger; no public setter exists yet.
+	// Defaults to a fmt.Printf-based logger; override via WithLogger.
 	logf func(format string, args ...any)
+
+	// closeOnce ensures Close is idempotent.
+	closeOnce sync.Once
+}
+
+// Option configures optional behavior for a JWTMaker, passed to NewGourdianTokenMaker.
+type Option func(*JWTMaker)
+
+// WithLogger sets the function used to report errors from background cleanup
+// goroutines. Defaults to a fmt.Printf-based logger. Passing nil is a no-op.
+func WithLogger(logf func(format string, args ...any)) Option {
+	return func(maker *JWTMaker) {
+		if logf != nil {
+			maker.logf = logf
+		}
+	}
+}
+
+// Close stops the maker's background cleanup goroutines. Safe to call multiple
+// times and safe to call even if rotation/revocation were never enabled (in which
+// case there are no goroutines to stop). After Close, the maker itself remains
+// usable for Create/Verify/Revoke/Rotate — only the background cleanup stops.
+func (maker *JWTMaker) Close() error {
+	maker.closeOnce.Do(func() {
+		if maker.cleanupCancel != nil {
+			maker.cleanupCancel()
+		}
+	})
+	return nil
 }
 
 // NewGourdianTokenMaker creates a new GourdianTokenMaker with the specified configuration and token repository.
@@ -121,7 +151,7 @@ type JWTMaker struct {
 //	}
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, nil)
-func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, tokenRepo TokenRepository) (GourdianTokenMaker, error) {
+func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, tokenRepo TokenRepository, opts ...Option) (GourdianTokenMaker, error) {
 	// Check context cancellation first
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
@@ -138,12 +168,16 @@ func NewGourdianTokenMaker(ctx context.Context, config GourdianTokenConfig, toke
 
 	// Check repository requirements
 	if (config.RotationEnabled || config.RevocationEnabled) && tokenRepo == nil {
-		return nil, fmt.Errorf("token repository required: RotationEnabled=%v, RevocationEnabled=%v", config.RotationEnabled, config.RevocationEnabled)
+		return nil, fmt.Errorf("%w: RotationEnabled=%v, RevocationEnabled=%v", ErrTokenRepositoryRequired, config.RotationEnabled, config.RevocationEnabled)
 	}
 
 	maker := &JWTMaker{
 		config: config,
 		logf:   func(format string, args ...any) { fmt.Printf(format, args...) },
+	}
+
+	for _, opt := range opts {
+		opt(maker)
 	}
 
 	// Set repository if any feature requiring it is enabled
@@ -259,6 +293,7 @@ func DefaultGourdianTokenMaker(
 	ctx context.Context,
 	symmetricKey string,
 	tokenRepo TokenRepository,
+	opts ...Option,
 ) (GourdianTokenMaker, error) {
 	config := GourdianTokenConfig{
 		RevocationEnabled:        false,
@@ -284,7 +319,7 @@ func DefaultGourdianTokenMaker(
 		config.RevocationEnabled = true
 		config.RotationEnabled = true
 	}
-	return NewGourdianTokenMaker(ctx, config, tokenRepo)
+	return NewGourdianTokenMaker(ctx, config, tokenRepo, opts...)
 }
 
 // validateUserAndUsername validates the userID/username preconditions shared by
@@ -606,7 +641,7 @@ func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString st
 			return nil, fmt.Errorf("failed to check token revocation: %w", err)
 		}
 		if revoked {
-			return nil, fmt.Errorf("token has been revoked")
+			return nil, fmt.Errorf("%w", ErrTokenRevoked)
 		}
 	}
 
@@ -616,7 +651,7 @@ func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString st
 			return nil, fmt.Errorf("failed to check token rotation: %w", err)
 		}
 		if rotated {
-			return nil, fmt.Errorf("token has been rotated and is no longer valid")
+			return nil, fmt.Errorf("%w", ErrTokenRotated)
 		}
 	}
 
@@ -634,7 +669,7 @@ func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString st
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("invalid token: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 
 	if !token.Valid {
@@ -648,7 +683,7 @@ func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString st
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, fmt.Errorf("invalid token claims")
+		return nil, fmt.Errorf("%w", ErrInvalidClaims)
 	}
 
 	if err := validateTokenClaims(claims, tokenType, maker.config.RequiredClaims); err != nil {
@@ -859,7 +894,7 @@ func (maker *JWTMaker) revokeToken(ctx context.Context, tokenType TokenType, tok
 
 	exp := getUnixTime(claims["exp"])
 	if exp == 0 {
-		return fmt.Errorf("token missing exp claim")
+		return fmt.Errorf("%w", ErrMissingExpClaim)
 	}
 	ttl := time.Until(time.Unix(exp, 0))
 
@@ -1073,7 +1108,7 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 //	    // Rotate the token
 //	    newRefresh, err := maker.RotateRefreshToken(r.Context(), oldToken)
 //	    if err != nil {
-//	        if strings.Contains(err.Error(), "rotated") {
+//	        if errors.Is(err, gourdiantoken.ErrTokenRotated) {
 //	            // Possible token theft detected
 //	            log.Printf("Token reuse detected for token: %v", err)
 //	            http.Error(w, "security violation", http.StatusForbidden)
@@ -1104,7 +1139,7 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 //
 //	newToken, err := maker.RotateRefreshToken(ctx, oldToken)
 //	if err != nil {
-//	    if strings.Contains(err.Error(), "rotated") {
+//	    if errors.Is(err, gourdiantoken.ErrTokenRotated) {
 //	        // Token theft detected
 //	        securityLog.Alert("Token reuse attempt detected", map[string]interface{}{
 //	            "token_prefix": oldToken[:10],
@@ -1172,7 +1207,7 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 
 	if !marked {
 		// Token was already rotated by another goroutine
-		return nil, fmt.Errorf("token has been rotated")
+		return nil, fmt.Errorf("%w", ErrTokenRotated)
 	}
 
 	// Check context before creating new token

@@ -303,3 +303,25 @@ type GourdianTokenMaker interface {
 	//	// Return newToken to client
 	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
 }
+
+// GourdianTokenMakerCloser is an optional interface implemented by GourdianTokenMaker
+// implementations that support stopping their background cleanup goroutines. It is
+// deliberately separate from GourdianTokenMaker so that adding it does not break any
+// existing external implementer of that interface.
+//
+// Example:
+//
+//	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, tokenRepo)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer func() {
+//	    if closer, ok := maker.(gourdiantoken.GourdianTokenMakerCloser); ok {
+//	        closer.Close()
+//	    }
+//	}()
+type GourdianTokenMakerCloser interface {
+	// Close stops any background cleanup goroutines started by the maker.
+	// Safe to call multiple times.
+	Close() error
+}

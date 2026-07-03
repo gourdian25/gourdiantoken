@@ -14,7 +14,10 @@
 ├── go.sum
 ├── gourdiantoken.benchmark_test.go
 ├── gourdiantoken.claims.go
+├── gourdiantoken.close_test.go
 ├── gourdiantoken.config.go
+├── gourdiantoken.errors.go
+├── gourdiantoken.errors_test.go
 ├── gourdiantoken.factories.go
 ├── gourdiantoken.factories_test.go
 ├── gourdiantoken.interfaces.go
@@ -37,4 +40,4 @@
 ├── token.verification_test.go
 └── version.go
 
-1 directories, 36 files
+1 directories, 39 files

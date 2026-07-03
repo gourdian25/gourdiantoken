@@ -671,7 +671,7 @@
 //	// Handle token expiration
 //	claims, err := maker.VerifyAccessToken(ctx, token)
 //	if err != nil {
-//	    if strings.Contains(err.Error(), "expired") {
+//	    if errors.Is(err, gourdiantoken.ErrTokenExpired) {
 //	        // Attempt refresh
 //	        newToken, err := refreshAccessToken(ctx)
 //	        if err != nil {
@@ -686,7 +686,7 @@
 //	// Handle rotation detection
 //	newToken, err := maker.RotateRefreshToken(ctx, oldToken)
 //	if err != nil {
-//	    if strings.Contains(err.Error(), "rotated") {
+//	    if errors.Is(err, gourdiantoken.ErrTokenRotated) {
 //	        // Suspicious activity detected
 //	        logSecurityAlert("token reuse detected")
 //	        revokeAllUserTokens(ctx, userID)

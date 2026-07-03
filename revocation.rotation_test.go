@@ -4,7 +4,6 @@ package gourdiantoken
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -556,8 +555,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		if err != nil {
 			// Failure is acceptable if it's due to expiration
 			t.Logf("Rotation failed near expiry (acceptable): %v", err)
-			assert.True(t,
-				strings.Contains(err.Error(), "expired"),
+			assert.ErrorIs(t, err, ErrTokenExpired,
 				"Near-expiry failure should be due to expiration: %v", err)
 		} else {
 			// Success is also acceptable if timing worked out

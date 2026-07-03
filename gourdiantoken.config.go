@@ -185,6 +185,9 @@ type GourdianTokenConfig struct {
 //	    7*24*time.Hour, 30*24*time.Hour,
 //	    5*time.Minute, 6*time.Hour,
 //	)
+//
+// Deprecated: use DefaultGourdianTokenConfig plus struct-literal field assignment
+// instead. NewGourdianTokenConfig will be removed in a future major version.
 func NewGourdianTokenConfig(
 	signingMethod SigningMethod,
 	rotationEnabled, revocationEnabled bool,
