@@ -13,14 +13,19 @@
 ├── go.mod
 ├── go.sum
 ├── gourdiantoken.benchmark_test.go
+├── gourdiantoken.claims.go
+├── gourdiantoken.config.go
 ├── gourdiantoken.factories.go
 ├── gourdiantoken.factories_test.go
-├── gourdiantoken.go
+├── gourdiantoken.interfaces.go
+├── gourdiantoken.keys.go
+├── gourdiantoken.maker.go
 ├── gourdiantoken.repository.gorm.imp.go
 ├── gourdiantoken.repository.inmemory.imp.go
 ├── gourdiantoken.repository.mongo.imp.go
 ├── gourdiantoken.repository.redis.imp.go
 ├── gourdiantoken.repository_test.go
+├── gourdiantoken.validation.go
 ├── integration_test.go
 ├── plan.md
 ├── revocation.rotation_test.go
@@ -32,4 +37,4 @@
 ├── token.verification_test.go
 └── version.go
 
-1 directories, 31 files
+1 directories, 36 files
