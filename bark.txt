@@ -22,7 +22,6 @@
 ├── gourdiantoken.repository.redis.imp.go
 ├── gourdiantoken.repository_test.go
 ├── integration_test.go
-├── repository.factories.go.bak
 ├── revocation.rotation_test.go
 ├── token.bench.helper.go
 ├── token.creation_test.go
@@ -32,4 +31,4 @@
 ├── token.verification_test.go
 └── version.go
 
-1 directories, 31 files
+1 directories, 30 files
