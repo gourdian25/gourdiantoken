@@ -541,28 +541,26 @@ func (r *MongoTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token
 		CreatedAt: time.Now(),
 	}
 
-	var marked bool
 	err := r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
-
 		_, err := r.rotatedCollection.InsertOne(sessionCtx, doc)
-		if err != nil {
-			// Check if duplicate key error (already exists)
-			if mongo.IsDuplicateKeyError(err) {
-				marked = false
-				return nil
-			}
-			return fmt.Errorf("failed to mark token as rotated: %w", err)
-		}
-
-		marked = true
-		return nil
+		return err
 	})
 
 	if err != nil {
-		return false, err
+		// Duplicate-key detection happens here, at the transaction boundary, rather than
+		// inside the callback above: a write error surfaced to the driver mid-transaction
+		// can cause the server to abort the transaction regardless of the callback's return
+		// value, making commit behavior driver-version-dependent if handled internally.
+		// Checking after withTransaction returns means the transaction has already been
+		// aborted/rolled back, and "already rotated by someone else" is decided cleanly at
+		// the outer boundary — the same pattern Redis's SetNX and GORM's OnConflict use.
+		if mongo.IsDuplicateKeyError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to mark token as rotated: %w", err)
 	}
 
-	return marked, nil
+	return true, nil
 }
 
 // IsTokenRotated checks if a token has been rotated by checking its hash in MongoDB.

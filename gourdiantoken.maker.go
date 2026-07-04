@@ -1070,6 +1070,16 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 //	If multiple requests attempt to rotate the same token simultaneously, only the first
 //	succeeds and others receive an error. This detects token theft attempts.
 //
+// Known Failure Mode — Unrecoverable Lockout:
+//
+//	The old token is marked rotated *before* the new token is created. If CreateRefreshToken
+//	then fails (repository outage, signing error, context cancellation, etc.), this method
+//	returns that error but does NOT un-mark the old token's rotation record. The old refresh
+//	token is left permanently unusable and no new token was issued — the caller's session is
+//	locked out until they re-authenticate from scratch. A real fix requires a two-phase-commit-
+//	style redesign (delay marking rotated until after the new token is successfully created,
+//	trading off a small race window) and is tracked as a separate follow-up, not fixed here.
+//
 // Security Benefits:
 //   - Prevents token reuse attacks
 //   - Detects concurrent rotation attempts (possible token theft)

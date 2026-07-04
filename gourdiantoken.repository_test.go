@@ -1883,3 +1883,37 @@ func TestMemoryRepository_Close(t *testing.T) {
 	err = memRepo.MarkTokenRevoke(ctx, AccessToken, token, 30*time.Minute)
 	assert.NoError(t, err, "operations should work after close")
 }
+
+// TestRepositoryClose_Idempotent verifies that Close() on the Redis, GORM, and MongoDB
+// repository backends is safe to call more than once, mirroring the coverage
+// TestMemoryRepository_Close already provides for MemoryTokenRepository. Prior to this test,
+// only MemoryTokenRepository.Close() had any test coverage at all.
+func TestRepositoryClose_Idempotent(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		if name == "Memory" {
+			continue // already covered by TestMemoryRepository_Close
+		}
+
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			var closeFn func() error
+			switch r := repo.(type) {
+			case *RedisTokenRepository:
+				closeFn = r.Close
+			case *GormTokenRepository:
+				closeFn = r.Close
+			case *MongoTokenRepository:
+				closeFn = func() error { return r.Close(context.Background()) }
+			default:
+				t.Fatalf("unhandled repository type %T for backend %q", repo, name)
+			}
+
+			assert.NoError(t, closeFn(), "first close should succeed")
+			assert.NoError(t, closeFn(), "second close should succeed (idempotent)")
+		})
+	}
+}

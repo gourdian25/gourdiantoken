@@ -2,7 +2,23 @@
 
 ## ⚠️ IMPLEMENTATION STATUS — READ THIS FIRST BEFORE DOING ANYTHING ELSE
 
-**Phases 0, 1, 2, and 3 are DONE, committed, and verified.** Only **Phase 4** and **Phase 5** remain. Do not re-do the file split or re-apply the Phase 1-3 fixes described below — they're already in the tree. This section is the handoff note for continuing in a new environment/session.
+**Phases 0, 1, 2, 3, and 4 are DONE.** Only **Phase 5** remains, and it's still blocked on Phase 4 shipping first (see Phase 4's own note on this — Phase 4 is code-complete and largely verified, but ship it as a real release before starting Phase 5). Do not re-do the file split or re-apply the Phase 1-4 fixes described below — they're already in the tree. This section is the handoff note for continuing in a new environment/session.
+
+**2026-07-04 update:** Phase 4 (all 4 items) was completed this session, on the same `dev#manish#major_fixes` branch, working tree not yet committed (per this session's instructions: never commit unless the user asks). One new finding surfaced beyond what Phase 4 originally scoped — a real, pre-existing Redis `Close()` non-idempotency bug — documented in Phase 4's own section below along with the fix. One item (the Mongo regression test) is written and compiles but could not be executed in this environment; see "Mongo verification gap" below for exactly what's needed to close it out.
+
+### Mongo verification gap (read before touching Phase 5)
+
+This session's sandbox turned out to have its own pre-existing, already-running Redis and PostgreSQL fixtures reachable at the hardcoded `localhost` addresses (used to verify Redis/GORM work below), but its MongoDB was a bare **standalone, no-auth** mongod completely unrelated to the `gourdian-mongo` Docker container built in the user's own terminal during this session (confirmed via an unauthenticated `hello` command returning no `setName`/`hosts`/`me` fields, and a successful unauthenticated `ListDatabaseNames` call — proving auth wasn't even enabled). The sandbox has no `docker` group membership and no local `mongod`/systemd service to reconfigure, so this environment could not run anything against a real replica-set MongoDB. **The user did correctly build a working `gourdian-mongo` container** (single-node `rs0` replica set, keyfile-based internal auth, root user, `rs.initiate()` confirmed successful) — it just isn't reachable from where this session's tests ran.
+
+**Before Phase 5, or before considering Phase 4 fully closed out, run this in an environment where `gourdian-mongo` (or an equivalent) is actually reachable:**
+
+```
+go test -run TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions -v ./...
+go test -run TestRepositoryClose_Idempotent/MongoDB -v ./...
+go test -run TestNewGourdianTokenMakerWithMongo -v ./...
+```
+
+The first is the new Phase 4 item 1 regression test (`gourdiantoken.repository.mongo_test.go`) — to confirm it actually would have caught the pre-fix bug, temporarily revert the boundary-move in `MarkTokenRotatedAtomic` (move `mongo.IsDuplicateKeyError` back inside the transaction callback) and confirm this test fails, then re-apply the fix and confirm it passes. The other two commands are pre-existing tests that should now pass given a correctly configured replica set (they were the ones failing in the *original* handoff purely for lack of live infra, not for any code reason).
 
 ### Where things stand
 
@@ -353,7 +369,7 @@ func (maker *JWTMaker) Close() error {
 
 ---
 
-## Phase 4 — Repository backend fixes (ship with Phase 3, or as v1.1.1 immediately after) ⬜ NOT STARTED — up next
+## Phase 4 — Repository backend fixes (ship with Phase 3, or as v1.1.1 immediately after) ✅ DONE (2026-07-04, not yet committed — see Mongo verification gap above before considering it fully closed out)
 
 Sequenced after Phase 3 since item 1 references error-boundary conventions consistent with the sentinel-error work.
 
@@ -366,21 +382,28 @@ Sequenced after Phase 3 since item 1 references error-boundary conventions consi
      - This makes the atomic contract identical to Redis's `SetNX` (**[Verified]** L394) and GORM's `OnConflict{DoNothing:true}` (L472-475) + `RowsAffected` (L482): "false, nil" means "not newly marked, no real error," decided at the outer boundary. Both confirmed to match this pattern exactly.
    - **[Verified 2026-07-03]** `MarkTokenRevoke` (L317-350) and non-atomic `MarkTokenRotated` (L458-484) both use `ReplaceOne(..., options.Replace().SetUpsert(true))`, which matches-then-replaces rather than blind-inserting and structurally cannot hit a duplicate-key error — confirmed the fix is correctly scoped to `MarkTokenRotatedAtomic` only.
    - Add a regression test exercising concurrent/duplicate `MarkTokenRotatedAtomic` calls against Mongo with `useTransactions=true` to lock in the corrected boundary behavior.
+   - **[Implemented 2026-07-04]** Fix applied exactly as specified: the transaction callback now just does `_, err := r.rotatedCollection.InsertOne(sessionCtx, doc); return err`, and `mongo.IsDuplicateKeyError(err)` is checked after `withTransaction` returns, outside the (by then already aborted/rolled-back) transaction. Regression test added as `TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions` in the new file `gourdiantoken.repository.mongo_test.go`: spins up 10 concurrent goroutines calling `MarkTokenRotatedAtomic` on the same token against a repo constructed with `useTransactions=true` (via `NewMongoTokenRepository(baseRepo.revokedCollection.Database(), true)`, reusing the shared test factory's connection), asserts exactly one reports `(true, nil)` and the rest report `(false, nil)` with zero raw errors leaking through. **Could not be run in this session's environment** — see the "Mongo verification gap" note at the top of this document for why, and the exact commands to run once a real replica-set Mongo is reachable.
 
 2. **`RotateRefreshToken` unrecoverable-lockout bug. [Verified 2026-07-03 — matches exactly]**
    - L1928-1969: confirmed the sequence — `MarkTokenRotatedAtomic` succeeds at L1948, then `CreateRefreshToken` is called at L1963; if it fails, the function returns the raw error at L1965 with **no compensating call** to un-mark the rotation record. The old refresh token becomes permanently unusable with no new token issued — an unrecoverable lockout for that session.
    - **Document only this pass** — add a clear godoc warning on `RotateRefreshToken` describing this failure mode. A real fix is a two-phase-commit-style redesign (delay marking rotated until after the new token is successfully created, trading off a small race window) — flag as a separate follow-up decision rather than bundling into this phase.
+   - **[Implemented 2026-07-04]** Added a "Known Failure Mode — Unrecoverable Lockout" doc-comment section to `RotateRefreshToken` in `gourdiantoken.maker.go`, between the existing "Atomicity Guarantee" and "Security Benefits" sections. Doc-only change, verified via `go build`.
 
 3. **Redis's `minRedisTTL` (100ms) floor — document divergence, do not change behavior. [Verified 2026-07-03 — exact]**
    - `gourdiantoken.repository.redis.imp.go`: constant defined L20 (`minRedisTTL = 100 * time.Millisecond`), exactly 3 usage sites confirmed (L178-179, L317-318, L385-387), each clamping TTLs below the floor. Confirmed zero equivalent floor in in-memory/GORM/Mongo backends (`grep -n "minTTL\|MinTTL\|floor"` across all three returns nothing).
    - Document the divergence explicitly in `TokenRepository`'s interface godoc, e.g. "implementations may enforce a minimum TTL floor." Do not remove or change the floor — it may have been an intentional Redis-specific safeguard against near-zero-TTL races. Only change behavior if you separately confirm with the maintainer that it's unintentional.
+   - **[Implemented 2026-07-04]** Added the divergence note to `TokenRepository`'s doc comment in `gourdiantoken.interfaces.go`, in the existing "Implementation Considerations" bullet list. No behavior change, `minRedisTTL` untouched. Doc-only change, verified via `go build`.
 
 4. **Mongo's `Close(ctx context.Context) error` vs. the other three backends' bare `Close() error`. [Correction: interface question now resolved, not just "verify first"]**
    - **[Verified 2026-07-03]:** `TokenRepository` (defined L478, closing ~L570) does **not** declare a `Close()` method at all — confirmed via full-file grep, zero matches for "Close" anywhere in the interface definition. This means the signature mismatch across the four concrete repository types (`MemoryTokenRepository.Close() error` at `gourdiantoken.repository.inmemory.imp.go:623`, `RedisTokenRepository.Close() error` at `gourdiantoken.repository.redis.imp.go:807`, `GormTokenRepository.Close() error` at `gourdiantoken.repository.gorm.imp.go:853`, `MongoTokenRepository.Close(ctx context.Context) error` at `gourdiantoken.repository.mongo.imp.go:888`) is **not an interface-satisfaction bug** — it's an inconsistency between the four concrete types' ad hoc conventions, since callers only ever invoke `Close` on the concrete type directly. Confirmed low-urgency, not interface-breaking.
    - Flag only, no change this pass either way (adding `Close()` to the interface itself would be new API surface, a separate design decision from harmonizing an existing method).
    - Worth doing regardless of the signature question: **[Verified 2026-07-03]** confirmed only `MemoryTokenRepository.Close()` has test coverage today (3 call sites total, all in `gourdiantoken.benchmark_test.go`/`gourdiantoken.repository_test.go`) — Gorm/Redis/Mongo's `Close()` implementations have zero test coverage. Add coverage for all three.
+   - **[Implemented 2026-07-04]** Added `TestRepositoryClose_Idempotent` to `gourdiantoken.repository_test.go`, table-driven over `getTestRepositoryFactories()` (skipping `Memory`, already covered by `TestMemoryRepository_Close`), type-switching per backend to call the right `Close()` signature (`Mongo`'s takes a `context.Context`; the other two don't), asserting two consecutive `Close()` calls both return no error. Verified passing for `Redis` and `GORM` in this session (real live services, see below); `MongoDB` subtest written but blocked on the same environment gap described above.
+   - **[New finding, 2026-07-04 — not anticipated by the plan text above]:** writing this test immediately surfaced a real, previously-undetected bug: **`RedisTokenRepository.Close()` was not idempotent.** `go-redis`'s own `(*Client).Close()` returns `ErrClosed` ("redis: client is closed") if called a second time (confirmed directly in the `go-redis v9.7.3` source, `internal/pool/pool.go:481-483`) — unlike `GormTokenRepository.Close()` (backed by `database/sql`'s `(*DB).Close()`, which the stdlib documents as idempotent) and unlike the `sync.Once`-guarded pattern already used by `MemoryTokenRepository.Close()` and `JWTMaker.Close()` elsewhere in this codebase. **Fixed:** added a `closeOnce sync.Once` field to `RedisTokenRepository` (`gourdiantoken.repository.redis.imp.go`) and wrapped the existing `r.client.Close()` call in it, matching the established idempotent-Close convention. This is a genuine bug fix, not just test coverage — flagging it explicitly per this document's own policy of expanding rather than silently fixing. Verified: `TestRepositoryClose_Idempotent/Redis` failed before this fix (second `Close()` call returned the `ErrClosed` error) and passes after it, with zero `go test -race` data races introduced.
 
-**Files touched in Phase 4:** `gourdiantoken.repository.mongo.imp.go`, `gourdiantoken.maker.go` (doc comment), `gourdiantoken.repository.redis.imp.go` (doc comment only), a Mongo-specific regression test file.
+**Files touched in Phase 4:** `gourdiantoken.repository.mongo.imp.go` (fix + doc), `gourdiantoken.maker.go` (doc comment), `gourdiantoken.repository.redis.imp.go` (doc comment + the new `closeOnce` idempotency fix), `gourdiantoken.interfaces.go` (doc comment), `gourdiantoken.repository_test.go` (new `TestRepositoryClose_Idempotent`), `gourdiantoken.repository.mongo_test.go` (new file, the Mongo regression test).
+
+**Verification performed 2026-07-04 (this session):** `go build ./...`, `go vet ./...`, `gofmt -l .` all clean. Full `go test -count=1 -timeout=5m ./...` and `go test -race -count=1 -timeout=5m ./...`: every failure across both runs traced to the `MongoDB` subtest specifically (confirmed by diffing subtest-level pass/fail, not just parent-level `--- FAIL` lines, which Go reports for the whole parent whenever any one subtest fails) — zero failures and zero data races on `Memory`, `Redis`, or `GORM` subtests, and zero regressions relative to the Phase 1-3 baseline. This session's sandbox had working Redis and PostgreSQL fixtures reachable at the hardcoded test addresses but no usable MongoDB (see "Mongo verification gap" note at the top of this document) — full Mongo verification (including confirming the regression test fails when the fix is reverted, per this document's own verification-command list) is the one remaining step before Phase 4 can be called fully closed out.
 
 ---
 
@@ -446,7 +469,7 @@ Ships on the `dev#manish#remove_uuid` branch, strictly after Phases 0-4 land as 
 | v1.0.8 (patch) | Phase 1 | ✅ done, on `dev#manish#major_fixes` |
 | v1.0.9 (patch) | Phase 2 (2a then 2b as separate commits) | ✅ done, on `dev#manish#major_fixes` |
 | v1.1.0 (minor) | Phase 3 (3a + 3b + 3c) | ✅ done, on `dev#manish#major_fixes` |
-| v1.1.1 (patch) or bundled with v1.1.0 | Phase 4 | ⬜ not started — needs live Redis/MongoDB/PostgreSQL for full verification |
+| v1.1.1 (patch) or bundled with v1.1.0 | Phase 4 | ✅ code-complete 2026-07-04, on `dev#manish#major_fixes` — Mongo regression test written but not yet run against a real replica set, see "Mongo verification gap" note |
 | v2.0.0 (major) | Phase 5, on `dev#manish#remove_uuid`, strictly after v1.x above stabilizes | ⬜ not started — branch not yet created |
 
 Note these version numbers (v1.0.8 etc.) are the plan's proposed tags, not yet actually tagged/released — no `git tag` or `make release` has been run. All Phase 1-3 work so far lives as regular commits on `dev#manish#major_fixes`, not yet merged to `dev`/`master` or tagged.
