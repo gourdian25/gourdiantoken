@@ -4,7 +4,7 @@
 
 **Phases 0, 1, 2, 3, and 4 are DONE and fully verified.** Only **Phase 5** remains, and it's still blocked on Phase 4 shipping first as a real release (a v1.x tag/release before starting Phase 5's v2.0.0 work). Do not re-do the file split or re-apply the Phase 1-4 fixes described below — they're already in the tree. This section is the handoff note for continuing in a new environment/session.
 
-**2026-07-04 update:** Phase 4 (all 4 items) was completed and fully verified this session, on the same `dev#manish#major_fixes` branch, working tree not yet committed (per this session's instructions: never commit unless the user asks). Two new findings surfaced beyond what Phase 4 originally scoped: a real, pre-existing Redis `Close()` non-idempotency bug (fixed, documented in Phase 4's own section below) and a real race in the `TestClose_StopsCleanupGoroutines` test itself (fixed, see Phase 3b-adjacent test coverage notes / `gourdiantoken.close_test.go`). The full suite (`go test -count=1 -timeout=5m -cover ./...`) and race detector (`go test -race -count=1 -timeout=5m ./...`) both pass cleanly across all four backends (Memory/Redis/GORM/MongoDB) on the user's own machine, with real Redis/MongoDB/PostgreSQL — see "Mongo verification gap" below for the two non-code environment issues (a stuck Docker Desktop port mapping, and a replica-set `directConnection=true` requirement) that had to be resolved to get there.
+**2026-07-04 update:** Phase 4 (all 4 items) was completed and fully verified this session, on the same `dev#manish#major_fixes` branch. Two new findings surfaced beyond what Phase 4 originally scoped: a real, pre-existing Redis `Close()` non-idempotency bug (fixed, documented in Phase 4's own section below) and a real race in the `TestClose_StopsCleanupGoroutines` test itself (fixed, see Phase 3b-adjacent test coverage notes / `gourdiantoken.close_test.go`). The full suite (`go test -count=1 -timeout=5m -cover ./...`) and race detector (`go test -race -count=1 -timeout=5m ./...`) both pass cleanly across all four backends (Memory/Redis/GORM/MongoDB) on the user's own machine, with real Redis/MongoDB/PostgreSQL — see "Mongo verification gap" below for the two non-code environment issues (a stuck Docker Desktop port mapping, and a replica-set `directConnection=true` requirement) that had to be resolved to get there. **This session's changes are already committed** (this repo has an external auto-commit hook — see "Where things stand" below for exact commit hashes) and pushed to `origin/dev#manish#major_fixes`.
 
 ### Mongo verification gap — RESOLVED 2026-07-04, root cause was a stuck Docker Desktop port mapping, not the code
 
@@ -21,22 +21,30 @@ This took two separate, stacked problems to fully untangle:
 
 **Anyone else hitting `SCRAM-SHA-1: AuthenticationFailed` against a `gourdian-mongo`-style container they've verified is correctly configured** should suspect this same class of bug rather than re-checking the container's auth/replica-set setup: test with `docker run --rm --network container:<name> mongo:7 mongosh ...` first to confirm the container itself is fine, then check `sudo ss -tlnp | grep <port>` for a listener with no attributable process, and if a full Docker Desktop restart doesn't clear it, moving to a different host port is the fast, low-risk fix.
 
-**Now unblocked — run these to close out Phase 4 verification:**
+**Verified 2026-07-04 — all green, nothing left pending on Phase 4:**
 
 ```
-go test -run TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions -v ./...
-go test -run TestRepositoryClose_Idempotent/MongoDB -v ./...
-go test -run TestNewGourdianTokenMakerWithMongo -v ./...
-go test -count=1 -timeout=5m -cover ./...
-go test -race -count=1 -timeout=5m ./...
+go test -run TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions -v ./...   # PASS
+go test -run TestRepositoryClose_Idempotent/MongoDB -v ./...                                            # PASS
+go test -run TestNewGourdianTokenMakerWithMongo -v ./...                                                # PASS
+go test -count=1 -timeout=5m -cover ./...                # PASS, coverage: 78.5% of statements, 77.769s
+go test -race -count=1 -timeout=5m ./...                 # ok, 81.179s, zero data races
 ```
 
-The first is the new Phase 4 item 1 regression test (`gourdiantoken.repository.mongo_test.go`) — to confirm it actually would have caught the pre-fix bug, temporarily revert the boundary-move in `MarkTokenRotatedAtomic` (move `mongo.IsDuplicateKeyError` back inside the transaction callback) and confirm this test fails, then re-apply the fix and confirm it passes.
+The first is the Phase 4 item 1 regression test (`gourdiantoken.repository.mongo_test.go`) for the Mongo duplicate-key fix. **Not yet done, optional but recommended before fully trusting it**: temporarily revert the boundary-move in `MarkTokenRotatedAtomic` (move `mongo.IsDuplicateKeyError` back inside the transaction callback) and confirm this specific test fails, then re-apply the fix and confirm it passes again — this closes the loop on "would this test actually have caught the original bug."
 
 ### Where things stand
 
-- **Branch:** `dev#manish#major_fixes` (not `dev#manish#remove_uuid` — that's only for Phase 5, not yet created).
-- **Latest commit at handoff time:** `35ea31c` ("feat: add error handling and cleanup functionality; introduce new interfaces and improve token management"), with `74aad25` and `8a873c4` immediately before it covering the rest of Phases 1-3. Working tree was clean at handoff (all changes committed by the repo's auto-commit tooling — commits were not made explicitly via `git commit` by the assistant, since this session's operating instructions are to never commit unless the user asks; some external hook in this repo appears to auto-commit after each edit round).
+- **Branch:** `dev#manish#major_fixes`, working tree clean, up to date with `origin/dev#manish#major_fixes` (this repo has an external auto-commit hook that commits after each edit round — commits were not made explicitly via `git commit` by the assistant in either this session or the prior one, per this session's operating instructions to only commit when asked).
+- **Latest commit as of 2026-07-04 (this session, Phase 4 work):** `841b436` ("fix: update implementation status in the improvement plan; clarify Phase 4 completion and verification details"), preceded by `17dcb5f` (Mongo port 27018 / `directConnection=true` fix) and `0f25db5` (Redis `Close()` idempotency fix + Mongo regression test — the actual Phase 4 code changes). Before those, `43dbbe3`/`35ea31c`/`74aad25`/`8a873c4` cover Phases 1-3 (handoff point of the prior session).
+- **⚠️ `dev#manish#remove_uuid` exists but is STALE — do not start Phase 5 work on it as-is.** Checked 2026-07-04: it branched off at `132cb60` ("Add CLAUDE.md for project guidance and update file count in bark.txt"), *before* any of Phases 1-4 landed, and has exactly one commit of its own since (`6c746fd`, "Remove backup repository factories file and update directory structure in bark.txt" — unrelated repo-hygiene, not Phase 5 substance). It is missing all 11 commits of Phase 1-4 work that are on `dev#manish#major_fixes`. **Before starting Phase 5, either:** (a) rebase `dev#manish#remove_uuid` onto the current tip of `dev#manish#major_fixes` (cherry-picking `6c746fd` back on top if its bark.txt/backup-file cleanup is still wanted), or (b) just delete and recreate the branch fresh from `dev#manish#major_fixes`'s tip, re-applying `6c746fd`'s change manually if needed. Confirm with `git log --oneline -5` on the branch that Phase 4's commits (`0f25db5`, `17dcb5f`, `841b436`) are present before writing any Phase 5 code.
+
+### Starting Phase 5 in a new environment (quick checklist)
+
+1. Fix the stale-branch situation above first — do not build Phase 5 on top of a `dev#manish#remove_uuid` that's missing Phases 1-4.
+2. **No live Redis/MongoDB/PostgreSQL needed for Phase 5 development.** Confirmed: none of the four repository backends ever touch `uuid.UUID` — they only store a hash of the raw JWT string for revocation/rotation tracking, never the parsed claims struct. Phase 5 only changes claims/config/validation types, which the repository layer never sees. Scope test runs to `go test -run '.*/Memory' ./...` (plus the non-repository-backed test files, which is most of the suite) for full confidence while iterating — this matches the pattern `CLAUDE.md` already documents for iterating without live services.
+3. Only come back to a Docker-capable machine once, for a final `make test`/`make race` full-backend sanity pass before tagging the v2.0.0 release — not needed throughout Phase 5 development.
+4. Re-verify every line reference in the Phase 5 section below against current source before touching it — per the "Before you start" section's own instructions, and doubly true here since Phase 5 hasn't been touched since the original plan draft and the file layout has changed (Phase 2a's split) since those line numbers were recorded.
 - **The 6-way file split (Phase 2a) already happened.** `gourdiantoken.go` no longer exists. The single 3262-line file is now:
   - `gourdiantoken.config.go` — TokenType/SigningMethod/claim-key consts, GourdianTokenConfig, NewGourdianTokenConfig (now deprecated), DefaultGourdianTokenConfig
   - `gourdiantoken.claims.go` — AccessTokenClaims, RefreshTokenClaims, AccessTokenResponse, RefreshTokenResponse
