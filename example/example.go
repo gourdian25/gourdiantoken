@@ -1555,7 +1555,7 @@ func main() {
 	postgresDSN := "host=localhost user=postgres_user password=postgres_password dbname=postgres_db port=5432 sslmode=disable"
 	redisAddr := "localhost:6379"
 	redisPassword := "redis_password"
-	mongoURI := "mongodb://root:mongo_password@localhost:27017"
+	mongoURI := "mongodb://root:mongo_password@localhost:27018/?directConnection=true" // see plan.md's "Mongo verification gap" for why
 
 	// Define all repository configurations
 	repositories := []RepositoryConfig{

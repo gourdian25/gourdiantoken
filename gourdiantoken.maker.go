@@ -1059,26 +1059,29 @@ func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) err
 //
 // Rotation Process:
 //  1. Verifies the old token is valid (signature, expiration, not revoked/rotated)
-//  2. Atomically marks the old token as rotated using compare-and-swap
-//  3. If already rotated (by another request), returns error
-//  4. Creates a new refresh token with the same user and session
+//  2. Creates a new refresh token with the same user and session
+//  3. Atomically marks the old token as rotated using compare-and-swap
+//  4. If already rotated (by another concurrent request), discards the new token and
+//     returns an error
 //  5. Returns the new token with fresh expiration time
 //
 // Atomicity Guarantee:
 //
-//	Uses MarkTokenRotatedAtomic to ensure only ONE concurrent request succeeds.
-//	If multiple requests attempt to rotate the same token simultaneously, only the first
-//	succeeds and others receive an error. This detects token theft attempts.
+//	Uses MarkTokenRotatedAtomic to ensure only ONE concurrent request's new token is ever
+//	returned to a caller. If multiple requests attempt to rotate the same token
+//	simultaneously, only the first to win the atomic mark succeeds and others receive an
+//	error. This detects token theft attempts.
 //
-// Known Failure Mode — Unrecoverable Lockout:
+// Avoiding Unrecoverable Lockout:
 //
-//	The old token is marked rotated *before* the new token is created. If CreateRefreshToken
-//	then fails (repository outage, signing error, context cancellation, etc.), this method
-//	returns that error but does NOT un-mark the old token's rotation record. The old refresh
-//	token is left permanently unusable and no new token was issued — the caller's session is
-//	locked out until they re-authenticate from scratch. A real fix requires a two-phase-commit-
-//	style redesign (delay marking rotated until after the new token is successfully created,
-//	trading off a small race window) and is tracked as a separate follow-up, not fixed here.
+//	The new token is created *before* the old one is marked rotated (the reverse of a naive
+//	implementation). This means that if CreateRefreshToken fails (repository outage, signing
+//	error, context cancellation, etc.), nothing has been persisted yet — the old token is
+//	never marked rotated, so it remains valid and the caller can safely retry rotation
+//	instead of being permanently locked out. The trade-off: a losing concurrent request (see
+//	Atomicity Guarantee above) does the signing work for a new token that is then discarded —
+//	cheap, since it's pure cryptographic signing with no repository call, and the discarded
+//	token is never returned to any caller or persisted anywhere, so it poses no risk.
 //
 // Security Benefits:
 //   - Prevents token reuse attacks
@@ -1204,7 +1207,23 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 		return nil, err
 	}
 
-	// Check context before database operations
+	// Check context before creating the new token
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context canceled before creating new token: %w", err)
+	}
+
+	// Create the new token BEFORE marking the old one as rotated. If CreateRefreshToken
+	// fails, nothing has been persisted yet, so the old token remains valid and the caller
+	// can safely retry rotation instead of being permanently locked out (see the "Known
+	// Failure Mode" note above this function, which described the lockout this reordering
+	// fixes). The trade-off: a losing concurrent request (see below) does this signing work
+	// for nothing — cheap, since it's pure cryptographic signing with no repository call.
+	newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check context before the atomic rotation claim
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled before rotation check: %w", err)
 	}
@@ -1216,18 +1235,10 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 	}
 
 	if !marked {
-		// Token was already rotated by another goroutine
+		// Token was already rotated by another goroutine. The new token created above is
+		// simply discarded here — it was never returned to any caller and was never
+		// persisted anywhere, so it poses no risk and needs no explicit revocation.
 		return nil, fmt.Errorf("%w", ErrTokenRotated)
-	}
-
-	// Check context before creating new token
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context canceled before creating new token: %w", err)
-	}
-
-	newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID)
-	if err != nil {
-		return nil, err
 	}
 
 	return newToken, nil

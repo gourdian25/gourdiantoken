@@ -120,7 +120,28 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 		},
 
 		"MongoDB": func(t *testing.T) (TokenRepository, func()) {
-			mongoURI := "mongodb://root:mongo_password@localhost:27017"
+			// Port 27018, not the Mongo default 27017: on this project's dev machine, Docker
+			// Desktop's own port-forwarding for 27017 got stuck pointing at an orphaned
+			// standalone (non-replica-set, no-auth) mongod left over from an earlier failed
+			// container attempt, and persisted across container recreation, `wsl --shutdown`,
+			// and a full Docker Desktop restart. Moving to 27018 sidesteps it entirely — see
+			// plan.md's "Mongo verification gap" section for the full diagnosis.
+			//
+			// directConnection=true: the single-node replica set member is registered under
+			// its own container-internal hostname (e.g. "9698c87b448c:27017"), which only
+			// resolves inside Docker's network — the host running these tests can't resolve
+			// it. Without directConnection, the driver does full replica-set topology
+			// discovery/monitoring using that unresolvable hostname (from the `hosts` list in
+			// the server's `hello` reply) and ends up stuck in ReplicaSetNoPrimary. Reconfiguring
+			// the member's hostname to match the host-side port doesn't work either — rs.reconfig
+			// performs the same "does this host map to this node" self-connectivity check as
+			// rs.initiate, and the node only ever listens on its container-internal port.
+			// directConnection=true sidesteps all of this: the driver uses only the one
+			// connection dialed here for every operation, which is exactly right for a
+			// single-node dev/test replica set with no failover to discover anyway. Sessions/
+			// transactions still work fine over a direct connection since the server itself is
+			// genuinely part of an initialized replica set.
+			mongoURI := "mongodb://root:mongo_password@localhost:27018/?directConnection=true"
 
 			ctx := context.Background()
 			client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))

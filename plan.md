@@ -6,19 +6,32 @@
 
 **2026-07-04 update:** Phase 4 (all 4 items) was completed this session, on the same `dev#manish#major_fixes` branch, working tree not yet committed (per this session's instructions: never commit unless the user asks). One new finding surfaced beyond what Phase 4 originally scoped — a real, pre-existing Redis `Close()` non-idempotency bug — documented in Phase 4's own section below along with the fix. One item (the Mongo regression test) is written and compiles but could not be executed in this environment; see "Mongo verification gap" below for exactly what's needed to close it out.
 
-### Mongo verification gap (read before touching Phase 5)
+### Mongo verification gap — RESOLVED 2026-07-04, root cause was a stuck Docker Desktop port mapping, not the code
 
-This session's sandbox turned out to have its own pre-existing, already-running Redis and PostgreSQL fixtures reachable at the hardcoded `localhost` addresses (used to verify Redis/GORM work below), but its MongoDB was a bare **standalone, no-auth** mongod completely unrelated to the `gourdian-mongo` Docker container built in the user's own terminal during this session (confirmed via an unauthenticated `hello` command returning no `setName`/`hosts`/`me` fields, and a successful unauthenticated `ListDatabaseNames` call — proving auth wasn't even enabled). The sandbox has no `docker` group membership and no local `mongod`/systemd service to reconfigure, so this environment could not run anything against a real replica-set MongoDB. **The user did correctly build a working `gourdian-mongo` container** (single-node `rs0` replica set, keyfile-based internal auth, root user, `rs.initiate()` confirmed successful) — it just isn't reachable from where this session's tests ran.
+This took two separate, stacked problems to fully untangle:
 
-**Before Phase 5, or before considering Phase 4 fully closed out, run this in an environment where `gourdian-mongo` (or an equivalent) is actually reachable:**
+1. **This session's own sandbox** (the assistant's Bash tool) turned out to have pre-existing, already-running Redis and PostgreSQL fixtures reachable at the hardcoded `localhost` addresses, but its MongoDB was a bare **standalone, no-auth** mongod unrelated to the user's `gourdian-mongo` container (confirmed via an unauthenticated `hello` returning no `setName`/`hosts`/`me`, and a successful unauthenticated `ListDatabaseNames`). The sandbox has no `docker` group membership, so it could never reach the user's real container directly.
+2. **Separately, and this is the one that actually mattered**, the user's *own* `go test` runs — from their own terminal, against their own correctly-configured `gourdian-mongo` container — hit the exact same phantom no-auth standalone mongod on `localhost:27017`. Proven decisively: `docker run --rm --network container:gourdian-mongo mongo:7 mongosh ...` (sharing the container's own network namespace, bypassing the host port-publish entirely) authenticated cleanly and returned a real signed replica-set response — so the container's own config was correct the whole time. But `sudo ss -tlnp | grep 27017` showed a listener on `127.0.0.1:27017` with no attributable owning process, and this phantom regenerated with a fresh `processId` across a container recreation, `wsl --shutdown`, *and* a full Docker Desktop quit/restart — ruling out simple staleness, a native `mongod` service (`systemctl`/`ps aux` both came up empty), and a competing container in another WSL distro (`wsl -l -v` showed 6 running distros, but `docker ps` from every one of them showed the identical single shared container — Docker Desktop's WSL integration shares one engine). The conclusion: Docker Desktop's own internal port-forwarding state for host port `27017` specifically was stuck at a level a normal restart doesn't clear, on this dev machine.
+
+**Resolution the user chose:** stop fighting port 27017 and permanently publish `gourdian-mongo` on **host port 27018** instead (confirmed working immediately, no Docker Desktop factory-reset needed). All hardcoded references across the repo were updated to match: `token.test.helper_test.go`, `token.bench.helper_test.go`, `example/example.go`, `CLAUDE.md`, and this file.
+
+**Second, separate problem, also resolved:** the single-node replica set member registers itself under its own container-internal hostname (e.g. `9698c87b448c:27017`), which only resolves inside Docker's network — the host running the tests can't resolve it. Without any further change, the Go driver does full replica-set topology discovery/monitoring using that unresolvable hostname (from the `hosts` list in the server's `hello` reply) and gets stuck in `ReplicaSetNoPrimary`, timing out after 30s on every single Mongo operation. **The instinct to fix this by reconfiguring the member's hostname to the host-facing port does not work**: both `rs.initiate({members:[{host:"localhost:27018"}]})` *and* `rs.reconfig()` with the same host change fail with `MongoServerError: No host described in new configuration ... maps to this node` — `rs.reconfig` performs the exact same "does this host map to this node" self-connectivity check as `rs.initiate`, and the node internally only ever listens on its container-internal port (`27017`), regardless of what Docker publishes it as externally. (The oddly large `version` numbers seen in these errors, e.g. `23121`, `32101`, are not stale state — that's MongoDB's documented behavior for `rs.reconfig(cfg, {force: true})`, which jumps the version by a large arbitrary number on purpose.)
+
+**The actual fix is entirely on the client side**: add `directConnection=true` to the connection string (`mongodb://root:mongo_password@localhost:27018/?directConnection=true`). This tells the driver to use only the one connection dialed here for every operation, skipping topology discovery entirely — exactly right for a single-node dev/test replica set with no failover to discover anyway. Sessions/transactions still work fine over a direct connection since the server itself is genuinely part of an initialized replica set. **No `rs.reconfig()` step is needed at all** — a bare `rs.initiate()` is sufficient; leave the member registered under its own container hostname.
+
+**Anyone else hitting `SCRAM-SHA-1: AuthenticationFailed` against a `gourdian-mongo`-style container they've verified is correctly configured** should suspect this same class of bug rather than re-checking the container's auth/replica-set setup: test with `docker run --rm --network container:<name> mongo:7 mongosh ...` first to confirm the container itself is fine, then check `sudo ss -tlnp | grep <port>` for a listener with no attributable process, and if a full Docker Desktop restart doesn't clear it, moving to a different host port is the fast, low-risk fix.
+
+**Now unblocked — run these to close out Phase 4 verification:**
 
 ```
 go test -run TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions -v ./...
 go test -run TestRepositoryClose_Idempotent/MongoDB -v ./...
 go test -run TestNewGourdianTokenMakerWithMongo -v ./...
+go test -count=1 -timeout=5m -cover ./...
+go test -race -count=1 -timeout=5m ./...
 ```
 
-The first is the new Phase 4 item 1 regression test (`gourdiantoken.repository.mongo_test.go`) — to confirm it actually would have caught the pre-fix bug, temporarily revert the boundary-move in `MarkTokenRotatedAtomic` (move `mongo.IsDuplicateKeyError` back inside the transaction callback) and confirm this test fails, then re-apply the fix and confirm it passes. The other two commands are pre-existing tests that should now pass given a correctly configured replica set (they were the ones failing in the *original* handoff purely for lack of live infra, not for any code reason).
+The first is the new Phase 4 item 1 regression test (`gourdiantoken.repository.mongo_test.go`) — to confirm it actually would have caught the pre-fix bug, temporarily revert the boundary-move in `MarkTokenRotatedAtomic` (move `mongo.IsDuplicateKeyError` back inside the transaction callback) and confirm this test fails, then re-apply the fix and confirm it passes.
 
 ### Where things stand
 
@@ -57,7 +70,7 @@ Three local services are needed, all with **hardcoded, non-configurable** connec
 |---|---|---|
 | **Redis** | `localhost:6379`, password `redis_password`, DB index `15` | Any recent Redis image works |
 | **PostgreSQL** | `host=localhost user=postgres_user password=postgres_password dbname=postgres_db port=5432 sslmode=disable` | User/db must already exist; GORM auto-migrates the `revoked_tokens`/`rotated_tokens` tables itself (`db.AutoMigrate` in `NewGormTokenRepository`) — no manual schema needed |
-| **MongoDB** | `mongodb://root:mongo_password@localhost:27017`, database `gourdian_test` | **Must run as a replica set**, even a single-node one — plain standalone MongoDB doesn't support transactions, and Phase 4 item 1 (the fix that's up next) specifically needs `useTransactions=true` to work |
+| **MongoDB** | `mongodb://root:mongo_password@localhost:27018/?directConnection=true`, database `gourdian_test` | **Must run as a replica set**, even a single-node one — plain standalone MongoDB doesn't support transactions, and Phase 4 item 1 (the fix that's up next) specifically needs `useTransactions=true` to work. **Port `27018`, not Mongo's default `27017`, and `directConnection=true` is required** — see "Mongo verification gap" note above for why. |
 
 Quickest way to stand these up with Docker:
 
@@ -71,10 +84,27 @@ docker run -d --name gourdian-postgres -p 5432:5432 \
   postgres:16
 
 # MongoDB — single-node replica set (required for transactions)
-docker run -d --name gourdian-mongo -p 27017:27017 \
+# NOTE: --replSet + auth (root user) requires a keyfile for internal cluster auth, even for a
+# single-node set — MongoDB 7 refuses to start with "security.keyFile is required when
+# authorization is enabled with replica sets" otherwise. Generate one into a named volume first:
+docker volume create gourdian-mongo-keyfile
+docker run --rm -v gourdian-mongo-keyfile:/keyfile-dir mongo:7 bash -c \
+  "openssl rand -base64 756 > /keyfile-dir/mongo-keyfile && chmod 400 /keyfile-dir/mongo-keyfile && chown 999:999 /keyfile-dir/mongo-keyfile"
+# Published on host port 27018, not Mongo's default 27017 — see "Mongo verification gap" note
+# at the top of this document: Docker Desktop's own port-forwarding for 27017 got stuck
+# pointing at an orphaned mongod on at least one dev machine, and didn't clear even after
+# container recreation, `wsl --shutdown`, and a full Docker Desktop restart.
+docker run -d --name gourdian-mongo -p 27018:27017 \
   -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=mongo_password \
-  mongo:7 --replSet rs0
-# then initialize the replica set once it's up:
+  -v gourdian-mongo-keyfile:/keyfile-dir \
+  mongo:7 --replSet rs0 --keyFile /keyfile-dir/mongo-keyfile
+# then initialize the replica set — bare, do NOT try to set the member's host to the
+# host-facing port here. Both rs.initiate({members:[{host:"localhost:27018"}]}) and a
+# later rs.reconfig() attempting the same change fail with "No host described in new
+# configuration ... maps to this node": the node only ever listens on its container-internal
+# port (27017) and can't validate itself against the externally-published one. Leave the
+# member registered under its own container hostname and instead connect with
+# directConnection=true client-side (see CLAUDE.md) — that's the actual, working fix:
 docker exec -it gourdian-mongo mongosh -u root -p mongo_password --authenticationDatabase admin \
   --eval 'rs.initiate()'
 ```
@@ -92,7 +122,7 @@ Once all three are reachable, confirm with `make test` (or `go test -count=1 -ti
 ### What's left: Phase 4 and Phase 5 (see full details further below, unchanged from the verified plan)
 
 **Phase 4 — repository backend fixes.** Not started. Four items, in order of priority:
-1. Mongo `MarkTokenRotatedAtomic` duplicate-key fix — **needs live MongoDB with transactions to verify**, could not be done in this environment. The fix itself (move `mongo.IsDuplicateKeyError` detection out of the transaction callback to the outer boundary) is fully specified below and doesn't require guessing — just needs a real MongoDB to run the regression test against (`useTransactions=true`), per `CLAUDE.md`'s connection string (`mongodb://root:mongo_password@localhost:27017`, db `gourdian_test`).
+1. Mongo `MarkTokenRotatedAtomic` duplicate-key fix — **needs live MongoDB with transactions to verify**, could not be done in this environment. The fix itself (move `mongo.IsDuplicateKeyError` detection out of the transaction callback to the outer boundary) is fully specified below and doesn't require guessing — just needs a real MongoDB to run the regression test against (`useTransactions=true`), per `CLAUDE.md`'s connection string (`mongodb://root:mongo_password@localhost:27018/?directConnection=true`, db `gourdian_test`).
 2. `RotateRefreshToken` unrecoverable-lockout bug — doc-comment-only fix, no live service needed, safe to do in any environment.
 3. Redis TTL floor — doc-comment-only fix on the `TokenRepository` interface, no live service needed.
 4. Mongo `Close(ctx)` vs. others' bare `Close()` — flag only (already confirmed non-interface-breaking, see Phase 4 item 4 below), plus add test coverage for Gorm/Redis/Mongo `Close()` — **the Gorm/Redis tests need live services**; only Mongo... actually all three need live services. None of item 4's test-coverage work could be done in this environment either.
@@ -143,7 +173,7 @@ Before any refactor, confirm test coverage is adequate to catch regressions duri
   ```
   go test -run '.*/Memory' ./...
   ```
-  plus the non-repository-backed test files. If you *do* have Redis/MongoDB/PostgreSQL available locally, run the full `make test` / `make race` instead for a stronger baseline — see `CLAUDE.md` for connection details (Redis `localhost:6379`/`redis_password`/DB 15; MongoDB `mongodb://root:mongo_password@localhost:27017/gourdian_test`; Postgres `host=localhost user=postgres_user password=postgres_password dbname=postgres_db port=5432`).
+  plus the non-repository-backed test files. If you *do* have Redis/MongoDB/PostgreSQL available locally, run the full `make test` / `make race` instead for a stronger baseline — see `CLAUDE.md` for connection details (Redis `localhost:6379`/`redis_password`/DB 15; MongoDB `mongodb://root:mongo_password@localhost:27018/gourdian_test?directConnection=true`; Postgres `host=localhost user=postgres_user password=postgres_password dbname=postgres_db port=5432`).
 - No code changes in this phase.
 
 ---

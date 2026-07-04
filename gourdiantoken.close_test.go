@@ -121,7 +121,15 @@ func TestClose_StopsCleanupGoroutines(t *testing.T) {
 
 	require.NoError(t, maker.Close())
 
+	// Close cancels the goroutines' context, but their `select` loop races the cancellation
+	// against a possibly-already-ready ticker tick — Go doesn't prioritize ctx.Done() over
+	// ticker.C, so one in-flight tick can legitimately complete after Close returns, before
+	// the goroutine observes cancellation on its next loop iteration. Allow one interval's
+	// grace period before capturing the baseline, so that expected race isn't mistaken for
+	// the goroutines failing to stop.
+	time.Sleep(maker.config.CleanupInterval)
 	countAtClose := repo.Count()
+
 	// Wait several intervals' worth of time; the count must not increase further.
 	time.Sleep(200 * time.Millisecond)
 
