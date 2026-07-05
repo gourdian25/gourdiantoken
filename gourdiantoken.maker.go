@@ -324,8 +324,8 @@ func DefaultGourdianTokenMaker(
 
 // validateUserAndUsername validates the userID/username preconditions shared by
 // CreateAccessToken and CreateRefreshToken.
-func validateUserAndUsername(userID uuid.UUID, username string) error {
-	if userID == uuid.Nil {
+func validateUserAndUsername(userID string, username string) error {
+	if userID == "" {
 		return fmt.Errorf("invalid user ID: cannot be empty")
 	}
 	if len(username) > 1024 {
@@ -334,13 +334,15 @@ func validateUserAndUsername(userID uuid.UUID, username string) error {
 	return nil
 }
 
-// newTokenID generates a new random token ID, centralizing the uuid.NewRandom error path.
-func newTokenID() (uuid.UUID, error) {
+// newTokenID generates a new random token ID (a UUIDv4 string), centralizing the
+// uuid.NewRandom error path. uuid.NewRandom is used rather than uuid.NewString
+// because the latter panics on entropy-read failure instead of returning an error.
+func newTokenID() (string, error) {
 	tokenID, err := uuid.NewRandom()
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("failed to generate token ID: %w", err)
+		return "", fmt.Errorf("failed to generate token ID: %w", err)
 	}
-	return tokenID, nil
+	return tokenID.String(), nil
 }
 
 // signClaims builds map claims via toMapClaims and signs the resulting JWT, checking
@@ -384,17 +386,17 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //   - typ: Token type ("access")
 //
 // Validation:
-//   - userID must not be uuid.Nil
+//   - userID must not be empty
 //   - username must not exceed 1024 characters
 //   - roles must contain at least one non-empty string
-//   - sessionID can be any UUID (including Nil for sessionless tokens)
+//   - sessionID can be any string (including empty for sessionless tokens)
 //
 // Parameters:
 //   - ctx: Context for cancellation. Checks are performed before signing and during I/O.
-//   - userID: The user's unique identifier (UUID, must not be Nil)
+//   - userID: The user's unique identifier (must not be empty)
 //   - username: Human-readable username (max 1024 characters, can be empty)
 //   - roles: List of authorization roles (must contain at least one non-empty role)
-//   - sessionID: Session identifier (UUID, can be Nil for sessionless operation)
+//   - sessionID: Session identifier (can be empty for sessionless operation)
 //
 // Returns:
 //   - *AccessTokenResponse: Complete token response with signed JWT and metadata
@@ -402,15 +404,15 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //
 // Example (Basic usage):
 //
-//	userUUID := uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")
-//	sessionUUID := uuid.New()
+//	userID := "123e4567-e89b-12d3-a456-426614174000"
+//	sessionID := uuid.NewString()
 //
 //	token, err := maker.CreateAccessToken(
 //	    ctx,
-//	    userUUID,
+//	    userID,
 //	    "john.doe",
 //	    []string{"user", "admin"},
-//	    sessionUUID,
+//	    sessionID,
 //	)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create token: %w", err)
@@ -424,10 +426,10 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //
 //	token, err := maker.CreateAccessToken(
 //	    ctx,
-//	    userUUID,
+//	    userID,
 //	    "admin@example.com",
 //	    []string{"user", "admin", "moderator"},
-//	    sessionUUID,
+//	    sessionID,
 //	)
 //
 // Example (With context timeout):
@@ -435,8 +437,8 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 //	defer cancel()
 //
-//	token, err := maker.CreateAccessToken(ctx, userUUID, username, roles, sessionUUID)
-func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error) {
+//	token, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -518,15 +520,15 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 //   - typ: Token type ("refresh")
 //
 // Validation:
-//   - userID must not be uuid.Nil
+//   - userID must not be empty
 //   - username must not exceed 1024 characters
-//   - sessionID can be any UUID (including Nil)
+//   - sessionID can be any string (including empty for sessionless tokens)
 //
 // Parameters:
 //   - ctx: Context for cancellation
-//   - userID: The user's unique identifier (UUID, must not be Nil)
+//   - userID: The user's unique identifier (must not be empty)
 //   - username: Human-readable username (max 1024 characters)
-//   - sessionID: Session identifier (UUID)
+//   - sessionID: Session identifier (can be empty for sessionless operation)
 //
 // Returns:
 //   - *RefreshTokenResponse: Complete token response with signed JWT and metadata
@@ -542,9 +544,9 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 //
 //	refreshToken, err := maker.CreateRefreshToken(
 //	    ctx,
-//	    userUUID,
+//	    userID,
 //	    "john.doe",
-//	    sessionUUID,
+//	    sessionID,
 //	)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create refresh token: %w", err)
@@ -562,12 +564,12 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 //
 // Example (Create token pair):
 //
-//	accessToken, err := maker.CreateAccessToken(ctx, userUUID, username, roles, sessionUUID)
+//	accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
 //	if err != nil {
 //	    return err
 //	}
 //
-//	refreshToken, err := maker.CreateRefreshToken(ctx, userUUID, username, sessionUUID)
+//	refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
 //	if err != nil {
 //	    return err
 //	}
@@ -576,7 +578,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID uuid.UUID, 
 //	    AccessToken:  accessToken.Token,
 //	    RefreshToken: refreshToken.Token,
 //	}
-func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error) {
+func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}

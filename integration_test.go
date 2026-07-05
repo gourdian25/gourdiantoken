@@ -18,8 +18,8 @@ func TestCompleteTokenLifecycle(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 		username := "testuser"
 		roles := []string{"admin", "user"}
 
@@ -68,8 +68,8 @@ func TestCompleteTokenLifecycle(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 		username := "testuser"
 
 		// Step 1: Create initial refresh token
@@ -134,8 +134,8 @@ func TestTokenRotationFlow(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 		username := "testuser"
 
 		// Create initial token
@@ -178,7 +178,7 @@ func TestTokenRotationFlow(t *testing.T) {
 		ctx := context.Background()
 
 		// Create token
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Rotate once
@@ -205,7 +205,7 @@ func TestTokenRotationFlow(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Try to rotate same token concurrently
@@ -244,7 +244,7 @@ func TestRevocationFlow(t *testing.T) {
 		// Create multiple tokens
 		tokens := make([]*AccessTokenResponse, 5)
 		for i := range tokens {
-			token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 			require.NoError(t, err)
 			tokens[i] = token
 		}
@@ -283,7 +283,7 @@ func TestRevocationFlow(t *testing.T) {
 		ctx := context.Background()
 
 		// Create and revoke token
-		token, err := maker1.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker1.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		err = maker1.RevokeAccessToken(ctx, token.Token)
@@ -303,7 +303,7 @@ func TestRevocationFlow(t *testing.T) {
 		maker := setupTestMaker(t) // No repository
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		err = maker.RevokeAccessToken(ctx, token.Token)
@@ -334,7 +334,7 @@ func TestRepository_AllImplementations(t *testing.T) {
 
 			// Test revocation operations
 			t.Run("revocation operations", func(t *testing.T) {
-				token := uuid.New().String()
+				token := uuid.NewString()
 
 				// Mark as revoked
 				err := repo.MarkTokenRevoke(ctx, AccessToken, token, 5*time.Minute)
@@ -346,7 +346,7 @@ func TestRepository_AllImplementations(t *testing.T) {
 				assert.True(t, revoked)
 
 				// Different token should not be revoked
-				otherToken := uuid.New().String()
+				otherToken := uuid.NewString()
 				revoked, err = repo.IsTokenRevoked(ctx, AccessToken, otherToken)
 				assert.NoError(t, err)
 				assert.False(t, revoked)
@@ -354,7 +354,7 @@ func TestRepository_AllImplementations(t *testing.T) {
 
 			// Test rotation operations
 			t.Run("rotation operations", func(t *testing.T) {
-				token := uuid.New().String()
+				token := uuid.NewString()
 
 				// Mark as rotated
 				err := repo.MarkTokenRotated(ctx, token, 5*time.Minute)
@@ -375,7 +375,7 @@ func TestRepository_AllImplementations(t *testing.T) {
 			// Test cleanup operations
 			t.Run("cleanup operations", func(t *testing.T) {
 				// Create expired tokens
-				expiredToken := uuid.New().String()
+				expiredToken := uuid.NewString()
 				err := repo.MarkTokenRevoke(ctx, AccessToken, expiredToken, 1*time.Millisecond)
 				assert.NoError(t, err)
 
@@ -404,7 +404,7 @@ func TestCrossRepositoryCompatibility(t *testing.T) {
 		ctx := context.Background()
 
 		// Create token with first repository
-		token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		// Revoke with first repository
@@ -422,7 +422,7 @@ func TestCrossRepositoryCompatibility(t *testing.T) {
 		maker1 := setupTestMaker(t)
 		ctx := context.Background()
 
-		token, err := maker1.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker1.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		// Create new maker with repository
@@ -443,8 +443,8 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// User logs in - gets both tokens
 		accessToken, err := maker.CreateAccessToken(ctx, userID, "user@example.com", []string{"user"}, sessionID)
@@ -493,8 +493,8 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Initial refresh token
 		currentRefreshToken, err := maker.CreateRefreshToken(ctx, userID, "user", sessionID)
@@ -526,8 +526,8 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Create tokens
 		accessToken, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, sessionID)
@@ -559,8 +559,8 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Create valid token
 		validToken, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, sessionID)
@@ -592,17 +592,17 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
+		userID := uuid.NewString()
 
 		// User logs in on device 1
-		session1 := uuid.New()
+		session1 := uuid.NewString()
 		device1AccessToken, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, session1)
 		require.NoError(t, err)
 		device1RefreshToken, err := maker.CreateRefreshToken(ctx, userID, "user", session1)
 		require.NoError(t, err)
 
 		// User logs in on device 2
-		session2 := uuid.New()
+		session2 := uuid.NewString()
 		device2AccessToken, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, session2)
 		require.NoError(t, err)
 		device2RefreshToken, err := maker.CreateRefreshToken(ctx, userID, "user", session2)
@@ -645,15 +645,15 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
+		userID := uuid.NewString()
 
 		// Device 1 session
-		session1 := uuid.New()
+		session1 := uuid.NewString()
 		device1Token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, session1)
 		require.NoError(t, err)
 
 		// Device 2 session
-		session2 := uuid.New()
+		session2 := uuid.NewString()
 		device2Token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, session2)
 		require.NoError(t, err)
 
@@ -678,8 +678,8 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// User starts with basic role
 		token1, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, sessionID)
@@ -713,15 +713,15 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
+		userID := uuid.NewString()
 
 		// User has multiple sessions
-		sessions := make([]uuid.UUID, 3)
+		sessions := make([]string, 3)
 		accessTokens := make([]*AccessTokenResponse, 3)
 		refreshTokens := make([]*RefreshTokenResponse, 3)
 
 		for i := range sessions {
-			sessions[i] = uuid.New()
+			sessions[i] = uuid.NewString()
 
 			at, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, sessions[i])
 			require.NoError(t, err)
@@ -766,8 +766,8 @@ func TestEndToEndScenarios(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Create refresh token
 		refreshToken, err := maker.CreateRefreshToken(ctx, userID, "user", sessionID)
@@ -805,8 +805,8 @@ func TestComplexWorkflows(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Initial tokens
 		currentAccessToken, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, sessionID)
@@ -853,8 +853,8 @@ func TestComplexWorkflows(t *testing.T) {
 		const actionsPerUser = 10
 
 		type userSession struct {
-			userID       uuid.UUID
-			sessionID    uuid.UUID
+			userID       string
+			sessionID    string
 			accessToken  *AccessTokenResponse
 			refreshToken *RefreshTokenResponse
 		}
@@ -863,8 +863,8 @@ func TestComplexWorkflows(t *testing.T) {
 
 		// Create sessions for all users
 		for i := range sessions {
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 
 			at, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, sessionID)
 			require.NoError(t, err)
@@ -912,7 +912,7 @@ func TestComplexWorkflows(t *testing.T) {
 		ctx := context.Background()
 
 		// Can still create and verify tokens
-		token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"user"}, uuid.New())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"user"}, uuid.NewString())
 		require.NoError(t, err)
 
 		claims, err := maker.VerifyAccessToken(ctx, token.Token)
@@ -925,7 +925,7 @@ func TestComplexWorkflows(t *testing.T) {
 		assert.Contains(t, err.Error(), "not enabled")
 
 		// Rotation returns error but doesn't crash
-		refreshToken, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		refreshToken, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		_, err = maker.RotateRefreshToken(ctx, refreshToken.Token)
@@ -957,7 +957,7 @@ func TestErrorRecovery(t *testing.T) {
 		}
 
 		// System should still work with valid token
-		token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"user"}, uuid.New())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"user"}, uuid.NewString())
 		require.NoError(t, err)
 
 		claims, err := maker.VerifyAccessToken(ctx, token.Token)
@@ -975,12 +975,12 @@ func TestErrorRecovery(t *testing.T) {
 		defer cancel()
 		time.Sleep(10 * time.Millisecond)
 
-		_, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"user"}, uuid.New())
+		_, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"user"}, uuid.NewString())
 		assert.Error(t, err)
 
 		// System should work with valid context
 		validCtx := context.Background()
-		token, err := maker.CreateAccessToken(validCtx, uuid.New(), "user", []string{"user"}, uuid.New())
+		token, err := maker.CreateAccessToken(validCtx, uuid.NewString(), "user", []string{"user"}, uuid.NewString())
 		require.NoError(t, err)
 		assert.NotNil(t, token)
 
@@ -991,8 +991,8 @@ func TestErrorRecovery(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Create, verify, revoke in rapid succession
 		for i := 0; i < 10; i++ {
@@ -1020,8 +1020,8 @@ func TestDataConsistency(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Create access token
 		accessToken, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, sessionID)
@@ -1050,12 +1050,12 @@ func TestDataConsistency(t *testing.T) {
 		maker := setupTestMaker(t)
 		ctx := context.Background()
 
-		userID := uuid.New()
+		userID := uuid.NewString()
 
 		// Create multiple tokens for same user
 		tokens := make([]*AccessTokenResponse, 5)
 		for i := range tokens {
-			token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, uuid.New())
+			token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"user"}, uuid.NewString())
 			require.NoError(t, err)
 			tokens[i] = token
 		}

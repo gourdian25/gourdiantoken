@@ -21,8 +21,8 @@ func TestRotateRefreshToken_Success(t *testing.T) {
 	repo := NewMemoryTokenRepository(1 * time.Hour)
 	maker := setupTestMakerWithConfig(t, config, repo)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("basic rotation produces new valid token", func(t *testing.T) {
@@ -137,8 +137,8 @@ func TestRotateRefreshToken_Errors(t *testing.T) {
 	repo := NewMemoryTokenRepository(1 * time.Hour)
 	maker := setupTestMakerWithConfig(t, config, repo)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	t.Run("rotation fails when disabled", func(t *testing.T) {
 		disabledConfig := DefaultTestConfig()
@@ -196,7 +196,7 @@ func TestRotateRefreshToken_ConcurrencySafety(t *testing.T) {
 	maker := setupTestMakerWithConfig(t, config, repo)
 
 	t.Run("concurrent rotation attempts on same token", func(t *testing.T) {
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Attempt concurrent rotations
@@ -230,8 +230,8 @@ func TestRotateRefreshToken_AlreadyRotated(t *testing.T) {
 	repo := NewMemoryTokenRepository(1 * time.Hour)
 	maker := setupTestMakerWithConfig(t, config, repo)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("rejects already rotated token", func(t *testing.T) {
@@ -255,7 +255,7 @@ func TestRotateRefreshToken_AlreadyRotated(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// First rotation succeeds
@@ -273,7 +273,7 @@ func TestRotateRefreshToken_AlreadyRotated(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Rotate
@@ -298,8 +298,8 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 	repo := NewMemoryTokenRepository(1 * time.Hour)
 	maker := setupTestMakerWithConfig(t, config, repo)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("reuse interval prevents immediate re-rotation of same token", func(t *testing.T) {
@@ -401,7 +401,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Rotate
@@ -421,7 +421,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Rotate
@@ -444,7 +444,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Rotate
@@ -465,8 +465,8 @@ func TestRotation_Disabled(t *testing.T) {
 
 	maker := setupTestMakerWithConfig(t, config, nil)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("rotation fails when feature is disabled", func(t *testing.T) {
@@ -527,7 +527,7 @@ func TestRotation_Disabled(t *testing.T) {
 		maker := setupTestMaker(t) // No repository, rotation disabled
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		newToken, err := maker.RotateRefreshToken(ctx, token.Token)
@@ -540,7 +540,7 @@ func TestRotation_Disabled(t *testing.T) {
 		maker := setupTestMaker(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Should still be able to verify
@@ -557,8 +557,8 @@ func TestRotateRefreshToken_FeatureDisabled(t *testing.T) {
 
 	maker := setupTestMakerWithConfig(t, config, nil)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("returns error when rotation is disabled", func(t *testing.T) {
@@ -580,8 +580,8 @@ func TestRotationAndRevocation_Integration(t *testing.T) {
 	repo := NewMemoryTokenRepository(1 * time.Hour)
 	maker := setupTestMakerWithConfig(t, config, repo)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -674,8 +674,8 @@ func TestRotateRefreshToken_InvalidInput(t *testing.T) {
 	t.Run("fails with access token instead of refresh token", func(t *testing.T) {
 		ctx := context.Background()
 
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 		username := "testuser"
 		roles := []string{"admin"}
 
@@ -701,8 +701,8 @@ func TestRotateRefreshToken_ContextCancellation(t *testing.T) {
 	repo := NewMemoryTokenRepository(1 * time.Hour)
 	maker := setupTestMakerWithConfig(t, config, repo)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("returns error when context is canceled at beginning", func(t *testing.T) {

@@ -129,8 +129,8 @@ func main() {
     }
 
     // 3. Create access token
-    userID := uuid.New()
-    sessionID := uuid.New()
+    userID := uuid.NewString()
+    sessionID := uuid.NewString()
     
     accessToken, err := maker.CreateAccessToken(
         ctx,
@@ -211,8 +211,8 @@ func main() {
         log.Fatal(err)
     }
 
-    userID := uuid.New()
-    sessionID := uuid.New()
+    userID := uuid.NewString()
+    sessionID := uuid.NewString()
 
     // 4. Create token pair
     accessToken, _ := maker.CreateAccessToken(ctx, userID, "alice", []string{"user"}, sessionID)
@@ -583,9 +583,9 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 
 ```go
 type AccessTokenClaims struct {
-    ID                uuid.UUID   `json:"jti"`
-    Subject           uuid.UUID   `json:"sub"`
-    SessionID         uuid.UUID   `json:"sid"`
+    ID                string      `json:"jti"`
+    Subject           string      `json:"sub"`
+    SessionID         string      `json:"sid"`
     Username          string      `json:"usr"`
     Issuer            string      `json:"iss"`
     Audience          []string    `json:"aud"`
@@ -745,8 +745,8 @@ Automatic validation of all critical claims:
 
 ```go
 type GourdianTokenMaker interface {
-    CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
-    CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
+    CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error)
+    CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error)
     VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
     VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error)
     RevokeAccessToken(ctx context.Context, token string) error
@@ -760,10 +760,10 @@ type GourdianTokenMaker interface {
 ```go
 token, err := maker.CreateAccessToken(
     ctx,
-    userID,          // uuid.UUID - User's unique identifier
+    userID,          // string - User's unique identifier (must not be empty)
     username,        // string - Human-readable name
     roles,           // []string - Authorization roles (min 1)
-    sessionID,       // uuid.UUID - Session identifier
+    sessionID,       // string - Session identifier (may be empty)
 )
 ```
 
@@ -771,7 +771,7 @@ token, err := maker.CreateAccessToken(
 
 **Validation:**
 
-- `userID` must not be `uuid.Nil`
+- `userID` must not be empty
 - `username` max 1024 characters
 - `roles` must contain at least one non-empty string
 - Checks context cancellation before signing
@@ -781,9 +781,9 @@ token, err := maker.CreateAccessToken(
 ```go
 token, err := maker.CreateRefreshToken(
     ctx,
-    userID,          // uuid.UUID
+    userID,          // string
     username,        // string
-    sessionID,       // uuid.UUID
+    sessionID,       // string
 )
 ```
 
@@ -908,10 +908,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
     ctx := r.Context()
     
     // Authenticate user (your logic here)
-    userID := uuid.New()
+    userID := uuid.NewString()
     username := "john.doe@example.com"
     roles := []string{"user", "admin"}
-    sessionID := uuid.New()
+    sessionID := uuid.NewString()
     
     // Create token pair
     accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
@@ -1374,8 +1374,8 @@ func loginHandler(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
     return func(c *gin.Context) {
         // Your login logic here
         // Then create tokens:
-        userID := uuid.New()
-        sessionID := uuid.New()
+        userID := uuid.NewString()
+        sessionID := uuid.NewString()
         
         accessToken, _ := maker.CreateAccessToken(c, userID, "user@example.com", []string{"user"}, sessionID)
         refreshToken, _ := maker.CreateRefreshToken(c, userID, "user@example.com", sessionID)
@@ -1446,10 +1446,7 @@ func refreshTokenHandler(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc
         // Load roles from database (not in refresh token)
         roles := []string{"user"} // Your logic here
         
-        userUUID, _ := uuid.Parse(userID.(string))
-        sessionUUID, _ := uuid.Parse(sessionID.(string))
-        
-        newAccessToken, _ := maker.CreateAccessToken(c, userUUID, username.(string), roles, sessionUUID)
+        newAccessToken, _ := maker.CreateAccessToken(c, userID.(string), username.(string), roles, sessionID.(string))
         
         // Update cookies
         c.SetCookie("access_token", "Bearer "+newAccessToken.Token,
@@ -1652,7 +1649,7 @@ func main() {
 
 func login(w http.ResponseWriter, r *http.Request) {
     token, _ := maker.CreateAccessToken(
-        r.Context(), uuid.New(), "user@example.com", []string{"user"}, uuid.New(),
+        r.Context(), uuid.NewString(), "user@example.com", []string{"user"}, uuid.NewString(),
     )
     json.NewEncoder(w).Encode(token)
 }
@@ -1746,8 +1743,8 @@ type SessionManager struct {
     maker gourdiantoken.GourdianTokenMaker
 }
 
-func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, username string, roles []string) (*Session, error) {
-    sessionID := uuid.New()
+func (sm *SessionManager) CreateSession(ctx context.Context, userID string, username string, roles []string) (*Session, error) {
+    sessionID := uuid.NewString()
     
     accessToken, err := sm.maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
     if err != nil {
@@ -1806,8 +1803,8 @@ func (sm *SessionManager) EndSession(ctx context.Context, accessToken, refreshTo
 }
 
 type Session struct {
-    SessionID    uuid.UUID
-    UserID       uuid.UUID
+    SessionID    string
+    UserID       string
     AccessToken  string
     RefreshToken string
     ExpiresAt    time.Time
@@ -1841,8 +1838,8 @@ func TestTokenCreation(t *testing.T) {
     config := gourdiantoken.DefaultGourdianTokenConfig("test-secret-key-32-bytes-long")
     maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
     
-    userID := uuid.New()
-    token, err := maker.CreateAccessToken(ctx, userID, "test", []string{"user"}, uuid.New())
+    userID := uuid.NewString()
+    token, err := maker.CreateAccessToken(ctx, userID, "test", []string{"user"}, uuid.NewString())
     
     require.NoError(t, err)
     assert.NotEmpty(t, token.Token)
@@ -1855,7 +1852,7 @@ func TestTokenExpiration(t *testing.T) {
     config.AccessExpiryDuration = 1 * time.Second
     maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
     
-    token, _ := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"user"}, uuid.New())
+    token, _ := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"user"}, uuid.NewString())
     time.Sleep(2 * time.Second)
     
     _, err := maker.VerifyAccessToken(ctx, token.Token)
@@ -1869,7 +1866,7 @@ func TestTokenRotation(t *testing.T) {
     config.RotationEnabled = true
     maker, _ := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
     
-    refresh, _ := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+    refresh, _ := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
     newToken, err := maker.RotateRefreshToken(ctx, refresh.Token)
     
     require.NoError(t, err)

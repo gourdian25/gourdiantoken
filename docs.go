@@ -96,7 +96,7 @@
 //   - jti (JWT ID): Unique token identifier (UUIDv4)
 //   - iss (Issuer): Authentication service identifier
 //   - aud (Audience): Intended recipients list
-//   - sub (Subject): User's unique identifier (UUID)
+//   - sub (Subject): User's unique identifier (opaque non-empty string)
 //   - iat (Issued At): Token creation timestamp
 //   - exp (Expiration Time): Token expiration timestamp
 //   - nbf (Not Before): Optional token validity start time
@@ -398,10 +398,10 @@
 //	// 2. Login endpoint - create token pair
 //	accessToken, err := maker.CreateAccessToken(
 //	    ctx,
-//	    userID,              // uuid.UUID
+//	    userID,              // string (must not be empty)
 //	    email,               // string
 //	    []string{"user"},    // roles
-//	    sessionID,           // uuid.UUID
+//	    sessionID,           // string (may be empty for sessionless tokens)
 //	)
 //	if err != nil {
 //	    return err
@@ -762,8 +762,8 @@
 //
 //	func TestAccessTokenCreation(t *testing.T) {
 //	    maker := createTestMaker()
-//	    userID := uuid.New()
-//	    sessionID := uuid.New()
+//	    userID := uuid.NewString()
+//	    sessionID := uuid.NewString()
 //
 //	    token, err := maker.CreateAccessToken(
 //	        context.Background(),
@@ -803,8 +803,8 @@
 //
 //	func BenchmarkAccessTokenCreation(b *testing.B) {
 //	    maker := createBenchMaker()
-//	    userID := uuid.New()
-//	    sessionID := uuid.New()
+//	    userID := uuid.NewString()
+//	    sessionID := uuid.NewString()
 //
 //	    b.ResetTimer()
 //	    for i := 0; i < b.N; i++ {
@@ -871,7 +871,7 @@
 //
 // Required external dependencies:
 //   - github.com/golang-jwt/jwt/v5: JWT implementation
-//   - github.com/google/uuid: UUID generation and parsing
+//   - github.com/google/uuid: internal token ID (jti) generation
 //
 // Optional dependencies (for storage backends):
 //   - gorm.io/gorm: SQL database ORM
@@ -1060,7 +1060,7 @@
 //
 // ## Audit Logging
 //
-//	func auditLog(action string, userID uuid.UUID, result error) {
+//	func auditLog(action string, userID string, result error) {
 //	    log.Printf("[AUDIT] action=%s user=%s result=%v timestamp=%s",
 //	        action, userID, result, time.Now())
 //	}

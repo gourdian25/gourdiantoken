@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 // validateConfig performs comprehensive validation of the token maker configuration.
@@ -182,7 +181,6 @@ func validateAlgorithmAndMethod(config *GourdianTokenConfig) error {
 // Handles both AccessTokenClaims and RefreshTokenClaims.
 //
 // Conversions:
-//   - UUIDs → strings
 //   - Time → Unix timestamps (int64)
 //   - TokenType → string
 //   - Arrays remain as-is
@@ -211,10 +209,10 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 			return nil, fmt.Errorf("at least one role must be provided")
 		}
 		mapClaims := jwt.MapClaims{
-			"jti": v.ID.String(),
-			"sub": v.Subject.String(),
+			"jti": v.ID,
+			"sub": v.Subject,
 			"usr": v.Username,
-			"sid": v.SessionID.String(),
+			"sid": v.SessionID,
 			"iss": v.Issuer,
 			"aud": v.Audience,
 			"iat": v.IssuedAt.Unix(),
@@ -231,10 +229,10 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 		return mapClaims, nil
 	case RefreshTokenClaims:
 		mapClaims := jwt.MapClaims{
-			"jti": v.ID.String(),
-			"sub": v.Subject.String(),
+			"jti": v.ID,
+			"sub": v.Subject,
 			"usr": v.Username,
-			"sid": v.SessionID.String(),
+			"sid": v.SessionID,
 			"iss": v.Issuer,
 			"aud": v.Audience,
 			"iat": v.IssuedAt.Unix(),
@@ -257,9 +255,9 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 // TokenType is deliberately excluded: mapToAccessClaims and mapToRefreshClaims report
 // different error text for a missing/invalid "typ" claim, so each caller extracts it itself.
 type commonClaims struct {
-	ID                uuid.UUID
-	Subject           uuid.UUID
-	SessionID         uuid.UUID
+	ID                string
+	Subject           string
+	SessionID         string
 	Username          string
 	Issuer            string
 	Audience          []string
@@ -271,35 +269,32 @@ type commonClaims struct {
 
 // extractCommonClaims extracts and validates the jti/sub/sid/usr/iss/aud/timestamp
 // fields common to both AccessTokenClaims and RefreshTokenClaims, using a safe checked
-// pattern throughout. This also tightens the "iss" claim to require a string type,
+// pattern throughout. jti and sub must be non-empty strings; sid must be a string but
+// may be empty (sessionless tokens). This also tightens the "iss" claim to require a string type,
 // consistent with how jti/sub/sid are already handled (previously issuer silently
 // became "" via an unchecked type assertion instead of erroring on a bad claim).
 func extractCommonClaims(claims jwt.MapClaims) (*commonClaims, error) {
-	jti, ok := claims["jti"].(string)
+	tokenID, ok := claims["jti"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid token ID type: expected string")
 	}
-	tokenID, err := uuid.Parse(jti)
-	if err != nil {
-		return nil, fmt.Errorf("invalid token ID: %w", err)
+	if tokenID == "" {
+		return nil, fmt.Errorf("invalid token ID: cannot be empty")
 	}
 
-	sub, ok := claims["sub"].(string)
+	userID, ok := claims["sub"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid user ID type: expected string")
 	}
-	userID, err := uuid.Parse(sub)
-	if err != nil {
-		return nil, fmt.Errorf("invalid user ID: %w", err)
+	if userID == "" {
+		return nil, fmt.Errorf("invalid user ID: cannot be empty")
 	}
 
-	sid, ok := claims["sid"].(string)
+	// sid may be empty: an empty session ID is valid for sessionless tokens,
+	// mirroring the creation-side contract (only the type is enforced).
+	sessionID, ok := claims["sid"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid session ID type: expected string")
-	}
-	sessionID, err := uuid.Parse(sid)
-	if err != nil {
-		return nil, fmt.Errorf("invalid session ID: %w", err)
 	}
 
 	username, ok := claims["usr"].(string)
@@ -370,13 +365,12 @@ func extractCommonClaims(claims jwt.MapClaims) (*commonClaims, error) {
 // Performs type checking and validation of all fields.
 //
 // Conversions:
-//   - String UUIDs → uuid.UUID
 //   - Unix timestamps → time.Time
 //   - String token type → TokenType
 //   - Interface arrays → string arrays
 //
 // Validation:
-//   - All UUIDs must be valid
+//   - jti and sub must be non-empty strings (sid may be empty)
 //   - Roles must be non-empty array of strings
 //   - Timestamps must be valid numbers
 //   - Required fields must be present
@@ -450,13 +444,12 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 // Performs type checking and validation of all fields.
 //
 // Conversions:
-//   - String UUIDs → uuid.UUID
 //   - Unix timestamps → time.Time
 //   - String token type → TokenType
 //   - Interface arrays → string arrays
 //
 // Validation:
-//   - All UUIDs must be valid
+//   - jti and sub must be non-empty strings (sid may be empty)
 //   - Token type must be "refresh"
 //   - Timestamps must be valid numbers
 //   - Required fields must be present
@@ -504,11 +497,11 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 }
 
 // validateTokenClaims performs comprehensive validation of JWT claims.
-// Checks required claims, timestamps, token type, and UUID formats.
+// Checks required claims, timestamps, token type, and identifier claims.
 //
 // Validation Checks:
 //   - All required claims are present (base + custom)
-//   - UUIDs (jti, sub, sid) are valid
+//   - jti and sub are non-empty strings; sid is a string (may be empty)
 //   - Token type matches expected type
 //   - Token has not expired (exp > now)
 //   - Token is not used before valid time (iat <= now)
@@ -530,7 +523,7 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 //   - "missing required claim: iss"
 //   - "token has expired"
 //   - "invalid token type: expected access"
-//   - "invalid user ID format"
+//   - "invalid user ID: cannot be empty"
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error {
 	baseRequired := map[TokenType][]string{
 		AccessToken:  {"jti", "sub", "sid", "usr", "iat", "exp", "typ", "rls"},
@@ -545,20 +538,20 @@ func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required 
 
 	if jti, ok := claims["jti"].(string); !ok {
 		return fmt.Errorf("invalid token ID type: expected string")
-	} else if _, err := uuid.Parse(jti); err != nil {
-		return fmt.Errorf("invalid token ID format: %w", err)
+	} else if jti == "" {
+		return fmt.Errorf("invalid token ID: cannot be empty")
 	}
 
 	if sub, ok := claims["sub"].(string); !ok {
 		return fmt.Errorf("invalid user ID type: expected string")
-	} else if _, err := uuid.Parse(sub); err != nil {
-		return fmt.Errorf("invalid user ID format: %w", err)
+	} else if sub == "" {
+		return fmt.Errorf("invalid user ID: cannot be empty")
 	}
 
-	if sid, ok := claims["sid"].(string); !ok {
+	// sid may be empty (sessionless tokens) — only the type is enforced,
+	// mirroring extractCommonClaims and the creation-side contract.
+	if _, ok := claims["sid"].(string); !ok {
 		return fmt.Errorf("invalid session ID type: expected string")
-	} else if _, err := uuid.Parse(sid); err != nil {
-		return fmt.Errorf("invalid session ID format: %w", err)
 	}
 
 	tokenType, ok := claims["typ"].(string)

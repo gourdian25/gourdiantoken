@@ -18,7 +18,7 @@ func TestErrTokenRevoked_ErrorsIs(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
 	ctx := context.Background()
 
-	token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+	token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 	require.NoError(t, err)
 
 	require.NoError(t, maker.RevokeAccessToken(ctx, token.Token))
@@ -32,7 +32,7 @@ func TestErrTokenRotated_ErrorsIs(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
 	ctx := context.Background()
 
-	token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+	token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 	require.NoError(t, err)
 
 	_, err = maker.RotateRefreshToken(ctx, token.Token)
@@ -54,9 +54,9 @@ func TestErrTokenExpired_ErrorsIs(t *testing.T) {
 
 	pastTime := time.Now().Add(-1 * time.Hour)
 	claims := AccessTokenClaims{
-		ID:                uuid.New(),
-		Subject:           uuid.New(),
-		SessionID:         uuid.New(),
+		ID:                uuid.NewString(),
+		Subject:           uuid.NewString(),
+		SessionID:         uuid.NewString(),
 		Username:          "user",
 		Issuer:            maker.config.Issuer,
 		Audience:          maker.config.Audience,
@@ -86,9 +86,9 @@ func TestErrTokenMaxLifetimeExceeded_ErrorsIs(t *testing.T) {
 	now := time.Now()
 	pastMle := now.Add(-1 * time.Minute)
 	claims := AccessTokenClaims{
-		ID:                uuid.New(),
-		Subject:           uuid.New(),
-		SessionID:         uuid.New(),
+		ID:                uuid.NewString(),
+		Subject:           uuid.NewString(),
+		SessionID:         uuid.NewString(),
 		Username:          "user",
 		Issuer:            maker.config.Issuer,
 		Audience:          maker.config.Audience,

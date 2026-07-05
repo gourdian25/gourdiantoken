@@ -18,8 +18,8 @@ func TestVerifyAccessToken_Valid(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin", "user"}
 
@@ -77,8 +77,8 @@ func TestVerifyAccessToken_Expired(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -104,12 +104,12 @@ func TestVerifyAccessToken_Expired(t *testing.T) {
 	t.Run("rejects token exceeding max lifetime", func(t *testing.T) {
 		// Manually create a token with past max lifetime
 		now := time.Now()
-		tokenID := uuid.New()
+		tokenID := uuid.NewString()
 
 		claims := jwt.MapClaims{
-			"jti": tokenID.String(),
-			"sub": userID.String(),
-			"sid": sessionID.String(),
+			"jti": tokenID,
+			"sub": userID,
+			"sid": sessionID,
 			"usr": username,
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -136,8 +136,8 @@ func TestVerifyAccessToken_InvalidSignature(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -241,8 +241,8 @@ func TestVerifyRefreshToken_Valid(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("verifies valid refresh token", func(t *testing.T) {
@@ -277,8 +277,8 @@ func TestVerifyRefreshToken_Invalid(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("rejects expired refresh token", func(t *testing.T) {
@@ -322,9 +322,9 @@ func TestVerifyAccessToken_InvalidClaims(t *testing.T) {
 	t.Run("rejects token without roles", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -349,9 +349,9 @@ func TestVerifyAccessToken_InvalidClaims(t *testing.T) {
 	t.Run("rejects token with wrong type", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -373,12 +373,12 @@ func TestVerifyAccessToken_InvalidClaims(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid token type")
 	})
 
-	t.Run("rejects token with invalid UUID", func(t *testing.T) {
+	t.Run("rejects token with empty token ID", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": "invalid-uuid",
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": "",
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -402,9 +402,9 @@ func TestVerifyAccessToken_InvalidClaims(t *testing.T) {
 	t.Run("rejects token issued in future", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -434,9 +434,9 @@ func TestVerifyAccessToken_InvalidAudienceIssuer(t *testing.T) {
 	t.Run("rejects token with wrong issuer", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": "wrong-issuer", // Different issuer
 			"aud": maker.config.Audience,
@@ -462,9 +462,9 @@ func TestVerifyAccessToken_InvalidAudienceIssuer(t *testing.T) {
 	t.Run("rejects token with wrong audience", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": []string{"wrong-audience"}, // Different audience
@@ -491,18 +491,18 @@ func TestVerifyRefreshToken_EdgeCases(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("rejects refresh token exceeding max lifetime", func(t *testing.T) {
 		now := time.Now()
-		tokenID := uuid.New()
+		tokenID := uuid.NewString()
 
 		claims := jwt.MapClaims{
-			"jti": tokenID.String(),
-			"sub": userID.String(),
-			"sid": sessionID.String(),
+			"jti": tokenID,
+			"sub": userID,
+			"sid": sessionID,
 			"usr": username,
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -526,8 +526,8 @@ func TestVerifyRefreshToken_EdgeCases(t *testing.T) {
 	t.Run("rejects refresh token with missing required claims", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": userID.String(),
+			"jti": uuid.NewString(),
+			"sub": userID,
 			// "sid" is missing
 			"usr": username,
 			"iss": maker.config.Issuer,
@@ -547,12 +547,12 @@ func TestVerifyRefreshToken_EdgeCases(t *testing.T) {
 		assert.Contains(t, err.Error(), "missing required claim: sid")
 	})
 
-	t.Run("rejects refresh token with invalid UUID formats", func(t *testing.T) {
+	t.Run("rejects refresh token with empty identifier claims", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": "invalid-uuid",
-			"sub": "invalid-uuid",
-			"sid": "invalid-uuid",
+			"jti": "",
+			"sub": "",
+			"sid": "",
 			"usr": username,
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -573,9 +573,9 @@ func TestVerifyRefreshToken_EdgeCases(t *testing.T) {
 	t.Run("accepts valid refresh token with all optional claims", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": userID.String(),
-			"sid": sessionID.String(),
+			"jti": uuid.NewString(),
+			"sub": userID,
+			"sid": sessionID,
 			"usr": username,
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -625,8 +625,8 @@ func TestVerifyTokens_InvalidTokenStructure(t *testing.T) {
 func TestVerifyAccessToken_ContextCancellation(t *testing.T) {
 	maker := setupTestMaker(t)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -691,8 +691,8 @@ func TestVerifyAccessToken_ContextCancellation(t *testing.T) {
 func TestVerifyRefreshToken_ContextCancellation(t *testing.T) {
 	maker := setupTestMaker(t)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("returns error when context is canceled during verification", func(t *testing.T) {
@@ -726,8 +726,8 @@ func TestVerifyAccessToken_ContextCancellation_WithRepository(t *testing.T) {
 	// Test with repository enabled to verify context cancellation works
 	maker := setupTestMakerWithRepo(t)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -756,9 +756,9 @@ func TestVerifyAccessToken_EdgeCases(t *testing.T) {
 	t.Run("rejects token with empty roles array", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -783,9 +783,9 @@ func TestVerifyAccessToken_EdgeCases(t *testing.T) {
 	t.Run("rejects token with invalid role types", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -810,9 +810,9 @@ func TestVerifyAccessToken_EdgeCases(t *testing.T) {
 	t.Run("rejects token with not-before in future", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -837,9 +837,9 @@ func TestVerifyAccessToken_EdgeCases(t *testing.T) {
 	t.Run("accepts token with valid not-before", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -868,9 +868,9 @@ func TestVerifyAccessToken_AdditionalEdgeCases(t *testing.T) {
 	t.Run("rejects token with malformed expiration", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -894,9 +894,9 @@ func TestVerifyAccessToken_AdditionalEdgeCases(t *testing.T) {
 	t.Run("rejects token with exceeded max lifetime", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -921,9 +921,9 @@ func TestVerifyAccessToken_AdditionalEdgeCases(t *testing.T) {
 	t.Run("accepts token with valid max lifetime", func(t *testing.T) {
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -949,8 +949,8 @@ func TestVerifyRefreshToken_Revocation(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("rejects revoked refresh token", func(t *testing.T) {
@@ -985,8 +985,8 @@ func TestVerifyAccessToken_Revocation(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -1024,8 +1024,8 @@ func TestVerifyToken_RevocationEdgeCases(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -1080,8 +1080,8 @@ func TestVerifyToken_RevocationEdgeCases(t *testing.T) {
 func TestContextCancellation_Integration(t *testing.T) {
 	maker := setupTestMaker(t)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 

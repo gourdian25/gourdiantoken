@@ -698,7 +698,7 @@ func TestNewGourdianTokenMaker_RequiresRepositoryForRotationOrRevocation(t *test
 // Helper Functions
 // ============================================================================
 
-func generateTestUUID() uuid.UUID {
-	uuid := uuid.New()
+func generateTestUUID() string {
+	uuid := uuid.NewString()
 	return uuid
 }

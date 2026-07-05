@@ -4,8 +4,6 @@ package gourdiantoken
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // AccessTokenClaims represents the claims contained in an access token JWT.
@@ -13,7 +11,7 @@ import (
 //
 // Standard JWT Claims:
 //   - jti: JWT ID (unique token identifier)
-//   - sub: Subject (user UUID)
+//   - sub: Subject (user identifier)
 //   - iss: Issuer (authentication service)
 //   - aud: Audience (intended recipients)
 //   - iat: Issued At (token creation time)
@@ -27,15 +25,17 @@ import (
 //   - typ: Token Type (always "access" for access tokens)
 //   - mle: Maximum Lifetime Expiry (absolute expiration)
 type AccessTokenClaims struct {
-	// ID is the unique token identifier (UUIDv4) used for tracking and revocation.
-	ID uuid.UUID `json:"jti"`
+	// ID is the unique token identifier (a UUIDv4 string, generated internally)
+	// used for tracking and revocation.
+	ID string `json:"jti"`
 
-	// Subject is the user's unique identifier (UUID).
-	Subject uuid.UUID `json:"sub"`
+	// Subject is the user's unique identifier (any non-empty string).
+	Subject string `json:"sub"`
 
-	// SessionID uniquely identifies the user's session (UUIDv4).
-	// Used to invalidate all tokens when a session ends.
-	SessionID uuid.UUID `json:"sid"`
+	// SessionID uniquely identifies the user's session (any string; may be
+	// empty for sessionless tokens). Used to invalidate all tokens when a
+	// session ends.
+	SessionID string `json:"sid"`
 
 	// Username is the human-readable username for logging and display purposes.
 	Username string `json:"usr"`
@@ -71,7 +71,7 @@ type AccessTokenClaims struct {
 //
 // Standard JWT Claims:
 //   - jti: JWT ID (unique token identifier)
-//   - sub: Subject (user UUID)
+//   - sub: Subject (user identifier)
 //   - iss: Issuer (authentication service)
 //   - aud: Audience (intended recipients)
 //   - iat: Issued At (token creation time)
@@ -86,14 +86,16 @@ type AccessTokenClaims struct {
 //
 // Note: Refresh tokens do not include roles since they're only used to obtain new access tokens.
 type RefreshTokenClaims struct {
-	// ID is the unique token identifier (UUIDv4) used for tracking and rotation.
-	ID uuid.UUID `json:"jti"`
+	// ID is the unique token identifier (a UUIDv4 string, generated internally)
+	// used for tracking and rotation.
+	ID string `json:"jti"`
 
-	// Subject is the user's unique identifier (UUID).
-	Subject uuid.UUID `json:"sub"`
+	// Subject is the user's unique identifier (any non-empty string).
+	Subject string `json:"sub"`
 
-	// SessionID uniquely identifies the user's session (UUIDv4).
-	SessionID uuid.UUID `json:"sid"`
+	// SessionID uniquely identifies the user's session (any string; may be
+	// empty for sessionless tokens).
+	SessionID string `json:"sid"`
 
 	// Username is the human-readable username.
 	Username string `json:"usr"`
@@ -124,11 +126,12 @@ type RefreshTokenClaims struct {
 // This is returned after successful token creation and includes all information needed
 // for the client to use the token.
 type AccessTokenResponse struct {
-	// Subject is the user's unique identifier (UUID).
-	Subject uuid.UUID `json:"sub"`
+	// Subject is the user's unique identifier (any non-empty string).
+	Subject string `json:"sub"`
 
-	// SessionID uniquely identifies the user's session (UUID).
-	SessionID uuid.UUID `json:"sid"`
+	// SessionID uniquely identifies the user's session (any string; may be
+	// empty for sessionless tokens).
+	SessionID string `json:"sid"`
 
 	// Token is the signed JWT string ready for use in Authorization headers.
 	Token string `json:"tok"`
@@ -164,11 +167,12 @@ type AccessTokenResponse struct {
 // RefreshTokenResponse contains the generated refresh token and its associated metadata.
 // This is returned after successful refresh token creation or rotation.
 type RefreshTokenResponse struct {
-	// Subject is the user's unique identifier (UUID).
-	Subject uuid.UUID `json:"sub"`
+	// Subject is the user's unique identifier (any non-empty string).
+	Subject string `json:"sub"`
 
-	// SessionID uniquely identifies the user's session (UUID).
-	SessionID uuid.UUID `json:"sid"`
+	// SessionID uniquely identifies the user's session (any string; may be
+	// empty for sessionless tokens).
+	SessionID string `json:"sid"`
 
 	// Token is the signed JWT string that can be used to obtain new access tokens.
 	Token string `json:"tok"`

@@ -5,8 +5,6 @@ package gourdiantoken
 import (
 	"context"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // TokenRepository defines the interface for persistent token storage operations.
@@ -138,10 +136,10 @@ type GourdianTokenMaker interface {
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - userID: The user's unique identifier (must not be uuid.Nil)
+	//   - userID: The user's unique identifier (must not be empty)
 	//   - username: Human-readable username (max 1024 characters)
 	//   - roles: Authorization roles (must contain at least one non-empty role)
-	//   - sessionID: Session identifier for tracking
+	//   - sessionID: Session identifier for tracking (may be empty for sessionless tokens)
 	//
 	// Returns:
 	//   - *AccessTokenResponse: Generated token with metadata
@@ -151,20 +149,20 @@ type GourdianTokenMaker interface {
 	//
 	//	token, err := maker.CreateAccessToken(
 	//	    ctx,
-	//	    uuid.MustParse("123e4567-e89b-12d3-a456-426614174000"),
+	//	    "123e4567-e89b-12d3-a456-426614174000",
 	//	    "john.doe",
 	//	    []string{"user", "admin"},
-	//	    sessionUUID,
+	//	    sessionID,
 	//	)
-	CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
+	CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error)
 
 	// CreateRefreshToken generates a new signed refresh token.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout
-	//   - userID: The user's unique identifier (must not be uuid.Nil)
+	//   - userID: The user's unique identifier (must not be empty)
 	//   - username: Human-readable username (max 1024 characters)
-	//   - sessionID: Session identifier for tracking
+	//   - sessionID: Session identifier for tracking (may be empty for sessionless tokens)
 	//
 	// Returns:
 	//   - *RefreshTokenResponse: Generated token with metadata
@@ -174,11 +172,11 @@ type GourdianTokenMaker interface {
 	//
 	//	token, err := maker.CreateRefreshToken(
 	//	    ctx,
-	//	    userUUID,
+	//	    userID,
 	//	    "john.doe",
-	//	    sessionUUID,
+	//	    sessionID,
 	//	)
-	CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
+	CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error)
 
 	// VerifyAccessToken validates an access token and returns its claims.
 	// Checks signature, expiration, revocation status, and required claims.

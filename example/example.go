@@ -86,8 +86,8 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 	var results []TestResult
 	fmt.Printf("\n┌─ %s\n", "TOKEN LIFECYCLE")
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "lifecycle@example.com"
 	roles := []string{"user"}
 
@@ -216,8 +216,8 @@ func runSecurityValidationTests(ctx context.Context, tokenMaker gourdiantoken.Go
 	var results []TestResult
 	fmt.Printf("\n┌─ %s\n", "SECURITY & VALIDATION")
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	// Test 1: Invalid Token Format
 	results = append(results, runTest("Reject Invalid Token Format", func() (string, error) {
@@ -315,11 +315,11 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	var results []TestResult
 	fmt.Printf("\n┌─ %s\n", "EDGE CASES")
 
-	sessionID := uuid.New()
+	sessionID := uuid.NewString()
 
 	// Test 1: Nil User ID
 	results = append(results, runTest("Reject Nil User ID", func() (string, error) {
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.Nil, "user@test.com", []string{"user"}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, "", "user@test.com", []string{"user"}, sessionID)
 		if err == nil {
 			return "", fmt.Errorf("should reject nil user ID")
 		}
@@ -328,7 +328,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 
 	// Test 2: Empty Roles
 	results = append(results, runTest("Reject Empty Roles", func() (string, error) {
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.New(), "user@test.com", []string{}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", []string{}, sessionID)
 		if err == nil {
 			return "", fmt.Errorf("should reject empty roles")
 		}
@@ -337,7 +337,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 
 	// Test 3: Empty String in Roles
 	results = append(results, runTest("Reject Empty String in Roles", func() (string, error) {
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.New(), "user@test.com", []string{"user", "", "admin"}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", []string{"user", "", "admin"}, sessionID)
 		if err == nil {
 			return "", fmt.Errorf("should reject empty string in roles")
 		}
@@ -347,7 +347,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	// Test 4: Extremely Long Username
 	results = append(results, runTest("Reject Extremely Long Username", func() (string, error) {
 		longUsername := strings.Repeat("a", 2000) + "@test.com"
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.New(), longUsername, []string{"user"}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), longUsername, []string{"user"}, sessionID)
 		if err == nil {
 			return "", fmt.Errorf("should reject extremely long username")
 		}
@@ -357,7 +357,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	// Test 5: Maximum Valid Username Length
 	results = append(results, runTest("Accept Maximum Valid Username", func() (string, error) {
 		maxUsername := strings.Repeat("a", 1000) + "@test.com"
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.New(), maxUsername, []string{"user"}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), maxUsername, []string{"user"}, sessionID)
 		if err != nil {
 			return "", err
 		}
@@ -367,7 +367,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	// Test 6: Unicode Username
 	results = append(results, runTest("Handle Unicode Username", func() (string, error) {
 		unicodeUsername := "用户名@例え.日本"
-		token, err := tokenMaker.CreateAccessToken(ctx, uuid.New(), unicodeUsername, []string{"user"}, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), unicodeUsername, []string{"user"}, sessionID)
 		if err != nil {
 			return "", err
 		}
@@ -386,7 +386,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	// Test 7: Special Characters in Roles
 	results = append(results, runTest("Handle Special Characters in Roles", func() (string, error) {
 		specialRoles := []string{"admin:write", "user/read", "mod*all", "super_admin"}
-		token, err := tokenMaker.CreateAccessToken(ctx, uuid.New(), "user@test.com", specialRoles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", specialRoles, sessionID)
 		if err != nil {
 			return "", err
 		}
@@ -406,7 +406,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 			manyRoles[i] = fmt.Sprintf("role_%d", i)
 		}
 
-		token, err := tokenMaker.CreateAccessToken(ctx, uuid.New(), "user@test.com", manyRoles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", manyRoles, sessionID)
 		if err != nil {
 			return "", err
 		}
@@ -438,8 +438,8 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				userID := uuid.New()
-				sessionID := uuid.New()
+				userID := uuid.NewString()
+				sessionID := uuid.NewString()
 				username := fmt.Sprintf("concurrent%d@test.com", id)
 				roles := []string{"user"}
 
@@ -471,8 +471,8 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 		const count = 50
 		tokens := make([]string, count)
 		for i := 0; i < count; i++ {
-			token, err := tokenMaker.CreateAccessToken(ctx, uuid.New(), fmt.Sprintf("user%d@test.com", i),
-				[]string{"user"}, uuid.New())
+			token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), fmt.Sprintf("user%d@test.com", i),
+				[]string{"user"}, uuid.NewString())
 			if err != nil {
 				return "", err
 			}
@@ -521,8 +521,8 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				userID := uuid.New()
-				sessionID := uuid.New()
+				userID := uuid.NewString()
+				sessionID := uuid.NewString()
 
 				// 50% create, 30% verify, 20% rotate
 				switch id % 10 {
@@ -572,7 +572,7 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 
 	// Test 4: Race Condition on Token Rotation
 	results = append(results, runTest("Race Condition: Simultaneous Rotation", func() (string, error) {
-		token, err := tokenMaker.CreateRefreshToken(ctx, uuid.New(), "race@test.com", uuid.New())
+		token, err := tokenMaker.CreateRefreshToken(ctx, uuid.NewString(), "race@test.com", uuid.NewString())
 		if err != nil {
 			return "", err
 		}
@@ -620,8 +620,8 @@ func runBasicOperationsTests(ctx context.Context, tokenMaker gourdiantoken.Gourd
 	var results []TestResult
 	fmt.Printf("\n┌─ %s\n", "BASIC OPERATIONS")
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "john.doe@example.com"
 	roles := []string{"user", "admin"}
 
@@ -722,8 +722,8 @@ func runBasicOperationsTests(ctx context.Context, tokenMaker gourdiantoken.Gourd
 	// Test 5: Token Payload Integrity
 	results = append(results, runTest("Token Payload Integrity", func() (string, error) {
 		// Create token with specific claims
-		testUserID := uuid.New()
-		testSessionID := uuid.New()
+		testUserID := uuid.NewString()
+		testSessionID := uuid.NewString()
 		testUsername := "integrity@test.com"
 		testRoles := []string{"admin", "editor", "viewer"}
 
@@ -782,8 +782,8 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 		start := time.Now()
 
 		for i := 0; i < count; i++ {
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 			username := fmt.Sprintf("perfuser%d@test.com", i)
 			roles := []string{"user", fmt.Sprintf("role%d", i%10)}
 
@@ -805,8 +805,8 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 
 		// Create tokens first
 		for i := 0; i < count; i++ {
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 			username := fmt.Sprintf("verifyuser%d@test.com", i)
 			roles := []string{"user"}
 
@@ -839,8 +839,8 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 
 		// Create tokens with large role sets
 		for i := 0; i < count; i++ {
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 			username := fmt.Sprintf("largeuser%d@test.com", i)
 
 			// Create many roles to simulate large payload
@@ -868,8 +868,8 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 		successCount := 0
 
 		for i := 0; i < operations; i++ {
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 			username := fmt.Sprintf("mixeduser%d@test.com", i)
 			roles := []string{"user"}
 
@@ -899,8 +899,8 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 		durations := make([]time.Duration, samples)
 
 		for i := 0; i < samples; i++ {
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 			username := fmt.Sprintf("latencyuser%d@test.com", i)
 			roles := []string{"user"}
 
@@ -944,8 +944,8 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 			go func(id int) {
 				defer wg.Done()
 
-				userID := uuid.New()
-				sessionID := uuid.New()
+				userID := uuid.NewString()
+				sessionID := uuid.NewString()
 				username := fmt.Sprintf("stressuser%d@test.com", id)
 				roles := []string{"user", "stress_test"}
 
@@ -1001,8 +1001,8 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 1: User Login Flow
 	results = append(results, runTest("Scenario: Complete User Login", func() (string, error) {
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 		username := "alice@company.com"
 		roles := []string{"user", "employee", "developer"}
 
@@ -1036,8 +1036,8 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 2: Token Refresh Flow
 	results = append(results, runTest("Scenario: Token Refresh Flow", func() (string, error) {
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 		username := "bob@company.com"
 
 		// Initial refresh token
@@ -1067,8 +1067,8 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 3: User Logout Flow
 	results = append(results, runTest("Scenario: User Logout (Token Revocation)", func() (string, error) {
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 		username := "charlie@company.com"
 
 		// Create tokens
@@ -1098,14 +1098,14 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 4: Multi-Device Login
 	results = append(results, runTest("Scenario: Multi-Device Login", func() (string, error) {
-		userID := uuid.New()
+		userID := uuid.NewString()
 		username := "david@company.com"
 		devices := []string{"desktop", "mobile", "tablet"}
 
 		deviceTokens := make(map[string]*gourdiantoken.AccessTokenResponse)
 
 		for _, device := range devices {
-			sessionID := uuid.New() // Different session per device
+			sessionID := uuid.NewString() // Different session per device
 			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID)
 			if err != nil {
 				return "", fmt.Errorf("failed to create token for %s: %w", device, err)
@@ -1138,8 +1138,8 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		}
 
 		for _, u := range users {
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 
 			token, err := tokenMaker.CreateAccessToken(ctx, userID, u.username, u.roles, sessionID)
 			if err != nil {
@@ -1170,7 +1170,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 6: Session Management
 	results = append(results, runTest("Scenario: Session Management", func() (string, error) {
-		userID := uuid.New()
+		userID := uuid.NewString()
 		username := "eve@company.com"
 
 		// Create multiple sessions
@@ -1178,7 +1178,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		sessionTokens := make([]string, sessions)
 
 		for i := 0; i < sessions; i++ {
-			sessionID := uuid.New()
+			sessionID := uuid.NewString()
 			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID)
 			if err != nil {
 				return "", err
@@ -1187,7 +1187,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		}
 
 		// Verify all sessions are independent
-		sessionIDs := make(map[uuid.UUID]bool)
+		sessionIDs := make(map[string]bool)
 		for _, tokenStr := range sessionTokens {
 			claims, err := tokenMaker.VerifyAccessToken(ctx, tokenStr)
 			if err != nil {
@@ -1205,8 +1205,8 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 7: Token Expiry Near Boundary
 	results = append(results, runTest("Scenario: Token Near Expiry", func() (string, error) {
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		token, err := tokenMaker.CreateAccessToken(ctx, userID, "nearexpiry@test.com", []string{"user"}, sessionID)
 		if err != nil {
@@ -1227,8 +1227,8 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 8: High-Security Transaction
 	results = append(results, runTest("Scenario: High-Security Transaction", func() (string, error) {
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 		username := "banker@secure.com"
 		roles := []string{"user", "banker", "transaction_approver"}
 
@@ -1268,8 +1268,8 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 9: API Rate Limiting Simulation
 	results = append(results, runTest("Scenario: API Rate Limiting (100 requests)", func() (string, error) {
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Create token once
 		token, err := tokenMaker.CreateAccessToken(ctx, userID, "api@user.com", []string{"user", "api"}, sessionID)
@@ -1294,8 +1294,8 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 10: Microservices Token Sharing
 	results = append(results, runTest("Scenario: Microservices Token Validation", func() (string, error) {
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		// Service A creates token
 		token, err := tokenMaker.CreateAccessToken(ctx, userID, "microservice@user.com",
