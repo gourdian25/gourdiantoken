@@ -1107,8 +1107,8 @@ func TestAllSupportedAlgorithms(t *testing.T) {
 			require.NotNil(t, maker)
 
 			// Create and verify access token
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 			username := "testuser"
 			roles := []string{"admin"}
 
@@ -1345,8 +1345,8 @@ func TestCrossAlgorithmVerification(t *testing.T) {
 		config256.Algorithm = "HS256"
 		maker256, _ := NewGourdianTokenMaker(ctx, config256, nil)
 
-		userID := uuid.New()
-		token, err := maker256.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.New())
+		userID := uuid.NewString()
+		token, err := maker256.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString())
 		require.NoError(t, err)
 
 		// Try to verify with HS512
@@ -1365,8 +1365,8 @@ func TestCrossAlgorithmVerification(t *testing.T) {
 		config1.SymmetricKey = "first-secret-key-that-is-at-least-32-bytes-long"
 		maker1, _ := NewGourdianTokenMaker(ctx, config1, nil)
 
-		userID := uuid.New()
-		token, err := maker1.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.New())
+		userID := uuid.NewString()
+		token, err := maker1.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString())
 		require.NoError(t, err)
 
 		// Try to verify with second key

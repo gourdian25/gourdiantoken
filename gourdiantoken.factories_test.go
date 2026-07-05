@@ -296,7 +296,7 @@ func TestNewGourdianTokenMakerWithMongo_AllRepositories(t *testing.T) {
 			config.RotationEnabled = true
 
 			mongoRepo := repo.(*MongoTokenRepository)
-			maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database())
+			maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), false)
 			require.NoError(t, err)
 			require.NotNil(t, maker)
 		})
@@ -308,7 +308,7 @@ func TestNewGourdianTokenMakerWithMongo_NilDatabaseFails(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil)
+	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "database instance cannot be nil")
 }
@@ -326,7 +326,7 @@ func TestNewGourdianTokenMakerWithMongo_FailsWithCancelledContext(t *testing.T) 
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	_, err := NewGourdianTokenMakerWithMongo(ctx, config, mongoRepo.revokedCollection.Database())
+	_, err := NewGourdianTokenMakerWithMongo(ctx, config, mongoRepo.revokedCollection.Database(), false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
@@ -341,7 +341,7 @@ func TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository(t *t
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database())
+	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), true)
 	require.NoError(t, err)
 
 	// The returned maker should have transactions enabled
@@ -610,13 +610,95 @@ func TestAllFactories_InvalidConfigurationsFail(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+
+	// Shared invalid-config case run as a table test across all 5 factories: an
+	// invalid config (negative AccessExpiryDuration) must be rejected by every
+	// factory, not just NewGourdianTokenMakerNoStorage.
+	t.Run("NegativeAccessExpiry_AllFactories", func(t *testing.T) {
+		invalidConfig := DefaultTestConfig()
+		invalidConfig.AccessExpiryDuration = -1 * time.Minute
+
+		t.Run("NoStorage", func(t *testing.T) {
+			_, err := NewGourdianTokenMakerNoStorage(context.Background(), invalidConfig)
+			require.Error(t, err)
+		})
+
+		t.Run("Memory", func(t *testing.T) {
+			_, err := NewGourdianTokenMakerWithMemory(context.Background(), invalidConfig)
+			require.Error(t, err)
+		})
+
+		factories := getTestRepositoryFactories()
+
+		t.Run("GORM", func(t *testing.T) {
+			repo, cleanup := factories["GORM"](t)
+			defer cleanup()
+			gormRepo := repo.(*GormTokenRepository)
+			_, err := NewGourdianTokenMakerWithGorm(context.Background(), invalidConfig, gormRepo.db)
+			require.Error(t, err)
+		})
+
+		t.Run("MongoDB", func(t *testing.T) {
+			repo, cleanup := factories["MongoDB"](t)
+			defer cleanup()
+			mongoRepo := repo.(*MongoTokenRepository)
+			_, err := NewGourdianTokenMakerWithMongo(context.Background(), invalidConfig, mongoRepo.revokedCollection.Database(), false)
+			require.Error(t, err)
+		})
+
+		t.Run("Redis", func(t *testing.T) {
+			repo, cleanup := factories["Redis"](t)
+			defer cleanup()
+			redisRepo := repo.(*RedisTokenRepository)
+			_, err := NewGourdianTokenMakerWithRedis(context.Background(), invalidConfig, redisRepo.client)
+			require.Error(t, err)
+		})
+	})
+}
+
+// TestNewGourdianTokenMaker_RequiresRepositoryForRotationOrRevocation exercises the
+// generic NewGourdianTokenMaker constructor directly (not via a NewGourdianTokenMakerWith*
+// factory) to confirm the repository-required error names which flag triggered it.
+func TestNewGourdianTokenMaker_RequiresRepositoryForRotationOrRevocation(t *testing.T) {
+	t.Run("rotation enabled, no repository", func(t *testing.T) {
+		config := DefaultTestConfig()
+		config.RotationEnabled = true
+		config.RevocationEnabled = false
+
+		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "RotationEnabled=true")
+		assert.Contains(t, err.Error(), "RevocationEnabled=false")
+	})
+
+	t.Run("revocation enabled, no repository", func(t *testing.T) {
+		config := DefaultTestConfig()
+		config.RotationEnabled = false
+		config.RevocationEnabled = true
+
+		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "RotationEnabled=false")
+		assert.Contains(t, err.Error(), "RevocationEnabled=true")
+	})
+
+	t.Run("both enabled, no repository", func(t *testing.T) {
+		config := DefaultTestConfig()
+		config.RotationEnabled = true
+		config.RevocationEnabled = true
+
+		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "RotationEnabled=true")
+		assert.Contains(t, err.Error(), "RevocationEnabled=true")
+	})
 }
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-func generateTestUUID() uuid.UUID {
-	uuid := uuid.New()
+func generateTestUUID() string {
+	uuid := uuid.NewString()
 	return uuid
 }

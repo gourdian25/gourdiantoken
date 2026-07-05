@@ -5,6 +5,7 @@ package gourdiantoken
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -51,6 +52,11 @@ const (
 //   - Consider maxmemory policy for production
 type RedisTokenRepository struct {
 	client *redis.Client
+
+	// closeOnce guards Close, since the underlying go-redis client's own Close returns
+	// ErrClosed ("redis: client is closed") if called a second time, unlike this
+	// repository's sibling backends.
+	closeOnce sync.Once
 }
 
 // NewRedisTokenRepository creates a new Redis-based token repository.
@@ -788,6 +794,10 @@ func (r *RedisTokenRepository) Stats(ctx context.Context) (map[string]interface{
 // Important: This should be called during application shutdown to prevent
 // Redis connection leaks and ensure graceful termination.
 //
+// Idempotent: safe to call more than once. The underlying go-redis client's own Close
+// returns an error ("redis: client is closed") if called a second time; this method
+// guards against that with sync.Once so repeated Close calls are a no-op after the first.
+//
 // Returns:
 //   - error: If closing the Redis client fails
 //
@@ -805,5 +815,9 @@ func (r *RedisTokenRepository) Stats(ctx context.Context) (map[string]interface{
 //	    log.Printf("Failed to close Redis token repository: %v", err)
 //	}
 func (r *RedisTokenRepository) Close() error {
-	return r.client.Close()
+	var err error
+	r.closeOnce.Do(func() {
+		err = r.client.Close()
+	})
+	return err
 }

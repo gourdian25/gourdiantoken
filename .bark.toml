@@ -1,0 +1,48 @@
+# File: src/default_config.toml
+
+[general]
+output      = "tree.txt"        # tree output filename
+backup_dir  = ".bark_backups"   # where backups are stored
+max_file_size = 1048576         # skip files larger than this (bytes)
+backup      = true              # create backups before modifying files
+
+[template]
+# Available variables: {{file}}, {{date}}, {{year}}, {{author}}, {{project}}, {{filename}}, {{ext}}
+default     = "File: {{file}}"
+date_format = "%Y-%m-%d"
+
+# Per-extension template overrides (extension without the dot)
+[template.overrides]
+# rs = "File: {{file}} | Author: {{author}} | {{date}}"
+# py = "File: {{file}} | Project: {{project}}"
+
+# Static variables available in all templates
+[template.variables]
+# author  = "Your Name"
+# project = "my-project"
+
+[exclude]
+# Glob patterns for files/directories to skip
+patterns = [
+    "*.min.*",
+    "*.bundle.*",
+    "dist/**",
+    "build/**",
+    "node_modules/**",
+    "vendor/**",
+    "target/**",
+]
+
+[extensions]
+# Extra extensions to process beyond the built-in set
+# style: "slash" (// ...), "hash" (# ...), "css" (/* ... */), "html" (<!-- ... -->)
+custom = [
+    # { ext = "lua",    style = "slash" },
+    # { ext = "svelte", style = "html"  },
+]
+# Extensions to always skip
+skip = []
+
+[watch]
+debounce_ms = 500   # milliseconds to wait after a change before processing
+ignore      = []    # additional glob patterns to ignore in watch mode

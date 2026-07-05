@@ -19,8 +19,8 @@ import (
 
 func BenchmarkCreateAccessToken(b *testing.B) {
 	maker := setupBenchMaker(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -30,8 +30,8 @@ func BenchmarkCreateAccessToken(b *testing.B) {
 
 func BenchmarkCreateRefreshToken(b *testing.B) {
 	maker := setupBenchMaker(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -41,8 +41,8 @@ func BenchmarkCreateRefreshToken(b *testing.B) {
 
 func BenchmarkVerifyAccessToken(b *testing.B) {
 	maker := setupBenchMaker(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	token, _ := maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID)
 
@@ -54,8 +54,8 @@ func BenchmarkVerifyAccessToken(b *testing.B) {
 
 func BenchmarkVerifyRefreshToken(b *testing.B) {
 	maker := setupBenchMaker(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	token, _ := maker.CreateRefreshToken(context.Background(), userID, "testuser", sessionID)
 
@@ -67,8 +67,8 @@ func BenchmarkVerifyRefreshToken(b *testing.B) {
 
 func BenchmarkRotateRefreshToken(b *testing.B) {
 	maker := setupBenchMakerWithRepo(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	token, _ := maker.CreateRefreshToken(context.Background(), userID, "testuser", sessionID)
 
@@ -96,8 +96,8 @@ func BenchmarkSigningMethods(b *testing.B) {
 			maker, _ := NewGourdianTokenMaker(context.Background(), config, nil)
 			jwtMaker := maker.(*JWTMaker)
 
-			userID := uuid.New()
-			sessionID := uuid.New()
+			userID := uuid.NewString()
+			sessionID := uuid.NewString()
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -110,7 +110,7 @@ func BenchmarkSigningMethods(b *testing.B) {
 func BenchmarkTokenHashing(b *testing.B) {
 	testTokens := make([]string, 1000)
 	for i := 0; i < 1000; i++ {
-		testTokens[i] = fmt.Sprintf("token-%d-%s", i, uuid.New().String())
+		testTokens[i] = fmt.Sprintf("token-%d-%s", i, uuid.NewString())
 	}
 
 	b.ResetTimer()
@@ -121,9 +121,9 @@ func BenchmarkTokenHashing(b *testing.B) {
 
 func BenchmarkClaimsConversion(b *testing.B) {
 	claims := AccessTokenClaims{
-		ID:                uuid.New(),
-		Subject:           uuid.New(),
-		SessionID:         uuid.New(),
+		ID:                uuid.NewString(),
+		Subject:           uuid.NewString(),
+		SessionID:         uuid.NewString(),
 		Username:          "testuser",
 		Issuer:            "test.com",
 		Audience:          []string{"api.test.com"},
@@ -137,7 +137,7 @@ func BenchmarkClaimsConversion(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = toMapClaims(claims)
+		_, _ = toMapClaims(claims)
 	}
 }
 
@@ -154,7 +154,7 @@ func BenchmarkRepositoryRevocation_Comparative(b *testing.B) {
 			defer cleanup()
 
 			ctx := context.Background()
-			testToken := "test-revocation-token-" + uuid.New().String()
+			testToken := "test-revocation-token-" + uuid.NewString()
 
 			b.Run("MarkRevoke", func(b *testing.B) {
 				b.ResetTimer()
@@ -200,7 +200,7 @@ func BenchmarkRepositoryRotation_Comparative(b *testing.B) {
 			defer cleanup()
 
 			ctx := context.Background()
-			testToken := "test-rotation-token-" + uuid.New().String()
+			testToken := "test-rotation-token-" + uuid.NewString()
 
 			b.Run("MarkRotated", func(b *testing.B) {
 				b.ResetTimer()
@@ -308,8 +308,8 @@ func BenchmarkConcurrentTokenCreation(b *testing.B) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					userID := uuid.New()
-					sessionID := uuid.New()
+					userID := uuid.NewString()
+					sessionID := uuid.NewString()
 
 					for i := 0; i < operationsPerGoroutine; i++ {
 						_, _ = maker.CreateAccessToken(
@@ -330,8 +330,8 @@ func BenchmarkConcurrentTokenCreation(b *testing.B) {
 
 func BenchmarkConcurrentTokenVerification(b *testing.B) {
 	maker := setupBenchMaker(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	// Pre-create tokens
 	tokens := make([]string, 100)
@@ -394,7 +394,7 @@ func BenchmarkConcurrentRevocation_Comparative(b *testing.B) {
 						go func(goroutineID int) {
 							defer wg.Done()
 							for i := 0; i < operationsPerGoroutine; i++ {
-								token := fmt.Sprintf("token-g%d-i%d-%s", goroutineID, i, uuid.New().String())
+								token := fmt.Sprintf("token-g%d-i%d-%s", goroutineID, i, uuid.NewString())
 								_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 1*time.Hour)
 
 								_, _ = repo.IsTokenRevoked(ctx, AccessToken, token)
@@ -431,7 +431,7 @@ func BenchmarkConcurrentRotationAndRevocation(b *testing.B) {
 					defer wg.Done()
 
 					for i := 0; i < operationsPerGoroutine; i++ {
-						token := fmt.Sprintf("token-g%d-i%d-%s", goroutineID, i, uuid.New().String())
+						token := fmt.Sprintf("token-g%d-i%d-%s", goroutineID, i, uuid.NewString())
 
 						if i%2 == 0 {
 							_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 1*time.Hour)
@@ -460,9 +460,9 @@ func BenchmarkTokenClaimsMemory(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			_ = AccessTokenClaims{
-				ID:                uuid.New(),
-				Subject:           uuid.New(),
-				SessionID:         uuid.New(),
+				ID:                uuid.NewString(),
+				Subject:           uuid.NewString(),
+				SessionID:         uuid.NewString(),
 				Username:          "testuser@example.com",
 				Issuer:            "auth.example.com",
 				Audience:          []string{"api.example.com", "web.example.com"},
@@ -482,9 +482,9 @@ func BenchmarkTokenClaimsMemory(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			_ = RefreshTokenClaims{
-				ID:                uuid.New(),
-				Subject:           uuid.New(),
-				SessionID:         uuid.New(),
+				ID:                uuid.NewString(),
+				Subject:           uuid.NewString(),
+				SessionID:         uuid.NewString(),
 				Username:          "testuser@example.com",
 				Issuer:            "auth.example.com",
 				Audience:          []string{"api.example.com"},
@@ -508,7 +508,7 @@ func BenchmarkMemoryRepositoryMemoryUsage(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
-			token := fmt.Sprintf("token-%d-%s", i, uuid.New().String())
+			token := fmt.Sprintf("token-%d-%s", i, uuid.NewString())
 			b.StartTimer()
 
 			_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 1*time.Hour)
@@ -543,8 +543,8 @@ func BenchmarkMemoryRepositoryMemoryUsage(b *testing.B) {
 
 func BenchmarkThroughput_TokenCreation(b *testing.B) {
 	maker := setupBenchMaker(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	b.ResetTimer()
 	startTime := time.Now()
@@ -576,7 +576,7 @@ func BenchmarkThroughput_Repository(b *testing.B) {
 				count := int64(0)
 
 				for i := 0; i < b.N; i++ {
-					token := fmt.Sprintf("token-%d-%s", i, uuid.New().String())
+					token := fmt.Sprintf("token-%d-%s", i, uuid.NewString())
 					_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 1*time.Hour)
 					atomic.AddInt64(&count, 1)
 				}
@@ -613,8 +613,8 @@ func BenchmarkThroughput_Repository(b *testing.B) {
 
 func BenchmarkEndToEnd_TokenLifecycle(b *testing.B) {
 	maker := setupBenchMakerWithRepo(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -637,8 +637,8 @@ func BenchmarkEndToEnd_TokenLifecycle(b *testing.B) {
 
 func BenchmarkEndToEnd_RefreshFlow(b *testing.B) {
 	maker := setupBenchMakerWithRepo(b)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	refreshResp, _ := maker.CreateRefreshToken(
 		context.Background(),
@@ -668,8 +668,8 @@ func BenchmarkStress_HighConcurrencyTokenOperations(b *testing.B) {
 	numTokens := 50
 
 	tokens := make([]string, numTokens)
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 
 	// Pre-create tokens
 	for i := 0; i < numTokens; i++ {
@@ -719,7 +719,7 @@ func BenchmarkStress_RepositoryLoad(b *testing.B) {
 				go func(goroutineID int) {
 					defer wg.Done()
 					for i := 0; i < operationsPerGoroutine; i++ {
-						token := fmt.Sprintf("stress-g%d-i%d-%s", goroutineID, i, uuid.New().String())
+						token := fmt.Sprintf("stress-g%d-i%d-%s", goroutineID, i, uuid.NewString())
 
 						if err := repo.MarkTokenRevoke(ctx, AccessToken, token, 1*time.Hour); err == nil {
 							atomic.AddInt64(&successCount, 1)
@@ -761,14 +761,14 @@ func BenchmarkRepositoryOperations(b *testing.B) {
 			b.Run("MarkTokenRevoke", func(b *testing.B) {
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					token := fmt.Sprintf("bench-token-%d-%s", i, uuid.New().String())
+					token := fmt.Sprintf("bench-token-%d-%s", i, uuid.NewString())
 					_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 1*time.Hour)
 				}
 			})
 
 			b.Run("IsTokenRevoked", func(b *testing.B) {
 				// Setup - create a token to check
-				token := "bench-check-token-" + uuid.New().String()
+				token := "bench-check-token-" + uuid.NewString()
 				_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 1*time.Hour)
 
 				b.ResetTimer()
@@ -780,14 +780,14 @@ func BenchmarkRepositoryOperations(b *testing.B) {
 			b.Run("MarkTokenRotated", func(b *testing.B) {
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					token := fmt.Sprintf("bench-rotate-%d-%s", i, uuid.New().String())
+					token := fmt.Sprintf("bench-rotate-%d-%s", i, uuid.NewString())
 					_ = repo.MarkTokenRotated(ctx, token, 1*time.Hour)
 				}
 			})
 
 			b.Run("GetRotationTTL", func(b *testing.B) {
 				// Setup - create a rotated token to check TTL
-				token := "bench-ttl-token-" + uuid.New().String()
+				token := "bench-ttl-token-" + uuid.NewString()
 				_ = repo.MarkTokenRotated(ctx, token, 1*time.Hour)
 
 				b.ResetTimer()

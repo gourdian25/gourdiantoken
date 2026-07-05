@@ -1,4 +1,4 @@
-// File: token.bench.helper.go
+// File: token.bench.helper_test.go
 
 package gourdiantoken
 
@@ -126,7 +126,9 @@ func getBenchRepositoryFactories() map[string]BenchRepositoryFactory {
 		},
 
 		"MongoDB": func(b *testing.B) (TokenRepository, func()) {
-			mongoURI := "mongodb://root:mongo_password@localhost:27017"
+			// See token.test.helper_test.go's MongoDB factory for why this is 27018 and
+			// includes directConnection=true.
+			mongoURI := "mongodb://root:mongo_password@localhost:27018/?directConnection=true"
 
 			ctx := context.Background()
 			client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))

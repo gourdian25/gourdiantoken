@@ -1,9 +1,11 @@
-.PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install
+# File: Makefile
+
+.PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install goreleaser-release goreleaser-check
 
 # Variables
-VERSION := v1.0.6
-MAIN_PACKAGE := github.com/gourdian25/gourdiantoken
-MODULE := github.com/gourdian25/gourdiantoken
+VERSION := v2.0.0
+MAIN_PACKAGE := github.com/gourdian25/gourdiantoken/v2
+MODULE := github.com/gourdian25/gourdiantoken/v2
 GO := go
 COVERAGE_MIN := 70
 BUILD_DIR := ./bin
@@ -201,10 +203,20 @@ release: prerelease
 	fi
 
 # Create a release using goreleaser (requires: go install github.com/goreleaser/goreleaser@latest)
-goreleaser-release:
+# Depends on `release` so the VERSION tag exists and is pushed *before* goreleaser runs —
+# goreleaser determines its own release version from the actual git tag at HEAD (via `git
+# describe`), not from this Makefile's VERSION variable, so running this target without
+# tagging first would build/publish under the wrong (previous) version.
+goreleaser-release: release
 	@echo "Building release with goreleaser..."
 	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser@latest" && exit 1)
 	goreleaser release --clean
+
+# Validate .goreleaser.yml and do a full local dry-run (no publish) without needing a real tag
+goreleaser-check:
+	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser@latest" && exit 1)
+	goreleaser check
+	goreleaser release --snapshot --clean
 
 # Development build (faster, with debugging info)
 dev-build:

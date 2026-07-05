@@ -33,8 +33,8 @@ func TestContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		userID := uuid.New()
-		token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.New())
+		userID := uuid.NewString()
+		token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString())
 
 		assert.Error(t, err)
 		assert.Nil(t, token)
@@ -45,7 +45,7 @@ func TestContextCancellation(t *testing.T) {
 		maker := setupTestMaker(t)
 
 		// Create token with valid context
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		// Verify with canceled context
@@ -66,8 +66,8 @@ func TestContextCancellation(t *testing.T) {
 
 		time.Sleep(10 * time.Millisecond) // Ensure timeout
 
-		userID := uuid.New()
-		token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.New())
+		userID := uuid.NewString()
+		token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString())
 
 		assert.Error(t, err)
 		assert.Nil(t, token)
@@ -77,7 +77,7 @@ func TestContextCancellation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 
 		// Create token
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		// Revoke with canceled context
@@ -93,7 +93,7 @@ func TestContextCancellation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 
 		// Create refresh token
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.New(), "user", uuid.New())
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.NewString(), "user", uuid.NewString())
 		require.NoError(t, err)
 
 		// Rotate with canceled context
@@ -107,16 +107,19 @@ func TestContextCancellation(t *testing.T) {
 	})
 }
 
-// TestInvalidUUIDs tests handling of invalid UUID formats
-func TestInvalidUUIDs(t *testing.T) {
+// TestIdentifierClaimValidation tests v2's opaque-string identifier claims:
+// jti/sub/sid no longer need to be UUID-shaped (any non-empty string verifies),
+// jti/sub must be non-empty strings, and sid may be empty (sessionless tokens).
+func TestIdentifierClaimValidation(t *testing.T) {
 	maker := setupTestMaker(t)
 
-	t.Run("invalid UUID in token claims - jti", func(t *testing.T) {
+	buildToken := func(t *testing.T, jti, sub, sid interface{}) string {
+		t.Helper()
 		now := time.Now()
 		claims := jwt.MapClaims{
-			"jti": "not-a-valid-uuid",
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": jti,
+			"sub": sub,
+			"sid": sid,
 			"usr": "testuser",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -127,10 +130,25 @@ func TestInvalidUUIDs(t *testing.T) {
 			"mle": now.Add(24 * time.Hour).Unix(),
 			"typ": string(AccessToken),
 		}
-
 		token := jwt.NewWithClaims(maker.signingMethod, claims)
 		signedToken, err := token.SignedString(maker.privateKey)
 		require.NoError(t, err)
+		return signedToken
+	}
+
+	t.Run("non-UUID identifier strings are accepted", func(t *testing.T) {
+		signedToken := buildToken(t, "not-a-uuid", "user-42", "session-abc")
+
+		accessClaims, err := maker.VerifyAccessToken(context.Background(), signedToken)
+		assert.NoError(t, err)
+		require.NotNil(t, accessClaims)
+		assert.Equal(t, "not-a-uuid", accessClaims.ID)
+		assert.Equal(t, "user-42", accessClaims.Subject)
+		assert.Equal(t, "session-abc", accessClaims.SessionID)
+	})
+
+	t.Run("empty jti is rejected", func(t *testing.T) {
+		signedToken := buildToken(t, "", uuid.NewString(), uuid.NewString())
 
 		accessClaims, err := maker.VerifyAccessToken(context.Background(), signedToken)
 		assert.Error(t, err)
@@ -138,26 +156,8 @@ func TestInvalidUUIDs(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid token ID")
 	})
 
-	t.Run("invalid UUID in token claims - sub", func(t *testing.T) {
-		now := time.Now()
-		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": "invalid-user-uuid",
-			"sid": uuid.New().String(),
-			"usr": "testuser",
-			"iss": maker.config.Issuer,
-			"aud": maker.config.Audience,
-			"rls": []string{"admin"},
-			"iat": now.Unix(),
-			"exp": now.Add(30 * time.Minute).Unix(),
-			"nbf": now.Unix(),
-			"mle": now.Add(24 * time.Hour).Unix(),
-			"typ": string(AccessToken),
-		}
-
-		token := jwt.NewWithClaims(maker.signingMethod, claims)
-		signedToken, err := token.SignedString(maker.privateKey)
-		require.NoError(t, err)
+	t.Run("empty sub is rejected", func(t *testing.T) {
+		signedToken := buildToken(t, uuid.NewString(), "", uuid.NewString())
 
 		accessClaims, err := maker.VerifyAccessToken(context.Background(), signedToken)
 		assert.Error(t, err)
@@ -165,53 +165,25 @@ func TestInvalidUUIDs(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid user ID")
 	})
 
-	t.Run("invalid UUID in token claims - sid", func(t *testing.T) {
-		now := time.Now()
-		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": "bad-session-id",
-			"usr": "testuser",
-			"iss": maker.config.Issuer,
-			"aud": maker.config.Audience,
-			"rls": []string{"admin"},
-			"iat": now.Unix(),
-			"exp": now.Add(30 * time.Minute).Unix(),
-			"nbf": now.Unix(),
-			"mle": now.Add(24 * time.Hour).Unix(),
-			"typ": string(AccessToken),
-		}
+	t.Run("empty sid is accepted (sessionless)", func(t *testing.T) {
+		signedToken := buildToken(t, uuid.NewString(), uuid.NewString(), "")
 
-		token := jwt.NewWithClaims(maker.signingMethod, claims)
-		signedToken, err := token.SignedString(maker.privateKey)
-		require.NoError(t, err)
+		accessClaims, err := maker.VerifyAccessToken(context.Background(), signedToken)
+		assert.NoError(t, err)
+		require.NotNil(t, accessClaims)
+		assert.Equal(t, "", accessClaims.SessionID)
+	})
+
+	t.Run("non-string jti is rejected", func(t *testing.T) {
+		signedToken := buildToken(t, 12345, uuid.NewString(), uuid.NewString())
 
 		accessClaims, err := maker.VerifyAccessToken(context.Background(), signedToken)
 		assert.Error(t, err)
 		assert.Nil(t, accessClaims)
-		assert.Contains(t, err.Error(), "invalid session ID")
 	})
 
-	t.Run("non-string UUID types", func(t *testing.T) {
-		now := time.Now()
-		claims := jwt.MapClaims{
-			"jti": 12345, // Wrong type
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
-			"usr": "testuser",
-			"iss": maker.config.Issuer,
-			"aud": maker.config.Audience,
-			"rls": []string{"admin"},
-			"iat": now.Unix(),
-			"exp": now.Add(30 * time.Minute).Unix(),
-			"nbf": now.Unix(),
-			"mle": now.Add(24 * time.Hour).Unix(),
-			"typ": string(AccessToken),
-		}
-
-		token := jwt.NewWithClaims(maker.signingMethod, claims)
-		signedToken, err := token.SignedString(maker.privateKey)
-		require.NoError(t, err)
+	t.Run("non-string sid is rejected", func(t *testing.T) {
+		signedToken := buildToken(t, uuid.NewString(), uuid.NewString(), 12345)
 
 		accessClaims, err := maker.VerifyAccessToken(context.Background(), signedToken)
 		assert.Error(t, err)
@@ -282,8 +254,8 @@ func TestEmptyClaims(t *testing.T) {
 		{
 			name: "missing jti",
 			claims: jwt.MapClaims{
-				"sub": uuid.New().String(),
-				"sid": uuid.New().String(),
+				"sub": uuid.NewString(),
+				"sid": uuid.NewString(),
 				"usr": "user",
 				"iss": maker.config.Issuer,   // ADD THIS
 				"aud": maker.config.Audience, // ADD THIS
@@ -299,8 +271,8 @@ func TestEmptyClaims(t *testing.T) {
 		{
 			name: "missing sub",
 			claims: jwt.MapClaims{
-				"jti": uuid.New().String(),
-				"sid": uuid.New().String(),
+				"jti": uuid.NewString(),
+				"sid": uuid.NewString(),
 				"usr": "user",
 				"iss": maker.config.Issuer,   // ADD THIS
 				"aud": maker.config.Audience, // ADD THIS
@@ -316,9 +288,9 @@ func TestEmptyClaims(t *testing.T) {
 		{
 			name: "missing iat",
 			claims: jwt.MapClaims{
-				"jti": uuid.New().String(),
-				"sub": uuid.New().String(),
-				"sid": uuid.New().String(),
+				"jti": uuid.NewString(),
+				"sub": uuid.NewString(),
+				"sid": uuid.NewString(),
 				"usr": "user",
 				"iss": maker.config.Issuer,   // ADD THIS
 				"aud": maker.config.Audience, // ADD THIS
@@ -333,9 +305,9 @@ func TestEmptyClaims(t *testing.T) {
 		{
 			name: "missing exp",
 			claims: jwt.MapClaims{
-				"jti": uuid.New().String(),
-				"sub": uuid.New().String(),
-				"sid": uuid.New().String(),
+				"jti": uuid.NewString(),
+				"sub": uuid.NewString(),
+				"sid": uuid.NewString(),
 				"usr": "user",
 				"iss": maker.config.Issuer,   // ADD THIS
 				"aud": maker.config.Audience, // ADD THIS
@@ -350,9 +322,9 @@ func TestEmptyClaims(t *testing.T) {
 		{
 			name: "missing typ",
 			claims: jwt.MapClaims{
-				"jti": uuid.New().String(),
-				"sub": uuid.New().String(),
-				"sid": uuid.New().String(),
+				"jti": uuid.NewString(),
+				"sub": uuid.NewString(),
+				"sid": uuid.NewString(),
 				"usr": "user",
 				"iss": maker.config.Issuer,   // ADD THIS
 				"aud": maker.config.Audience, // ADD THIS
@@ -368,8 +340,8 @@ func TestEmptyClaims(t *testing.T) {
 			name: "empty string jti",
 			claims: jwt.MapClaims{
 				"jti": "",
-				"sub": uuid.New().String(),
-				"sid": uuid.New().String(),
+				"sub": uuid.NewString(),
+				"sid": uuid.NewString(),
 				"usr": "user",
 				"iss": maker.config.Issuer,   // ADD THIS
 				"aud": maker.config.Audience, // ADD THIS
@@ -386,8 +358,8 @@ func TestEmptyClaims(t *testing.T) {
 			name: "null jti",
 			claims: jwt.MapClaims{
 				"jti": nil,
-				"sub": uuid.New().String(),
-				"sid": uuid.New().String(),
+				"sub": uuid.NewString(),
+				"sid": uuid.NewString(),
 				"usr": "user",
 				"iss": maker.config.Issuer,   // ADD THIS
 				"aud": maker.config.Audience, // ADD THIS
@@ -403,9 +375,9 @@ func TestEmptyClaims(t *testing.T) {
 		{
 			name: "wrong type for exp",
 			claims: jwt.MapClaims{
-				"jti": uuid.New().String(),
-				"sub": uuid.New().String(),
-				"sid": uuid.New().String(),
+				"jti": uuid.NewString(),
+				"sub": uuid.NewString(),
+				"sid": uuid.NewString(),
 				"usr": "user",
 				"iss": maker.config.Issuer,
 				"aud": maker.config.Audience,
@@ -437,9 +409,9 @@ func TestEmptyClaims(t *testing.T) {
 
 	t.Run("empty username is valid", func(t *testing.T) {
 		claims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "", // Empty username should be allowed
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -471,7 +443,7 @@ func TestBoundaryConditions(t *testing.T) {
 			username = username[:i] + "a" + username[i+1:]
 		}
 
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), username, []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), username, []string{"admin"}, uuid.NewString())
 		assert.NoError(t, err)
 		assert.NotNil(t, token)
 		assert.Equal(t, 1024, len(token.Username))
@@ -481,7 +453,7 @@ func TestBoundaryConditions(t *testing.T) {
 		maker := setupTestMaker(t)
 		username := string(make([]byte, 1025))
 
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), username, []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), username, []string{"admin"}, uuid.NewString())
 		assert.Error(t, err)
 		assert.Nil(t, token)
 		assert.Contains(t, err.Error(), "username too long")
@@ -489,7 +461,7 @@ func TestBoundaryConditions(t *testing.T) {
 
 	t.Run("single role", func(t *testing.T) {
 		maker := setupTestMaker(t)
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"user"}, uuid.New())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"user"}, uuid.NewString())
 		assert.NoError(t, err)
 		assert.NotNil(t, token)
 		assert.Len(t, token.Roles, 1)
@@ -502,7 +474,7 @@ func TestBoundaryConditions(t *testing.T) {
 			roles[i] = "role" + string(rune(i))
 		}
 
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", roles, uuid.New())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", roles, uuid.NewString())
 		assert.NoError(t, err)
 		assert.NotNil(t, token)
 		assert.Len(t, token.Roles, 100)
@@ -515,9 +487,9 @@ func TestBoundaryConditions(t *testing.T) {
 		// Test with an explicitly expired token
 		pastTime := time.Now().Add(-1 * time.Hour)
 		expiredClaims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "user",
 			"iss": maker.config.Issuer,
 			"aud": maker.config.Audience,
@@ -540,7 +512,7 @@ func TestBoundaryConditions(t *testing.T) {
 		assert.Contains(t, err.Error(), "expired")
 
 		// Test with a valid token
-		validToken, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+		validToken, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		claims, err = maker.VerifyAccessToken(context.Background(), validToken.Token)
@@ -554,9 +526,9 @@ func TestBoundaryConditions(t *testing.T) {
 
 		// Test 1: Create a token that's already expired
 		pastTime := time.Now().Add(-1 * time.Hour)
-		tokenID := uuid.New()
-		userID := uuid.New()
-		sessionID := uuid.New()
+		tokenID := uuid.NewString()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		expiredClaims := AccessTokenClaims{
 			ID:                tokenID,
@@ -573,7 +545,9 @@ func TestBoundaryConditions(t *testing.T) {
 			TokenType:         AccessToken,
 		}
 
-		jwtToken := jwt.NewWithClaims(maker.signingMethod, toMapClaims(expiredClaims))
+		expiredMapClaims, err := toMapClaims(expiredClaims)
+		require.NoError(t, err)
+		jwtToken := jwt.NewWithClaims(maker.signingMethod, expiredMapClaims)
 		expiredToken, err := jwtToken.SignedString(maker.privateKey)
 		require.NoError(t, err)
 
@@ -584,7 +558,7 @@ func TestBoundaryConditions(t *testing.T) {
 		assert.Contains(t, err.Error(), "expired")
 
 		// Test 2: Create a valid token and verify it works
-		validToken, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+		validToken, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		claims, err = maker.VerifyAccessToken(context.Background(), validToken.Token)
@@ -599,7 +573,7 @@ func TestBoundaryConditions(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, nil)
 
 		// Create token and immediately verify it's valid
-		token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		// Verify token is initially valid

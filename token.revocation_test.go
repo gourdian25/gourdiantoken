@@ -21,8 +21,8 @@ func TestRevokeAccessToken_ContextCancellation(t *testing.T) {
 	repo := NewMemoryTokenRepository(1 * time.Hour)
 	maker := setupTestMakerWithConfig(t, config, repo)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -62,8 +62,8 @@ func TestRevokeRefreshToken_ContextCancellation(t *testing.T) {
 	repo := NewMemoryTokenRepository(1 * time.Hour)
 	maker := setupTestMakerWithConfig(t, config, repo)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("returns error when context is canceled", func(t *testing.T) {
@@ -99,8 +99,8 @@ func TestRevokeAccessToken_FeatureDisabled(t *testing.T) {
 
 	maker := setupTestMakerWithConfig(t, config, nil)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
@@ -121,8 +121,8 @@ func TestRevokeRefreshToken_FeatureDisabled(t *testing.T) {
 
 	maker := setupTestMakerWithConfig(t, config, nil)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("returns error when revocation is disabled", func(t *testing.T) {

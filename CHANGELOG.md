@@ -1,0 +1,51 @@
+# Changelog
+
+All notable changes to `gourdiantoken` are documented in this file.
+
+## v2.0.0
+
+### ⚠️ Breaking changes
+
+- **Module path changed to `github.com/gourdian25/gourdiantoken/v2`**, per Go's semantic import versioning rules for major version 2+. Update your import statements and `go get github.com/gourdian25/gourdiantoken/v2@latest`.
+- **`ID`, `Subject`, and `SessionID` changed from `uuid.UUID` to `string`** on `AccessTokenClaims` and `RefreshTokenClaims`. `Subject` and `SessionID` likewise changed on `AccessTokenResponse` and `RefreshTokenResponse` (neither response type has an `ID`/`jti` field).
+- **`userID` and `sessionID` parameters changed from `uuid.UUID` to `string`** on `CreateAccessToken` and `CreateRefreshToken` (both the `GourdianTokenMaker` interface and the `*JWTMaker` implementation).
+- **Validation is now fully opaque for user-supplied identifiers**: `userID` must be a non-empty string; `sessionID` may be empty (for sessionless tokens) but is no longer required to be UUID-shaped. Any previously-valid UUID string is still accepted — this is a widening of accepted input, not a narrowing.
+- If you were calling `.String()` on `claims.Subject`, `claims.SessionID`, or a response's `Subject`/`SessionID` to get a string, remove that call — they're already `string`.
+- `github.com/google/uuid` is now purely an internal dependency (used only for generating the token ID / `jti`). If your code only ever passed your own string identifiers into this library and never imported `google/uuid` for anything else, you no longer need that import at all.
+
+### Added
+
+- Sentinel errors for use with `errors.Is`: `ErrTokenRevoked`, `ErrTokenRotated`, `ErrTokenExpired`, `ErrInvalidSignature`, `ErrInvalidToken`, `ErrInvalidClaims`, `ErrTokenRepositoryRequired`, `ErrMissingExpClaim`, `ErrTokenMaxLifetimeExceeded`. Existing error message text is preserved ahead of the wrapped sentinel, so string-matching callers are unaffected.
+- `GourdianTokenMakerCloser`, a new optional interface with a `Close() error` method for makers that support stopping their background cleanup goroutines. Implemented by `*JWTMaker`; not added to the existing `GourdianTokenMaker` interface, so this is non-breaking for external implementers. Idempotent — safe to call more than once.
+- `WithLogger` functional option, for overriding how background cleanup goroutines report errors (defaults to `fmt.Printf`-based logging, matching prior behavior).
+- `TestRepositoryClose_Idempotent` test covering `Close()` idempotency on the Redis, GORM, and MongoDB repository backends (previously only `MemoryTokenRepository.Close()` had coverage).
+- `TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions` regression test locking in the Mongo duplicate-key fix below.
+
+### Fixed
+
+- **Mongo `MarkTokenRotatedAtomic` duplicate-key handling**: duplicate-key detection moved from inside the transaction callback to the transaction boundary. Previously, a write error surfaced to the driver mid-transaction could cause the server to abort the transaction regardless of the callback's return value, making commit behavior driver-version-dependent. Now matches the same "false, nil means not-newly-marked, no real error" contract as the Redis and GORM backends.
+- **`RotateRefreshToken` unrecoverable lockout**: the new refresh token is now created *before* the old one is marked rotated (previously the reverse). If token creation fails, the old token is no longer left permanently unusable with no new token issued — the caller can safely retry.
+- **`RedisTokenRepository.Close()` was not idempotent**: a second call previously returned `redis: client is closed` (an upstream `go-redis` behavior). Now guarded with `sync.Once`, matching the idempotent-`Close()` convention used elsewhere in this codebase.
+- Dead-`err` bug in `VerifyAccessToken`/`VerifyRefreshToken`/`RevokeAccessToken`/`RevokeRefreshToken`: an already-nil-checked `err` was being reused in a later error message, producing misleading `"invalid token: <nil>"` output.
+- `toMapClaims` panics (on unsupported claim types and empty `Roles`) converted to returned errors. These paths were not reachable through the public API as shipped, but were fragile defense-in-depth.
+- Redundant `"invalid token: "` prefix stutter removed from `RotateRefreshToken`'s error wrapping around `VerifyRefreshToken`'s own already-descriptive errors.
+- Ambiguous validation message when a token repository is required but missing now states which flag (`RotationEnabled`/`RevocationEnabled`) triggered it.
+- False doc comment claiming cleanup goroutines stop via garbage-collection finalization (they don't — see `Close()` above, which is the real fix for this).
+- Flaky race in the (pre-existing, test-only) `TestClose_StopsCleanupGoroutines` test: `Close()`'s context cancellation could race against an already-ready ticker tick, causing one legitimate in-flight cleanup cycle to be mistaken for the goroutines failing to stop. Production behavior was always correct; only the test's assertion was too strict.
+
+### Changed
+
+- Internal source file `gourdiantoken.go` split into topic-focused files (`gourdiantoken.config.go`, `gourdiantoken.claims.go`, `gourdiantoken.interfaces.go`, `gourdiantoken.maker.go`, `gourdiantoken.validation.go`, `gourdiantoken.keys.go`) — no behavior change, no consumer-visible impact.
+- `NewGourdianTokenConfig` is now marked `// Deprecated:` in favor of `DefaultGourdianTokenConfig` plus direct struct-literal field assignment. Not removed; still fully functional.
+- `TokenRepository`'s interface doc now documents that implementations may enforce a minimum TTL floor (Redis does, at 100ms); the other three backends don't. No behavior change.
+- Exported claim-key constants (`ClaimIssuer`, `ClaimAudience`, `ClaimNotBefore`, `ClaimMaxLifetimeExpiry`) added alongside `GourdianTokenConfig`, replacing bare string literals used internally.
+
+### Dependencies
+
+- `github.com/stretchr/testify` is no longer pulled in by consumers of this library — it was previously a direct dependency only because two test-helper files were missing the `_test.go` suffix (now renamed: `token.test.helper_test.go`, `token.bench.helper_test.go`).
+
+### Known issues (flagged, not changed in this release)
+
+- `RevokeAccessToken`/`RevokeRefreshToken`'s internal `jwt.Parse` keyfunc callbacks don't check the token's signing algorithm the way `VerifyAccessToken`/`VerifyRefreshToken` do. Low-severity (Go's static typing of the verification key already bounds classic algorithm-confusion attacks here); left alone in this release to avoid an unreviewed behavior change to revoke/rotate paths.
+- `NewGourdianTokenMakerWithMongo`'s extra `transactionsEnabled bool` positional parameter breaks the `(ctx, config, handle)` shape shared by `NewGourdianTokenMakerWithGorm`/`WithRedis`. Fixing this needs an options struct or a new factory variant — a separate, larger design decision.
+- `MongoTokenRepository.Close(ctx context.Context) error` has a different signature than the other three backends' bare `Close() error`. Not an interface-satisfaction issue (`TokenRepository` doesn't declare `Close()` at all), just an inconsistency between the four concrete types' own conventions.
