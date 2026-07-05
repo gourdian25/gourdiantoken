@@ -30,8 +30,8 @@ func TestConcurrentTokenCreation(t *testing.T) {
 			go func(id int) {
 				defer wg.Done()
 
-				userID := uuid.New()
-				token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.New())
+				userID := uuid.NewString()
+				token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString())
 				if err != nil {
 					errors <- err
 					return
@@ -78,7 +78,7 @@ func TestConcurrentTokenCreation(t *testing.T) {
 			go func() {
 				defer wg.Done()
 
-				token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+				token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 				if err != nil {
 					errorCount.Add(1)
 					return
@@ -97,8 +97,8 @@ func TestConcurrentTokenCreation(t *testing.T) {
 	t.Run("concurrent creation with same user ID", func(t *testing.T) {
 		maker := setupTestMaker(t)
 		ctx := context.Background()
-		userID := uuid.New()
-		sessionID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
 
 		const numGoroutines = 50
 		tokens := make([]string, numGoroutines)
@@ -151,7 +151,7 @@ func TestConcurrentTokenCreation(t *testing.T) {
 					case <-stopChan:
 						return
 					default:
-						_, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+						_, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 						if err != nil {
 							errorCount.Add(1)
 						} else {
@@ -177,7 +177,7 @@ func TestConcurrentTokenVerification(t *testing.T) {
 		ctx := context.Background()
 
 		// Create one token
-		token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		const numGoroutines = 100
@@ -208,7 +208,7 @@ func TestConcurrentTokenVerification(t *testing.T) {
 		const numTokens = 50
 		tokens := make([]string, numTokens)
 		for i := 0; i < numTokens; i++ {
-			token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 			require.NoError(t, err)
 			tokens[i] = token.Token
 		}
@@ -254,7 +254,7 @@ func TestConcurrentTokenVerification(t *testing.T) {
 					case <-stopChan:
 						return
 					default:
-						token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+						token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 						if err == nil {
 							createCount.Add(1)
 							select {
@@ -306,7 +306,7 @@ func TestConcurrentRevocation(t *testing.T) {
 		const numTokens = 50
 		tokens := make([]*AccessTokenResponse, numTokens)
 		for i := 0; i < numTokens; i++ {
-			token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 			require.NoError(t, err)
 			tokens[i] = token
 		}
@@ -342,7 +342,7 @@ func TestConcurrentRevocation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		const numGoroutines = 20
@@ -378,7 +378,7 @@ func TestConcurrentRevocation(t *testing.T) {
 		const numTokens = 20
 		oldTokens := make([]string, numTokens)
 		for i := 0; i < numTokens; i++ {
-			token, err := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+			token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
 			require.NoError(t, err)
 			oldTokens[i] = token.Token
 		}
@@ -424,7 +424,7 @@ func TestConcurrentRevocation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		const numGoroutines = 50
@@ -482,7 +482,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 			go func(id int) {
 				defer wg.Done()
 
-				token := uuid.New().String()
+				token := uuid.NewString()
 				err := repo.MarkTokenRevoke(ctx, AccessToken, token, 5*time.Minute)
 				if err == nil {
 					successCount.Add(1)
@@ -500,7 +500,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 
 		tokens := make([]string, 50)
 		for i := range tokens {
-			tokens[i] = uuid.New().String()
+			tokens[i] = uuid.NewString()
 			err := repo.MarkTokenRevoke(ctx, AccessToken, tokens[i], 5*time.Minute)
 			require.NoError(t, err)
 		}
@@ -528,7 +528,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				newToken := uuid.New().String()
+				newToken := uuid.NewString()
 				err := repo.MarkTokenRevoke(ctx, AccessToken, newToken, 5*time.Minute)
 				if err == nil {
 					writeCount.Add(1)
@@ -565,7 +565,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 					case <-stopChan:
 						return
 					default:
-						token := uuid.New().String()
+						token := uuid.NewString()
 						_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 5*time.Minute)
 						_, _ = repo.IsTokenRevoked(ctx, AccessToken, token)
 						_ = repo.MarkTokenRotated(ctx, token, 5*time.Minute)
@@ -590,7 +590,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 
 		// Pre-populate with access tokens
 		for i := range tokens {
-			tokens[i] = uuid.New().String()
+			tokens[i] = uuid.NewString()
 			err := repo.MarkTokenRevoke(ctx, AccessToken, tokens[i], 5*time.Minute)
 			require.NoError(t, err)
 		}
@@ -618,7 +618,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				token := uuid.New().String()
+				token := uuid.NewString()
 				err := repo.MarkTokenRevoke(ctx, RefreshToken, token, 5*time.Minute)
 				if err == nil {
 					refreshWriteCount.Add(1)
@@ -644,7 +644,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				token := uuid.New().String()
+				token := uuid.NewString()
 
 				// Mark as rotated
 				err := repo.MarkTokenRotated(ctx, token, 5*time.Minute)
@@ -670,7 +670,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 
 		// Add tokens with short TTL
 		for i := 0; i < 20; i++ {
-			token := uuid.New().String()
+			token := uuid.NewString()
 			_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 200*time.Millisecond)
 		}
 
@@ -707,7 +707,7 @@ func TestConcurrentRepositoryAccess(t *testing.T) {
 				defer wg.Done()
 
 				for j := 0; j < operationsPerWorker; j++ {
-					token := uuid.New().String()
+					token := uuid.NewString()
 
 					// Random operation
 					switch j % 4 {
@@ -748,7 +748,7 @@ func TestRaceConditions(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, _ = maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+				_, _ = maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 			}()
 		}
 		wg.Wait()
@@ -758,7 +758,7 @@ func TestRaceConditions(t *testing.T) {
 		maker := setupTestMaker(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
@@ -778,7 +778,7 @@ func TestRaceConditions(t *testing.T) {
 
 		tokens := make([]string, 10)
 		for i := range tokens {
-			token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 			require.NoError(t, err)
 			tokens[i] = token.Token
 		}
@@ -809,7 +809,7 @@ func TestDeadlockPrevention(t *testing.T) {
 			// Create tokens
 			tokens := make([]string, 10)
 			for i := range tokens {
-				token, _ := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+				token, _ := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 				if token != nil {
 					tokens[i] = token.Token
 				}
@@ -850,7 +850,7 @@ func TestDeadlockPrevention(t *testing.T) {
 		done := make(chan bool, 1)
 		go func() {
 			for i := 0; i < 100; i++ {
-				_, _ = maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+				_, _ = maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 				if ctx.Err() != nil {
 					break
 				}
@@ -879,7 +879,7 @@ func TestMemoryLeaks(t *testing.T) {
 
 		// Add many short-lived tokens
 		for i := 0; i < 1000; i++ {
-			token := uuid.New().String()
+			token := uuid.NewString()
 			_ = repo.MarkTokenRevoke(ctx, AccessToken, token, 200*time.Millisecond)
 		}
 
@@ -959,7 +959,7 @@ func TestLoadBalancing(t *testing.T) {
 						return
 					default:
 						// Create token
-						token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+						token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 						if err != nil {
 							errorCount.Add(1)
 							continue
@@ -1008,7 +1008,7 @@ func TestLoadBalancing(t *testing.T) {
 				go func() {
 					defer wg.Done()
 
-					token, err := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"admin"}, uuid.New())
+					token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 					if err == nil && token != nil {
 						successCount.Add(1)
 					}
@@ -1055,7 +1055,7 @@ func TestConcurrentMakerCreation(t *testing.T) {
 		// All makers should be independent
 		for i, maker := range makers {
 			if maker != nil {
-				token, err := maker.CreateAccessToken(context.Background(), uuid.New(), "user", []string{"admin"}, uuid.New())
+				token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
 				assert.NoError(t, err, "Maker %d should work", i)
 				assert.NotNil(t, token)
 			}

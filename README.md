@@ -1,8 +1,8 @@
 # Gourdiantoken – Enterprise-Grade JWT Management for Go
 
-![Go Version](https://img.shields.io/badge/Go-1.18%2B-blue)
+![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![GoDoc](https://pkg.go.dev/badge/github.com/gourdian25/gourdiantoken)](https://pkg.go.dev/github.com/gourdian25/gourdiantoken)
+[![GoDoc](https://pkg.go.dev/badge/github.com/gourdian25/gourdiantoken/v2)](https://pkg.go.dev/github.com/gourdian25/gourdiantoken/v2)
 
 **gourdiantoken** is a production-ready, comprehensive JWT token management system designed for modern Go applications. Built with security-first principles and performance optimization, it provides everything needed for enterprise authentication systems — from basic token generation to advanced features like automatic rotation, Redis-backed revocation, and multi-algorithm cryptographic support.
 
@@ -21,6 +21,7 @@
 
 - [Features](#-features)
 - [Installation](#-installation)
+- [Migrating from v1.x](#-migrating-from-v1x)
 - [Quick Start](#-quick-start)
 - [Architecture Overview](#-architecture-overview)
 - [Configuration](#-configuration)
@@ -43,7 +44,7 @@
 ### Core Token Management
 
 - **Dual Token System**: Short-lived access tokens (15-60 min) with long-lived refresh tokens (7-90 days)
-- **Comprehensive Claims**: UUIDs for users/sessions, username, roles (RBAC), issuer, audience, timestamps
+- **Comprehensive Claims**: Opaque string identifiers for users/sessions, username, roles (RBAC), issuer, audience, timestamps
 - **Flexible Expiration**: Configure both sliding expiration and absolute maximum lifetime
 - **Context-Aware**: All operations support Go context for cancellation and timeouts
 
@@ -67,17 +68,17 @@
 - **Clean API**: Intuitive interface with clear method signatures
 - **Factory Methods**: Quick setup with defaults or full customization
 - **Rich Documentation**: Comprehensive inline documentation and examples
-- **Type Safety**: Strong typing with UUIDs and time.Time throughout
+- **Type Safety**: Strong typing with time.Time throughout; user/session identifiers are plain strings (any non-empty value, not restricted to UUID format)
 
 ---
 
 ## 📦 Installation
 
 ```bash
-go get github.com/gourdian25/gourdiantoken@latest
+go get github.com/gourdian25/gourdiantoken/v2@latest
 ```
 
-**Requirements**: Go 1.18 or higher
+**Requirements**: Go 1.24 or higher
 
 **Optional Dependencies** (based on storage backend):
 
@@ -92,6 +93,12 @@ go get gorm.io/driver/postgres  # or mysql, sqlite
 # For MongoDB
 go get go.mongodb.org/mongo-driver
 ```
+
+---
+
+## ⬆️ Migrating from v1.x
+
+**v2.0.0 is a breaking release**: `ID`/`Subject`/`SessionID` on `AccessTokenClaims`/`RefreshTokenClaims`, and `Subject`/`SessionID` on `AccessTokenResponse`/`RefreshTokenResponse`, changed from `uuid.UUID` to plain `string`. Likewise, the `userID`/`sessionID` parameters on `CreateAccessToken`/`CreateRefreshToken` are now `string` instead of `uuid.UUID`. Any non-empty string is now accepted — values no longer need to be UUID-shaped. If you were calling `.String()` on these fields, drop that call; they're already strings. See [CHANGELOG.md](./CHANGELOG.md) for the full list of changes, including several non-breaking fixes bundled into this release. Since `google/uuid` is now only used internally (for the token ID / `jti`), v2 consumers who only pass their own string identifiers no longer need to import it themselves at all — it remains a direct dependency of this module only for that internal use.
 
 ---
 
@@ -110,7 +117,7 @@ import (
     "log"
     "time"
 
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
     "github.com/google/uuid"
 )
 
@@ -129,8 +136,8 @@ func main() {
     }
 
     // 3. Create access token
-    userID := uuid.New()
-    sessionID := uuid.New()
+    userID := uuid.NewString()
+    sessionID := uuid.NewString()
     
     accessToken, err := maker.CreateAccessToken(
         ctx,
@@ -170,7 +177,7 @@ import (
     "log"
     "time"
 
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
     "github.com/google/uuid"
     "github.com/redis/go-redis/v9"
 )
@@ -211,8 +218,8 @@ func main() {
         log.Fatal(err)
     }
 
-    userID := uuid.New()
-    sessionID := uuid.New()
+    userID := uuid.NewString()
+    sessionID := uuid.NewString()
 
     // 4. Create token pair
     accessToken, _ := maker.CreateAccessToken(ctx, userID, "alice", []string{"user"}, sessionID)
@@ -583,9 +590,9 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 
 ```go
 type AccessTokenClaims struct {
-    ID                uuid.UUID   `json:"jti"`
-    Subject           uuid.UUID   `json:"sub"`
-    SessionID         uuid.UUID   `json:"sid"`
+    ID                string      `json:"jti"`
+    Subject           string      `json:"sub"`
+    SessionID         string      `json:"sid"`
     Username          string      `json:"usr"`
     Issuer            string      `json:"iss"`
     Audience          []string    `json:"aud"`
@@ -724,7 +731,7 @@ Automatic validation of all critical claims:
 - ✅ Maximum lifetime (`mle > now`)
 - ✅ Token type (access vs refresh)
 - ✅ Required claims presence
-- ✅ UUID format validation
+- ✅ Non-empty identifier validation (`jti`/`sub`; `sid` may be empty for sessionless tokens)
 - ✅ Revocation status (if enabled)
 - ✅ Rotation status (if enabled)
 
@@ -745,8 +752,8 @@ Automatic validation of all critical claims:
 
 ```go
 type GourdianTokenMaker interface {
-    CreateAccessToken(ctx context.Context, userID uuid.UUID, username string, roles []string, sessionID uuid.UUID) (*AccessTokenResponse, error)
-    CreateRefreshToken(ctx context.Context, userID uuid.UUID, username string, sessionID uuid.UUID) (*RefreshTokenResponse, error)
+    CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error)
+    CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error)
     VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
     VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error)
     RevokeAccessToken(ctx context.Context, token string) error
@@ -760,10 +767,10 @@ type GourdianTokenMaker interface {
 ```go
 token, err := maker.CreateAccessToken(
     ctx,
-    userID,          // uuid.UUID - User's unique identifier
+    userID,          // string - User's unique identifier (must not be empty)
     username,        // string - Human-readable name
     roles,           // []string - Authorization roles (min 1)
-    sessionID,       // uuid.UUID - Session identifier
+    sessionID,       // string - Session identifier (may be empty)
 )
 ```
 
@@ -771,7 +778,7 @@ token, err := maker.CreateAccessToken(
 
 **Validation:**
 
-- `userID` must not be `uuid.Nil`
+- `userID` must not be empty
 - `username` max 1024 characters
 - `roles` must contain at least one non-empty string
 - Checks context cancellation before signing
@@ -781,9 +788,9 @@ token, err := maker.CreateAccessToken(
 ```go
 token, err := maker.CreateRefreshToken(
     ctx,
-    userID,          // uuid.UUID
+    userID,          // string
     username,        // string
-    sessionID,       // uuid.UUID
+    sessionID,       // string
 )
 ```
 
@@ -880,7 +887,7 @@ import (
     "strings"
     "time"
 
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
     "github.com/google/uuid"
     "github.com/redis/go-redis/v9"
 )
@@ -908,10 +915,10 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
     ctx := r.Context()
     
     // Authenticate user (your logic here)
-    userID := uuid.New()
+    userID := uuid.NewString()
     username := "john.doe@example.com"
     roles := []string{"user", "admin"}
-    sessionID := uuid.New()
+    sessionID := uuid.NewString()
     
     // Create token pair
     accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
@@ -1123,7 +1130,7 @@ import (
     "strings"
 
     "github.com/gin-gonic/gin"
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
 )
 
 // AccessTokenMiddleware verifies JWT access tokens
@@ -1183,10 +1190,10 @@ func AccessTokenMiddleware(tokenMaker gourdiantoken.GourdianTokenMaker) gin.Hand
         }
 
         // Store claims in context
-        c.Set("user_id", claims.Subject.String())
+        c.Set("user_id", claims.Subject)
         c.Set("username", claims.Username)
         c.Set("roles", claims.Roles)
-        c.Set("session_id", claims.SessionID.String())
+        c.Set("session_id", claims.SessionID)
 
         c.Next()
     }
@@ -1243,9 +1250,9 @@ func RefreshTokenMiddleware(tokenMaker gourdiantoken.GourdianTokenMaker) gin.Han
         }
 
         // Store claims in context
-        c.Set("user_id", claims.Subject.String())
+        c.Set("user_id", claims.Subject)
         c.Set("username", claims.Username)
-        c.Set("session_id", claims.SessionID.String())
+        c.Set("session_id", claims.SessionID)
         c.Set("refresh_token", tokenString)
 
         c.Next()
@@ -1318,7 +1325,7 @@ import (
     "time"
 
     "github.com/gin-gonic/gin"
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
     "github.com/redis/go-redis/v9"
 )
 
@@ -1374,8 +1381,8 @@ func loginHandler(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc {
     return func(c *gin.Context) {
         // Your login logic here
         // Then create tokens:
-        userID := uuid.New()
-        sessionID := uuid.New()
+        userID := uuid.NewString()
+        sessionID := uuid.NewString()
         
         accessToken, _ := maker.CreateAccessToken(c, userID, "user@example.com", []string{"user"}, sessionID)
         refreshToken, _ := maker.CreateRefreshToken(c, userID, "user@example.com", sessionID)
@@ -1446,10 +1453,7 @@ func refreshTokenHandler(maker gourdiantoken.GourdianTokenMaker) gin.HandlerFunc
         // Load roles from database (not in refresh token)
         roles := []string{"user"} // Your logic here
         
-        userUUID, _ := uuid.Parse(userID.(string))
-        sessionUUID, _ := uuid.Parse(sessionID.(string))
-        
-        newAccessToken, _ := maker.CreateAccessToken(c, userUUID, username.(string), roles, sessionUUID)
+        newAccessToken, _ := maker.CreateAccessToken(c, userID.(string), username.(string), roles, sessionID.(string))
         
         // Update cookies
         c.SetCookie("access_token", "Bearer "+newAccessToken.Token,
@@ -1628,7 +1632,7 @@ import (
     "net/http"
     "strings"
 
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
     "github.com/google/uuid"
 )
 
@@ -1652,7 +1656,7 @@ func main() {
 
 func login(w http.ResponseWriter, r *http.Request) {
     token, _ := maker.CreateAccessToken(
-        r.Context(), uuid.New(), "user@example.com", []string{"user"}, uuid.New(),
+        r.Context(), uuid.NewString(), "user@example.com", []string{"user"}, uuid.NewString(),
     )
     json.NewEncoder(w).Encode(token)
 }
@@ -1688,7 +1692,7 @@ package main
 
 import (
     "context"
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
     "github.com/redis/go-redis/v9"
 )
 
@@ -1711,7 +1715,7 @@ package main
 
 import (
     "context"
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
     "github.com/redis/go-redis/v9"
 )
 
@@ -1738,7 +1742,7 @@ import (
     "context"
     "time"
 
-    "github.com/gourdian25/gourdiantoken"
+    "github.com/gourdian25/gourdiantoken/v2"
     "github.com/google/uuid"
 )
 
@@ -1746,8 +1750,8 @@ type SessionManager struct {
     maker gourdiantoken.GourdianTokenMaker
 }
 
-func (sm *SessionManager) CreateSession(ctx context.Context, userID uuid.UUID, username string, roles []string) (*Session, error) {
-    sessionID := uuid.New()
+func (sm *SessionManager) CreateSession(ctx context.Context, userID string, username string, roles []string) (*Session, error) {
+    sessionID := uuid.NewString()
     
     accessToken, err := sm.maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
     if err != nil {
@@ -1806,8 +1810,8 @@ func (sm *SessionManager) EndSession(ctx context.Context, accessToken, refreshTo
 }
 
 type Session struct {
-    SessionID    uuid.UUID
-    UserID       uuid.UUID
+    SessionID    string
+    UserID       string
     AccessToken  string
     RefreshToken string
     ExpiresAt    time.Time
@@ -1841,8 +1845,8 @@ func TestTokenCreation(t *testing.T) {
     config := gourdiantoken.DefaultGourdianTokenConfig("test-secret-key-32-bytes-long")
     maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
     
-    userID := uuid.New()
-    token, err := maker.CreateAccessToken(ctx, userID, "test", []string{"user"}, uuid.New())
+    userID := uuid.NewString()
+    token, err := maker.CreateAccessToken(ctx, userID, "test", []string{"user"}, uuid.NewString())
     
     require.NoError(t, err)
     assert.NotEmpty(t, token.Token)
@@ -1855,7 +1859,7 @@ func TestTokenExpiration(t *testing.T) {
     config.AccessExpiryDuration = 1 * time.Second
     maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
     
-    token, _ := maker.CreateAccessToken(ctx, uuid.New(), "user", []string{"user"}, uuid.New())
+    token, _ := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"user"}, uuid.NewString())
     time.Sleep(2 * time.Second)
     
     _, err := maker.VerifyAccessToken(ctx, token.Token)
@@ -1869,7 +1873,7 @@ func TestTokenRotation(t *testing.T) {
     config.RotationEnabled = true
     maker, _ := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
     
-    refresh, _ := maker.CreateRefreshToken(ctx, uuid.New(), "user", uuid.New())
+    refresh, _ := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
     newToken, err := maker.RotateRefreshToken(ctx, refresh.Token)
     
     require.NoError(t, err)
@@ -1942,7 +1946,7 @@ Report vulnerabilities privately via email. DO NOT open public issues for securi
 
 ## 📚 Resources
 
-- [GoDoc](https://pkg.go.dev/github.com/gourdian25/gourdiantoken) - Full API docs
+- [GoDoc](https://pkg.go.dev/github.com/gourdian25/gourdiantoken/v2) - Full API docs
 - [RFC 7519](https://tools.ietf.org/html/rfc7519) - JWT Standard
 - [RFC 7515](https://tools.ietf.org/html/rfc7515) - JWS Standard
 - [RFC 7518](https://tools.ietf.org/html/rfc7518) - JWA Standard
@@ -1953,7 +1957,7 @@ Report vulnerabilities privately via email. DO NOT open public issues for securi
 
 **Made with ❤️ by the gourdiantoken team**
 
-[Documentation](https://pkg.go.dev/github.com/gourdian25/gourdiantoken) •
+[Documentation](https://pkg.go.dev/github.com/gourdian25/gourdiantoken/v2) •
 [Issues](https://github.com/gourdian25/gourdiantoken/issues) •
 [Discussions](https://github.com/gourdian25/gourdiantoken/discussions)
 

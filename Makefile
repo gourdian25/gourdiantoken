@@ -3,9 +3,9 @@
 .PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install
 
 # Variables
-VERSION := v1.0.7
-MAIN_PACKAGE := github.com/gourdian25/gourdiantoken
-MODULE := github.com/gourdian25/gourdiantoken
+VERSION := v2.0.0
+MAIN_PACKAGE := github.com/gourdian25/gourdiantoken/v2
+MODULE := github.com/gourdian25/gourdiantoken/v2
 GO := go
 COVERAGE_MIN := 70
 BUILD_DIR := ./bin

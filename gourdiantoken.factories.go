@@ -88,7 +88,7 @@ import (
 //	}
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
-func NewGourdianTokenMakerNoStorage(ctx context.Context, config GourdianTokenConfig) (GourdianTokenMaker, error) {
+func NewGourdianTokenMakerNoStorage(ctx context.Context, config GourdianTokenConfig, opts ...Option) (GourdianTokenMaker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -98,7 +98,7 @@ func NewGourdianTokenMakerNoStorage(ctx context.Context, config GourdianTokenCon
 		return nil, fmt.Errorf("revocation and rotation must be disabled for stateless token maker")
 	}
 
-	return NewGourdianTokenMaker(ctx, config, nil)
+	return NewGourdianTokenMaker(ctx, config, nil, opts...)
 }
 
 // NewGourdianTokenMakerWithMemory creates a GourdianTokenMaker with an in-memory token repository.
@@ -169,7 +169,7 @@ func NewGourdianTokenMakerNoStorage(ctx context.Context, config GourdianTokenCon
 //	}
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
-func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenConfig) (GourdianTokenMaker, error) {
+func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenConfig, opts ...Option) (GourdianTokenMaker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -177,7 +177,7 @@ func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenCo
 	// Create in-memory repository with default cleanup interval from config
 	tokenRepo := NewMemoryTokenRepository(config.CleanupInterval)
 
-	return NewGourdianTokenMaker(ctx, config, tokenRepo)
+	return NewGourdianTokenMaker(ctx, config, tokenRepo, opts...)
 }
 
 // NewGourdianTokenMakerWithGorm creates a GourdianTokenMaker with a GORM-based token repository.
@@ -270,7 +270,7 @@ func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenCo
 //	}
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMakerWithGorm(ctx, config, gormDB)
-func NewGourdianTokenMakerWithGorm(ctx context.Context, config GourdianTokenConfig, db *gorm.DB) (GourdianTokenMaker, error) {
+func NewGourdianTokenMakerWithGorm(ctx context.Context, config GourdianTokenConfig, db *gorm.DB, opts ...Option) (GourdianTokenMaker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -285,7 +285,7 @@ func NewGourdianTokenMakerWithGorm(ctx context.Context, config GourdianTokenConf
 		return nil, fmt.Errorf("failed to initialize GORM token repository: %w", err)
 	}
 
-	return NewGourdianTokenMaker(ctx, config, tokenRepo)
+	return NewGourdianTokenMaker(ctx, config, tokenRepo, opts...)
 }
 
 // NewGourdianTokenMakerWithMongo creates a GourdianTokenMaker with a MongoDB-based token repository.
@@ -377,7 +377,14 @@ func NewGourdianTokenMakerWithGorm(ctx context.Context, config GourdianTokenConf
 //	}
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
-func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenConfig, mongoDB *mongo.Database, transactionsEnabled bool) (GourdianTokenMaker, error) {
+//
+// Note: unlike its NewGourdianTokenMakerWithGorm/WithRedis siblings, this factory takes
+// an extra transactionsEnabled positional parameter, breaking the otherwise-consistent
+// (ctx, config, handle) shape shared by the other backend factories. This is a known
+// inconsistency, flagged here rather than fixed — changing it would require an options
+// struct or a new factory variant, which is a breaking-signature decision out of scope
+// for this pass.
+func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenConfig, mongoDB *mongo.Database, transactionsEnabled bool, opts ...Option) (GourdianTokenMaker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -392,7 +399,7 @@ func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenCon
 		return nil, fmt.Errorf("failed to initialize MongoDB token repository: %w", err)
 	}
 
-	return NewGourdianTokenMaker(ctx, config, tokenRepo)
+	return NewGourdianTokenMaker(ctx, config, tokenRepo, opts...)
 }
 
 // NewGourdianTokenMakerWithRedis creates a GourdianTokenMaker with a Redis-based token repository.
@@ -487,7 +494,7 @@ func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenCon
 //	}
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisClient)
-func NewGourdianTokenMakerWithRedis(ctx context.Context, config GourdianTokenConfig, redisClient *redis.Client) (GourdianTokenMaker, error) {
+func NewGourdianTokenMakerWithRedis(ctx context.Context, config GourdianTokenConfig, redisClient *redis.Client, opts ...Option) (GourdianTokenMaker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -502,5 +509,5 @@ func NewGourdianTokenMakerWithRedis(ctx context.Context, config GourdianTokenCon
 		return nil, fmt.Errorf("failed to initialize Redis token repository: %w", err)
 	}
 
-	return NewGourdianTokenMaker(ctx, config, tokenRepo)
+	return NewGourdianTokenMaker(ctx, config, tokenRepo, opts...)
 }

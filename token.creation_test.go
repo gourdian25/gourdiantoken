@@ -17,8 +17,8 @@ func TestCreateAccessToken_Valid(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin", "user"}
 
@@ -50,8 +50,8 @@ func TestCreateAccessToken_Valid(t *testing.T) {
 		claims, ok := token.Claims.(jwt.MapClaims)
 		require.True(t, ok)
 
-		assert.Equal(t, userID.String(), claims["sub"])
-		assert.Equal(t, sessionID.String(), claims["sid"])
+		assert.Equal(t, userID, claims["sub"])
+		assert.Equal(t, sessionID, claims["sid"])
 		assert.Equal(t, username, claims["usr"])
 		assert.Equal(t, "test.com", claims["iss"])
 		assert.Equal(t, string(AccessToken), claims["typ"])
@@ -101,13 +101,13 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 	roles := []string{"admin"}
 
 	t.Run("nil user ID", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, uuid.Nil, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, "", username, roles, sessionID)
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -167,11 +167,11 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 	})
 
 	t.Run("nil session ID is allowed", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, uuid.Nil)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, "")
 
 		assert.NoError(t, err)
 		assert.NotNil(t, response)
-		assert.Equal(t, uuid.Nil, response.SessionID)
+		assert.Equal(t, "", response.SessionID)
 	})
 }
 
@@ -179,8 +179,8 @@ func TestCreateRefreshToken_Valid(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("creates valid refresh token", func(t *testing.T) {
@@ -210,8 +210,8 @@ func TestCreateRefreshToken_Valid(t *testing.T) {
 		claims, ok := token.Claims.(jwt.MapClaims)
 		require.True(t, ok)
 
-		assert.Equal(t, userID.String(), claims["sub"])
-		assert.Equal(t, sessionID.String(), claims["sid"])
+		assert.Equal(t, userID, claims["sub"])
+		assert.Equal(t, sessionID, claims["sid"])
 		assert.Equal(t, username, claims["usr"])
 		assert.Equal(t, "test.com", claims["iss"])
 		assert.Equal(t, string(RefreshToken), claims["typ"])
@@ -248,12 +248,12 @@ func TestCreateRefreshToken_InvalidInput(t *testing.T) {
 	maker := setupTestMaker(t)
 	ctx := context.Background()
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("nil user ID", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, uuid.Nil, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, "", username, sessionID)
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -292,9 +292,9 @@ func TestCreateRefreshToken_InvalidInput(t *testing.T) {
 func TestTokenClaims_Mapping(t *testing.T) {
 	t.Run("access token claims to map claims", func(t *testing.T) {
 		now := time.Now()
-		userID := uuid.New()
-		sessionID := uuid.New()
-		tokenID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
+		tokenID := uuid.NewString()
 
 		claims := AccessTokenClaims{
 			ID:                tokenID,
@@ -311,11 +311,12 @@ func TestTokenClaims_Mapping(t *testing.T) {
 			TokenType:         AccessToken,
 		}
 
-		mapClaims := toMapClaims(claims)
+		mapClaims, err := toMapClaims(claims)
+		require.NoError(t, err)
 
-		assert.Equal(t, tokenID.String(), mapClaims["jti"])
-		assert.Equal(t, userID.String(), mapClaims["sub"])
-		assert.Equal(t, sessionID.String(), mapClaims["sid"])
+		assert.Equal(t, tokenID, mapClaims["jti"])
+		assert.Equal(t, userID, mapClaims["sub"])
+		assert.Equal(t, sessionID, mapClaims["sid"])
 		assert.Equal(t, "testuser", mapClaims["usr"])
 		assert.Equal(t, "test.com", mapClaims["iss"])
 		assert.Equal(t, []string{"api.test.com"}, mapClaims["aud"])
@@ -328,9 +329,9 @@ func TestTokenClaims_Mapping(t *testing.T) {
 
 	t.Run("refresh token claims to map claims", func(t *testing.T) {
 		now := time.Now()
-		userID := uuid.New()
-		sessionID := uuid.New()
-		tokenID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
+		tokenID := uuid.NewString()
 
 		claims := RefreshTokenClaims{
 			ID:                tokenID,
@@ -346,11 +347,12 @@ func TestTokenClaims_Mapping(t *testing.T) {
 			TokenType:         RefreshToken,
 		}
 
-		mapClaims := toMapClaims(claims)
+		mapClaims, err := toMapClaims(claims)
+		require.NoError(t, err)
 
-		assert.Equal(t, tokenID.String(), mapClaims["jti"])
-		assert.Equal(t, userID.String(), mapClaims["sub"])
-		assert.Equal(t, sessionID.String(), mapClaims["sid"])
+		assert.Equal(t, tokenID, mapClaims["jti"])
+		assert.Equal(t, userID, mapClaims["sub"])
+		assert.Equal(t, sessionID, mapClaims["sid"])
 		assert.Equal(t, "testuser", mapClaims["usr"])
 		assert.Equal(t, string(RefreshToken), mapClaims["typ"])
 
@@ -361,14 +363,14 @@ func TestTokenClaims_Mapping(t *testing.T) {
 
 	t.Run("map claims to access token claims", func(t *testing.T) {
 		now := time.Now()
-		userID := uuid.New()
-		sessionID := uuid.New()
-		tokenID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
+		tokenID := uuid.NewString()
 
 		mapClaims := jwt.MapClaims{
-			"jti": tokenID.String(),
-			"sub": userID.String(),
-			"sid": sessionID.String(),
+			"jti": tokenID,
+			"sub": userID,
+			"sid": sessionID,
 			"usr": "testuser",
 			"iss": "test.com",
 			"aud": []string{"api.test.com"},
@@ -395,14 +397,14 @@ func TestTokenClaims_Mapping(t *testing.T) {
 
 	t.Run("map claims to refresh token claims", func(t *testing.T) {
 		now := time.Now()
-		userID := uuid.New()
-		sessionID := uuid.New()
-		tokenID := uuid.New()
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
+		tokenID := uuid.NewString()
 
 		mapClaims := jwt.MapClaims{
-			"jti": tokenID.String(),
-			"sub": userID.String(),
-			"sid": sessionID.String(),
+			"jti": tokenID,
+			"sub": userID,
+			"sid": sessionID,
 			"usr": "testuser",
 			"iss": "test.com",
 			"aud": []string{"api.test.com"},
@@ -423,11 +425,28 @@ func TestTokenClaims_Mapping(t *testing.T) {
 		assert.Equal(t, RefreshToken, refreshClaims.TokenType)
 	})
 
-	t.Run("invalid UUID in map claims", func(t *testing.T) {
+	t.Run("non-UUID token ID in map claims is accepted", func(t *testing.T) {
 		mapClaims := jwt.MapClaims{
-			"jti": "invalid-uuid",
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": "opaque-token-id",
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
+			"usr": "testuser",
+			"rls": []interface{}{"admin"},
+			"iat": float64(time.Now().Unix()),
+			"exp": float64(time.Now().Add(30 * time.Minute).Unix()),
+			"typ": string(AccessToken),
+		}
+
+		accessClaims, err := mapToAccessClaims(mapClaims)
+		require.NoError(t, err)
+		assert.Equal(t, "opaque-token-id", accessClaims.ID)
+	})
+
+	t.Run("empty token ID in map claims is rejected", func(t *testing.T) {
+		mapClaims := jwt.MapClaims{
+			"jti": "",
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"rls": []interface{}{"admin"},
 			"iat": float64(time.Now().Unix()),
@@ -442,8 +461,8 @@ func TestTokenClaims_Mapping(t *testing.T) {
 
 	t.Run("missing required claim", func(t *testing.T) {
 		mapClaims := jwt.MapClaims{
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"rls": []interface{}{"admin"},
 			"iat": float64(time.Now().Unix()),
@@ -457,9 +476,9 @@ func TestTokenClaims_Mapping(t *testing.T) {
 
 	t.Run("empty roles in access token", func(t *testing.T) {
 		mapClaims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"rls": []interface{}{},
 			"iat": float64(time.Now().Unix()),
@@ -474,9 +493,9 @@ func TestTokenClaims_Mapping(t *testing.T) {
 
 	t.Run("wrong token type in refresh claims", func(t *testing.T) {
 		mapClaims := jwt.MapClaims{
-			"jti": uuid.New().String(),
-			"sub": uuid.New().String(),
-			"sid": uuid.New().String(),
+			"jti": uuid.NewString(),
+			"sub": uuid.NewString(),
+			"sid": uuid.NewString(),
 			"usr": "testuser",
 			"iat": float64(time.Now().Unix()),
 			"exp": float64(time.Now().Add(7 * 24 * time.Hour).Unix()),
@@ -492,8 +511,8 @@ func TestTokenClaims_Mapping(t *testing.T) {
 func TestCreateRefreshToken_ContextCancellation(t *testing.T) {
 	maker := setupTestMaker(t)
 
-	userID := uuid.New()
-	sessionID := uuid.New()
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
 	username := "testuser"
 
 	t.Run("returns error when context is canceled", func(t *testing.T) {
