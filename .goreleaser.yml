@@ -1,3 +1,5 @@
+version: 2
+
 project_name: gourdiantoken
 
 before:
@@ -10,7 +12,8 @@ builds:
 
 archives:
   - id: "source"
-    format: tar.gz
+    meta: true # not tied to any build — the only build is skipped (pure library, no binary), so without meta:true this archive silently produces nothing
+    formats: [tar.gz]
     files:
       - LICENSE
       - README.md
@@ -36,3 +39,4 @@ changelog:
       - '^chore:'
       - 'README'
       - Merge pull request
+      
