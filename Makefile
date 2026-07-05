@@ -1,6 +1,6 @@
 # File: Makefile
 
-.PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install
+.PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install goreleaser-release goreleaser-check
 
 # Variables
 VERSION := v2.0.0
@@ -203,10 +203,20 @@ release: prerelease
 	fi
 
 # Create a release using goreleaser (requires: go install github.com/goreleaser/goreleaser@latest)
-goreleaser-release:
+# Depends on `release` so the VERSION tag exists and is pushed *before* goreleaser runs —
+# goreleaser determines its own release version from the actual git tag at HEAD (via `git
+# describe`), not from this Makefile's VERSION variable, so running this target without
+# tagging first would build/publish under the wrong (previous) version.
+goreleaser-release: release
 	@echo "Building release with goreleaser..."
 	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser@latest" && exit 1)
 	goreleaser release --clean
+
+# Validate .goreleaser.yml and do a full local dry-run (no publish) without needing a real tag
+goreleaser-check:
+	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser@latest" && exit 1)
+	goreleaser check
+	goreleaser release --snapshot --clean
 
 # Development build (faster, with debugging info)
 dev-build:
