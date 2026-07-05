@@ -1,4 +1,4 @@
-module github.com/gourdian25/gourdiantoken
+module github.com/gourdian25/gourdiantoken/v2
 
 go 1.24.0
 

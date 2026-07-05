@@ -4,8 +4,8 @@
 
 # Variables
 VERSION := v2.0.0
-MAIN_PACKAGE := github.com/gourdian25/gourdiantoken
-MODULE := github.com/gourdian25/gourdiantoken
+MAIN_PACKAGE := github.com/gourdian25/gourdiantoken/v2
+MODULE := github.com/gourdian25/gourdiantoken/v2
 GO := go
 COVERAGE_MIN := 70
 BUILD_DIR := ./bin

@@ -17,7 +17,7 @@ archives:
       - go.mod
       - go.sum
       - ./*.go
-      - examples/*.go
+      - example/*.go
     name_template: "{{ .ProjectName }}_{{ .Version }}_src"
 
 release:

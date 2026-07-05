@@ -1,4 +1,5 @@
 .
+├── CHANGELOG.md
 ├── CLAUDE.md
 ├── LICENSE
 ├── Makefile
@@ -41,4 +42,4 @@
 ├── token.verification_test.go
 └── version.go
 
-1 directories, 40 files
+1 directories, 41 files
