@@ -629,16 +629,75 @@ type AccessTokenClaims struct {
 
 **Note**: Refresh tokens do NOT include the `rls` (roles) claim.
 
+### Verification Tokens
+
+**Purpose**: Short-lived, single-use, use-case-scoped tokens for gaps between two authentication steps — e.g. a 2FA-pending verification step between password check and full session issuance, or password-reset/email-verify links.
+
+**Standard Claims:**
+
+```json
+{
+  "jti": "abc12345-e89b-12d3-a456-426614174000",
+  "sub": "123e4567-e89b-12d3-a456-426614174000",
+  "uc": "2fa-pending",
+  "iss": "auth.example.com",
+  "aud": ["api.example.com"],
+  "iat": 1609459200,
+  "exp": 1609459500,
+  "nbf": 1609459200,
+  "mle": 1609459500,
+  "typ": "verification",
+  "mtd": { "username": "john.doe@example.com" }
+}
+```
+
+**Go Structure:**
+
+```go
+type VerificationTokenClaims struct {
+    ID                string                 `json:"jti"`
+    Subject           string                 `json:"sub"`
+    UseCase           string                 `json:"uc"`
+    Issuer            string                 `json:"iss"`
+    Audience          []string               `json:"aud"`
+    IssuedAt          time.Time              `json:"iat"`
+    ExpiresAt         time.Time              `json:"exp"`
+    NotBefore         time.Time              `json:"nbf"`
+    MaxLifetimeExpiry time.Time              `json:"mle"`
+    Metadata          map[string]interface{} `json:"mtd,omitempty"`
+    TokenType         TokenType              `json:"typ"`
+}
+```
+
+**Note**: No `sid`/`usr`/`rls` claims — no session, username, or roles concept. Requires `VerificationTokensEnabled`; accessed via the optional `GourdianTokenMakerVerification` interface. `mle` always equals `exp` (verification tokens are never renewed). Unlike `CreateAccessToken`/`CreateRefreshToken`, `CreateVerificationToken` takes a per-call `ttl` (0 = use `VerificationDefaultExpiryDuration`).
+
+```go
+maker, err := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
+verifier, ok := maker.(gourdiantoken.GourdianTokenMakerVerification)
+
+// 1. Mint a 5-minute, single-use token scoped to "2fa-pending"
+token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
+
+// 2. Verify it (does not consume it — safe to call more than once)
+claims, err := verifier.VerifyVerificationToken(ctx, token.Token)
+
+// 3. Once the gated action actually completes (e.g. TOTP check passed), consume it
+err = verifier.MarkVerificationTokenUsed(ctx, token.Token)
+
+// 4. A second verify now fails with ErrTokenAlreadyUsed
+_, err = verifier.VerifyVerificationToken(ctx, token.Token) // errors.Is(err, gourdiantoken.ErrTokenAlreadyUsed)
+```
+
 ### Token Comparison
 
-| Feature | Access Token | Refresh Token |
-|---------|-------------|---------------|
-| **Lifetime** | 15-60 minutes | 7-90 days |
-| **Contains Roles** | ✅ Yes | ❌ No |
-| **Used for API Calls** | ✅ Yes | ❌ No |
-| **Can be Rotated** | ❌ No | ✅ Yes |
-| **Revocable** | ✅ Yes | ✅ Yes |
-| **Typical Storage** | Authorization header | HttpOnly cookie |
+| Feature | Access Token | Refresh Token | Verification Token |
+|---------|-------------|---------------|---------------------|
+| **Lifetime** | 15-60 minutes | 7-90 days | Per-call (default 5-15 min) |
+| **Contains Roles** | ✅ Yes | ❌ No | ❌ No |
+| **Used for API Calls** | ✅ Yes | ❌ No | ❌ No |
+| **Can be Rotated** | ❌ No | ✅ Yes | ❌ No |
+| **Revocable / Single-use** | ✅ Revocable | ✅ Revocable | ✅ Single-use (via revocation) |
+| **Typical Storage** | Authorization header | HttpOnly cookie | Query param / form field |
 
 ---
 
@@ -869,6 +928,41 @@ newToken, err := maker.RotateRefreshToken(ctx, oldTokenString)
 4. Return new token
 
 **Security:** If token already rotated, returns error (possible attack)
+
+### CreateVerificationToken
+
+```go
+verifier := maker.(gourdiantoken.GourdianTokenMakerVerification)
+token, err := verifier.CreateVerificationToken(ctx, userID, useCase, ttl, metadata)
+```
+
+**Requirements:** `VerificationTokensEnabled` must be `true`
+
+**Parameters:** `ttl <= 0` falls back to `VerificationDefaultExpiryDuration`; a `ttl` exceeding `VerificationMaxExpiryDuration` (if configured) is rejected. `useCase` must be non-empty and, if `VerificationAllowedUseCases` is set, must appear in that whitelist.
+
+### VerifyVerificationToken
+
+```go
+claims, err := verifier.VerifyVerificationToken(ctx, tokenString)
+```
+
+**Requirements:** `VerificationTokensEnabled` must be `true`
+
+**Effect:** Does not consume the token — safe to call more than once before deliberately marking it used.
+
+### MarkVerificationTokenUsed
+
+```go
+err := verifier.MarkVerificationTokenUsed(ctx, tokenString)
+```
+
+**Requirements:**
+
+- `VerificationTokensEnabled` must be `true`
+- `RevocationEnabled` must be `true`
+- Valid token repository configured
+
+**Effect:** Token immediately becomes invalid for future `VerifyVerificationToken` calls, which then fail with `ErrTokenAlreadyUsed`
 
 ---
 

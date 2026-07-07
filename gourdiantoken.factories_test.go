@@ -97,6 +97,50 @@ func TestNewGourdianTokenMakerNoStorage_CanCreateAndVerifyTokens(t *testing.T) {
 	require.Equal(t, userID, claims.Subject)
 }
 
+func TestDefaultGourdianTokenMaker_NilRepo(t *testing.T) {
+	maker, err := DefaultGourdianTokenMaker(context.Background(), "test-secret-key-that-is-at-least-32-bytes-long", nil)
+	require.NoError(t, err)
+
+	jwtMaker, ok := maker.(*JWTMaker)
+	require.True(t, ok)
+	assert.False(t, jwtMaker.config.RevocationEnabled, "revocation should stay disabled with a nil repo")
+	assert.False(t, jwtMaker.config.RotationEnabled, "rotation should stay disabled with a nil repo")
+
+	ctx := context.Background()
+	userID := generateTestUUID()
+	sessionID := generateTestUUID()
+
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	require.NoError(t, err)
+
+	claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
+	require.NoError(t, err)
+	require.Equal(t, userID, claims.Subject)
+}
+
+func TestDefaultGourdianTokenMaker_WithRepo(t *testing.T) {
+	repo := NewMemoryTokenRepository(1 * time.Minute)
+	maker, err := DefaultGourdianTokenMaker(context.Background(), "test-secret-key-that-is-at-least-32-bytes-long", repo)
+	require.NoError(t, err)
+
+	jwtMaker, ok := maker.(*JWTMaker)
+	require.True(t, ok)
+	assert.True(t, jwtMaker.config.RevocationEnabled, "revocation should be enabled automatically when a repo is provided")
+	assert.True(t, jwtMaker.config.RotationEnabled, "rotation should be enabled automatically when a repo is provided")
+
+	ctx := context.Background()
+	userID := generateTestUUID()
+	sessionID := generateTestUUID()
+
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	require.NoError(t, err)
+
+	require.NoError(t, maker.RevokeAccessToken(ctx, accessToken.Token))
+	_, err = maker.VerifyAccessToken(ctx, accessToken.Token)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTokenRevoked)
+}
+
 // ============================================================================
 // Tests for NewGourdianTokenMakerWithMemory
 // ============================================================================

@@ -49,6 +49,27 @@ func TestErrTokenRotated_ErrorsIs(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTokenRotated)
 }
 
+func TestErrTokenAlreadyUsed_ErrorsIs(t *testing.T) {
+	config := DefaultTestConfig()
+	config.VerificationTokensEnabled = true
+	config.VerificationDefaultExpiryDuration = 5 * time.Minute
+	config.VerificationMaxExpiryDuration = 1 * time.Hour
+
+	repo := NewMemoryTokenRepository(1 * time.Minute)
+	maker := setupTestMakerWithConfig(t, config, repo)
+	ctx := context.Background()
+
+	token, err := maker.CreateVerificationToken(ctx, uuid.NewString(), "2fa-pending", 0, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, maker.MarkVerificationTokenUsed(ctx, token.Token))
+
+	_, err = maker.VerifyVerificationToken(ctx, token.Token)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTokenAlreadyUsed)
+	assert.ErrorIs(t, err, ErrTokenRevoked)
+}
+
 func TestErrTokenExpired_ErrorsIs(t *testing.T) {
 	maker := setupTestMakerWithConfig(t, DefaultTestConfig(), nil)
 
