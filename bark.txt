@@ -8,9 +8,6 @@
 ├── config.validation_test.go
 ├── coverage.html
 ├── cryptographic_test.go
-├── docs/
-│   └── plan/
-│       └── verification-token-upgrade-plan.md
 ├── docs.go
 ├── edge.case_test.go
 ├── example/
@@ -46,4 +43,4 @@
 ├── token.verification_token_test.go
 └── version.go
 
-3 directories, 43 files
+1 directories, 42 files
