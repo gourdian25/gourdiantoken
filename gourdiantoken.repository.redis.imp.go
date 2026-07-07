@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	revokedAccessPrefix  = "revoked:access:"
-	revokedRefreshPrefix = "revoked:refresh:"
-	rotatedPrefix        = "rotated:"
+	revokedAccessPrefix       = "revoked:access:"
+	revokedRefreshPrefix      = "revoked:refresh:"
+	revokedVerificationPrefix = "revoked:verification:"
+	rotatedPrefix             = "rotated:"
 
 	// Minimum TTL to avoid Redis timing issues
 	// Redis has millisecond precision but very short TTLs can cause race conditions
@@ -194,6 +195,8 @@ func (r *RedisTokenRepository) MarkTokenRevoke(ctx context.Context, tokenType To
 		key = revokedAccessPrefix + tokenHash
 	case RefreshToken:
 		key = revokedRefreshPrefix + tokenHash
+	case VerificationToken:
+		key = revokedVerificationPrefix + tokenHash
 	default:
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
@@ -262,6 +265,8 @@ func (r *RedisTokenRepository) IsTokenRevoked(ctx context.Context, tokenType Tok
 		key = revokedAccessPrefix + tokenHash
 	case RefreshToken:
 		key = revokedRefreshPrefix + tokenHash
+	case VerificationToken:
+		key = revokedVerificationPrefix + tokenHash
 	default:
 		return false, fmt.Errorf("invalid token type: %s", tokenType)
 	}
@@ -571,6 +576,8 @@ func (r *RedisTokenRepository) CleanupExpiredRevokedTokens(ctx context.Context, 
 		prefix = revokedAccessPrefix
 	case RefreshToken:
 		prefix = revokedRefreshPrefix
+	case VerificationToken:
+		prefix = revokedVerificationPrefix
 	default:
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
@@ -737,7 +744,7 @@ func (r *RedisTokenRepository) cleanupExpiredKeys(ctx context.Context, prefix st
 //
 //	fmt.Printf("Redis token statistics: %+v\n", stats)
 func (r *RedisTokenRepository) Stats(ctx context.Context) (map[string]interface{}, error) {
-	var accessCount, refreshCount, rotatedCount int64
+	var accessCount, refreshCount, verificationCount, rotatedCount int64
 
 	// Count each type using SCAN
 	countKeys := func(pattern string) (int64, error) {
@@ -770,16 +777,22 @@ func (r *RedisTokenRepository) Stats(ctx context.Context) (map[string]interface{
 		return nil, fmt.Errorf("failed to count refresh tokens: %w", err)
 	}
 
+	verificationCount, err = countKeys(revokedVerificationPrefix + "*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to count verification tokens: %w", err)
+	}
+
 	rotatedCount, err = countKeys(rotatedPrefix + "*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to count rotated tokens: %w", err)
 	}
 
 	return map[string]interface{}{
-		"total_revoked_tokens":   accessCount + refreshCount,
-		"revoked_access_tokens":  accessCount,
-		"revoked_refresh_tokens": refreshCount,
-		"rotated_tokens":         rotatedCount,
+		"total_revoked_tokens":        accessCount + refreshCount + verificationCount,
+		"revoked_access_tokens":       accessCount,
+		"revoked_refresh_tokens":      refreshCount,
+		"revoked_verification_tokens": verificationCount,
+		"rotated_tokens":              rotatedCount,
 	}, nil
 }
 

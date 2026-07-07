@@ -221,6 +221,30 @@ func TestMarkTokenRevoke_DifferentTokenTypes(t *testing.T) {
 	}
 }
 
+// TestMarkTokenRevoke_SuccessVerificationToken verifies that a verification token can be
+// successfully marked as revoked (single-use enforcement is implemented as revocation).
+func TestMarkTokenRevoke_SuccessVerificationToken(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			token := fmt.Sprintf("test-verification-token-%s-12345", name)
+			ttl := 5 * time.Minute
+
+			err := repo.MarkTokenRevoke(ctx, VerificationToken, token, ttl)
+			assert.NoError(t, err, "should successfully mark verification token as revoked")
+
+			revoked, err := repo.IsTokenRevoked(ctx, VerificationToken, token)
+			assert.NoError(t, err, "should successfully check if token is revoked")
+			assert.True(t, revoked, "token should be marked as revoked")
+		})
+	}
+}
+
 // =============================================================================
 // IsTokenRevoked Tests
 // =============================================================================
@@ -292,6 +316,35 @@ func TestIsTokenRevoked_RevokedRefreshToken(t *testing.T) {
 			revoked, err := repo.IsTokenRevoked(ctx, RefreshToken, token)
 			assert.NoError(t, err, "should successfully check if token is revoked")
 			assert.True(t, revoked, "revoked token should return true")
+		})
+	}
+}
+
+// TestIsTokenRevoked_RevokedVerificationToken verifies that a token marked as
+// revoked verification token is correctly identified as revoked, independently
+// from an access/refresh token sharing the same underlying string.
+func TestIsTokenRevoked_RevokedVerificationToken(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			token := fmt.Sprintf("revoked-verification-token-%s-12345", name)
+
+			err := repo.MarkTokenRevoke(ctx, VerificationToken, token, 5*time.Minute)
+			require.NoError(t, err, "should successfully mark token as revoked")
+
+			revoked, err := repo.IsTokenRevoked(ctx, VerificationToken, token)
+			assert.NoError(t, err, "should successfully check if token is revoked")
+			assert.True(t, revoked, "revoked token should return true")
+
+			// A different token type sharing the same string must not be affected.
+			accessRevoked, err := repo.IsTokenRevoked(ctx, AccessToken, token)
+			assert.NoError(t, err)
+			assert.False(t, accessRevoked, "same string under a different token type should not be revoked")
 		})
 	}
 }
@@ -987,6 +1040,43 @@ func TestCleanupExpiredRevokedTokens_RefreshTokens(t *testing.T) {
 
 			// Verify valid token is still revoked
 			revoked, err = repo.IsTokenRevoked(ctx, RefreshToken, validToken)
+			assert.NoError(t, err)
+			assert.True(t, revoked, "valid token should still be revoked after cleanup")
+		})
+	}
+}
+
+// TestCleanupExpiredRevokedTokens_VerificationTokens verifies that expired verification
+// token revocation records are removed while unexpired ones are preserved, mirroring the
+// existing Access/Refresh cleanup behavior.
+func TestCleanupExpiredRevokedTokens_VerificationTokens(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+
+			expiredToken := fmt.Sprintf("expired-verification-%s-12345", name)
+			err := repo.MarkTokenRevoke(ctx, VerificationToken, expiredToken, 50*time.Millisecond)
+			require.NoError(t, err, "should mark expired token as revoked")
+
+			validToken := fmt.Sprintf("valid-verification-%s-12345", name)
+			err = repo.MarkTokenRevoke(ctx, VerificationToken, validToken, 1*time.Hour)
+			require.NoError(t, err, "should mark valid token as revoked")
+
+			time.Sleep(100 * time.Millisecond)
+
+			err = repo.CleanupExpiredRevokedTokens(ctx, VerificationToken)
+			assert.NoError(t, err, "cleanup should succeed")
+
+			revoked, err := repo.IsTokenRevoked(ctx, VerificationToken, expiredToken)
+			assert.NoError(t, err)
+			assert.False(t, revoked, "expired token should be cleaned up")
+
+			revoked, err = repo.IsTokenRevoked(ctx, VerificationToken, validToken)
 			assert.NoError(t, err)
 			assert.True(t, revoked, "valid token should still be revoked after cleanup")
 		})
@@ -1859,6 +1949,136 @@ func TestMemoryRepository_Stats(t *testing.T) {
 	assert.Equal(t, 5, stats["revoked_access_tokens"], "should have 5 access tokens")
 	assert.Equal(t, 3, stats["revoked_refresh_tokens"], "should have 3 refresh tokens")
 	assert.Equal(t, 2, stats["rotated_tokens"], "should have 2 rotated tokens")
+}
+
+// TestRepositoryStats_AllBackends verifies that Stats() returns accurate counts
+// (including the verification token bucket) for each concrete repository type.
+// Stats() is not part of the TokenRepository interface, so each backend requires
+// its own type assertion, mirroring TestMemoryRepository_Stats.
+func TestRepositoryStats_AllBackends(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			require.NoError(t, repo.MarkTokenRevoke(ctx, AccessToken, "stats-access", 30*time.Minute))
+			require.NoError(t, repo.MarkTokenRevoke(ctx, RefreshToken, "stats-refresh", 1*time.Hour))
+			require.NoError(t, repo.MarkTokenRevoke(ctx, VerificationToken, "stats-verification", 5*time.Minute))
+			require.NoError(t, repo.MarkTokenRotated(ctx, "stats-rotated", 1*time.Hour))
+
+			switch name {
+			case "Memory":
+				memRepo, ok := repo.(*MemoryTokenRepository)
+				require.True(t, ok)
+				stats := memRepo.Stats()
+				assert.Equal(t, 1, stats["revoked_access_tokens"])
+				assert.Equal(t, 1, stats["revoked_refresh_tokens"])
+				assert.Equal(t, 1, stats["revoked_verification_tokens"])
+				assert.Equal(t, 1, stats["rotated_tokens"])
+			case "Redis":
+				redisRepo, ok := repo.(*RedisTokenRepository)
+				require.True(t, ok)
+				stats, err := redisRepo.Stats(ctx)
+				require.NoError(t, err)
+				assert.EqualValues(t, 1, stats["revoked_access_tokens"])
+				assert.EqualValues(t, 1, stats["revoked_refresh_tokens"])
+				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
+				assert.EqualValues(t, 1, stats["rotated_tokens"])
+				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
+			case "GORM":
+				gormRepo, ok := repo.(*GormTokenRepository)
+				require.True(t, ok)
+				stats, err := gormRepo.Stats(ctx)
+				require.NoError(t, err)
+				assert.EqualValues(t, 1, stats["revoked_access_tokens"])
+				assert.EqualValues(t, 1, stats["revoked_refresh_tokens"])
+				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
+				assert.EqualValues(t, 1, stats["rotated_tokens"])
+				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
+			case "MongoDB":
+				mongoRepo, ok := repo.(*MongoTokenRepository)
+				require.True(t, ok)
+				stats, err := mongoRepo.Stats(ctx)
+				require.NoError(t, err)
+				assert.EqualValues(t, 1, stats["revoked_access_tokens"])
+				assert.EqualValues(t, 1, stats["revoked_refresh_tokens"])
+				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
+				assert.EqualValues(t, 1, stats["rotated_tokens"])
+				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
+			}
+		})
+	}
+}
+
+// TestMarkTokenRotatedAtomic_AllBackends exercises MarkTokenRotatedAtomic directly at
+// the repository level (rather than only indirectly via JWTMaker.RotateRefreshToken,
+// which existing maker-level tests only exercise against the Memory backend) across
+// all four backends, confirming the atomic compare-and-swap contract: the first caller
+// gets true, subsequent callers for the same token get false, with no error either way.
+func TestMarkTokenRotatedAtomic_AllBackends(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			token := fmt.Sprintf("atomic-rotate-%s-12345", name)
+
+			marked, err := repo.MarkTokenRotatedAtomic(ctx, token, 1*time.Hour)
+			require.NoError(t, err)
+			assert.True(t, marked, "first caller should win the atomic mark")
+
+			marked, err = repo.MarkTokenRotatedAtomic(ctx, token, 1*time.Hour)
+			require.NoError(t, err)
+			assert.False(t, marked, "second caller should not win the atomic mark")
+
+			rotated, err := repo.IsTokenRotated(ctx, token)
+			require.NoError(t, err)
+			assert.True(t, rotated)
+		})
+	}
+}
+
+// TestGormRepository_CleanupAll verifies the GORM-specific CleanupAll convenience
+// method sweeps expired access, refresh, and verification revocations plus expired
+// rotation records in one call.
+func TestGormRepository_CleanupAll(t *testing.T) {
+	factories := getTestRepositoryFactories()
+	factory, ok := factories["GORM"]
+	require.True(t, ok)
+
+	repo, cleanup := factory(t)
+	defer cleanup()
+
+	gormRepo, ok := repo.(*GormTokenRepository)
+	require.True(t, ok)
+
+	ctx := context.Background()
+	require.NoError(t, gormRepo.MarkTokenRevoke(ctx, AccessToken, "cleanup-all-access", 50*time.Millisecond))
+	require.NoError(t, gormRepo.MarkTokenRevoke(ctx, RefreshToken, "cleanup-all-refresh", 50*time.Millisecond))
+	require.NoError(t, gormRepo.MarkTokenRevoke(ctx, VerificationToken, "cleanup-all-verification", 50*time.Millisecond))
+	require.NoError(t, gormRepo.MarkTokenRotated(ctx, "cleanup-all-rotated", 50*time.Millisecond))
+
+	time.Sleep(100 * time.Millisecond)
+
+	require.NoError(t, gormRepo.CleanupAll(ctx))
+
+	revoked, err := gormRepo.IsTokenRevoked(ctx, AccessToken, "cleanup-all-access")
+	require.NoError(t, err)
+	assert.False(t, revoked)
+
+	revoked, err = gormRepo.IsTokenRevoked(ctx, VerificationToken, "cleanup-all-verification")
+	require.NoError(t, err)
+	assert.False(t, revoked)
+
+	rotated, err := gormRepo.IsTokenRotated(ctx, "cleanup-all-rotated")
+	require.NoError(t, err)
+	assert.False(t, rotated)
 }
 
 // TestMemoryRepository_Close verifies that Close properly stops cleanup goroutines.

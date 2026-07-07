@@ -32,7 +32,7 @@ type tokenEntry struct {
 // Architecture Characteristics:
 //   - Fully concurrent-safe with sync.RWMutex
 //   - Automatic background cleanup of expired entries
-//   - Three separate maps for different token types
+//   - Separate maps for different token types
 //   - Memory-efficient storage using token hashes
 //
 // Performance Characteristics:
@@ -53,13 +53,14 @@ type tokenEntry struct {
 //   - Memory consumption proportional to active tokens
 //   - No persistence for audit requirements
 type MemoryTokenRepository struct {
-	mu              sync.RWMutex
-	revokedAccess   map[string]tokenEntry
-	revokedRefresh  map[string]tokenEntry
-	rotatedTokens   map[string]tokenEntry
-	cleanupInterval time.Duration
-	stopCleanup     chan struct{}
-	cleanupOnce     sync.Once
+	mu                  sync.RWMutex
+	revokedAccess       map[string]tokenEntry
+	revokedRefresh      map[string]tokenEntry
+	revokedVerification map[string]tokenEntry
+	rotatedTokens       map[string]tokenEntry
+	cleanupInterval     time.Duration
+	stopCleanup         chan struct{}
+	cleanupOnce         sync.Once
 }
 
 // NewMemoryTokenRepository creates a new in-memory token repository.
@@ -111,11 +112,12 @@ func NewMemoryTokenRepository(cleanupInterval time.Duration) TokenRepository {
 	}
 
 	repo := &MemoryTokenRepository{
-		revokedAccess:   make(map[string]tokenEntry),
-		revokedRefresh:  make(map[string]tokenEntry),
-		rotatedTokens:   make(map[string]tokenEntry),
-		cleanupInterval: cleanupInterval,
-		stopCleanup:     make(chan struct{}),
+		revokedAccess:       make(map[string]tokenEntry),
+		revokedRefresh:      make(map[string]tokenEntry),
+		revokedVerification: make(map[string]tokenEntry),
+		rotatedTokens:       make(map[string]tokenEntry),
+		cleanupInterval:     cleanupInterval,
+		stopCleanup:         make(chan struct{}),
 	}
 
 	// Start background cleanup
@@ -130,7 +132,7 @@ func NewMemoryTokenRepository(cleanupInterval time.Duration) TokenRepository {
 // Memory Storage:
 //   - Token hash stored in type-specific map
 //   - Expiration time stored for automatic cleanup
-//   - Separate maps for access vs refresh tokens
+//   - Separate maps per token type (access, refresh, verification)
 //   - O(1) insertion time with map store
 //
 // Security Implementation:
@@ -184,6 +186,8 @@ func (m *MemoryTokenRepository) MarkTokenRevoke(ctx context.Context, tokenType T
 		m.revokedAccess[tokenHash] = entry
 	case RefreshToken:
 		m.revokedRefresh[tokenHash] = entry
+	case VerificationToken:
+		m.revokedVerification[tokenHash] = entry
 	default:
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
@@ -244,6 +248,8 @@ func (m *MemoryTokenRepository) IsTokenRevoked(ctx context.Context, tokenType To
 		entry, exists = m.revokedAccess[tokenHash]
 	case RefreshToken:
 		entry, exists = m.revokedRefresh[tokenHash]
+	case VerificationToken:
+		entry, exists = m.revokedVerification[tokenHash]
 	default:
 		return false, fmt.Errorf("invalid token type: %s", tokenType)
 	}
@@ -515,6 +521,12 @@ func (m *MemoryTokenRepository) CleanupExpiredRevokedTokens(ctx context.Context,
 				delete(m.revokedRefresh, hash)
 			}
 		}
+	case VerificationToken:
+		for hash, entry := range m.revokedVerification {
+			if now.After(entry.expiresAt) {
+				delete(m.revokedVerification, hash)
+			}
+		}
 	default:
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
@@ -562,7 +574,7 @@ func (m *MemoryTokenRepository) CleanupExpiredRotatedTokens(ctx context.Context)
 //
 // Cleanup Strategy:
 //   - Runs at configured cleanupInterval
-//   - Cleans all three token maps (access, refresh, rotated)
+//   - Cleans all token maps (access, refresh, verification, rotated)
 //   - Continues until stopCleanup channel is closed
 //   - Uses background context for cleanup operations
 //
@@ -590,6 +602,7 @@ func (m *MemoryTokenRepository) periodicCleanup() {
 			// Cleanup all expired entries
 			_ = m.CleanupExpiredRevokedTokens(ctx, AccessToken)
 			_ = m.CleanupExpiredRevokedTokens(ctx, RefreshToken)
+			_ = m.CleanupExpiredRevokedTokens(ctx, VerificationToken)
 			_ = m.CleanupExpiredRotatedTokens(ctx)
 		}
 	}
@@ -661,8 +674,9 @@ func (m *MemoryTokenRepository) Stats() map[string]int {
 	defer m.mu.RUnlock()
 
 	return map[string]int{
-		"revoked_access_tokens":  len(m.revokedAccess),
-		"revoked_refresh_tokens": len(m.revokedRefresh),
-		"rotated_tokens":         len(m.rotatedTokens),
+		"revoked_access_tokens":       len(m.revokedAccess),
+		"revoked_refresh_tokens":      len(m.revokedRefresh),
+		"revoked_verification_tokens": len(m.revokedVerification),
+		"rotated_tokens":              len(m.rotatedTokens),
 	}
 }

@@ -327,3 +327,41 @@ type GourdianTokenMakerCloser interface {
 	// Safe to call multiple times.
 	Close() error
 }
+
+// GourdianTokenMakerVerification is an optional interface implemented by GourdianTokenMaker
+// implementations that support short-lived, single-use, use-case-scoped verification tokens
+// (e.g. a 2FA-pending-verification step between password check and full session issuance,
+// or password-reset / email-verify flows). It is deliberately separate from
+// GourdianTokenMaker, following the same precedent as GourdianTokenMakerCloser, so that
+// adding it does not break any existing external implementer of GourdianTokenMaker.
+//
+// Requires GourdianTokenConfig.VerificationTokensEnabled. Single-use enforcement (a
+// verification token can only be successfully verified once) additionally requires
+// RevocationEnabled plus a TokenRepository, since MarkVerificationTokenUsed is implemented
+// by revoking the token via the same mechanism used for access/refresh revocation.
+//
+// Example:
+//
+//	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, tokenRepo)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	if verifier, ok := maker.(gourdiantoken.GourdianTokenMakerVerification); ok {
+//	    token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
+//	}
+type GourdianTokenMakerVerification interface {
+	// CreateVerificationToken generates a new signed, short-lived verification token
+	// scoped to useCase. A ttl <= 0 falls back to
+	// GourdianTokenConfig.VerificationDefaultExpiryDuration; a ttl exceeding
+	// VerificationMaxExpiryDuration (when configured) is rejected.
+	CreateVerificationToken(ctx context.Context, userID string, useCase string, ttl time.Duration, metadata map[string]interface{}) (*VerificationTokenResponse, error)
+
+	// VerifyVerificationToken validates a verification token and returns its claims.
+	// Checks signature, expiration, single-use status (if enabled), and use-case whitelist.
+	VerifyVerificationToken(ctx context.Context, tokenString string) (*VerificationTokenClaims, error)
+
+	// MarkVerificationTokenUsed marks a verification token as used, so a subsequent
+	// VerifyVerificationToken call on the same token fails. Requires RevocationEnabled
+	// plus a TokenRepository; returns an error otherwise.
+	MarkVerificationTokenUsed(ctx context.Context, token string) error
+}

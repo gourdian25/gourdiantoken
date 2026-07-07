@@ -2,6 +2,23 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## v2.1.0 (Unreleased)
+
+### Added
+
+- **`VerificationToken`**, a new token type for short-lived, single-use, use-case-scoped tokens (e.g. a 2FA-pending verification step between password check and full session issuance, or password-reset/email-verify links). Fully additive and disabled by default — existing configs and code are unaffected.
+  - New `VerificationTokenClaims`/`VerificationTokenResponse` structs (`gourdiantoken.claims.go`).
+  - New `GourdianTokenConfig` fields: `VerificationTokensEnabled` (master switch, default `false`), `VerificationAllowedUseCases`, `VerificationDefaultExpiryDuration`, `VerificationMaxExpiryDuration`.
+  - New optional interface `GourdianTokenMakerVerification` (`CreateVerificationToken`, `VerifyVerificationToken`, `MarkVerificationTokenUsed`), following the same precedent as `GourdianTokenMakerCloser` — deliberately kept separate from `GourdianTokenMaker` so implementing it does not break existing implementers. `*JWTMaker` implements it.
+  - `CreateVerificationToken` takes a per-call `ttl` parameter (0 = use the configured default), unlike the fixed-duration `CreateAccessToken`/`CreateRefreshToken` — variable per-use-case TTL is the reason this token type exists.
+  - Single-use enforcement (`MarkVerificationTokenUsed`) reuses the existing access/refresh revocation machinery (`MarkTokenRevoke`/`IsTokenRevoked`) rather than adding new `TokenRepository` methods — "mark used" is "revoke"; requires `RevocationEnabled` plus a `TokenRepository`.
+  - New sentinel `ErrTokenAlreadyUsed`, a plain alias of `ErrTokenRevoked` (matching the existing `ErrTokenExpired = jwt.ErrTokenExpired` precedent).
+  - All four `TokenRepository` implementations (Memory, Redis, GORM, MongoDB) updated to recognize `VerificationToken` alongside `AccessToken`/`RefreshToken` in revocation tracking and `Stats()`.
+
+### Changed
+
+- `Makefile`'s coverage gate (`COVERAGE_MIN`) raised from `70` to `80`.
+
 ## v2.0.0
 
 ### ⚠️ Breaking changes

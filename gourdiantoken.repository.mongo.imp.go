@@ -22,7 +22,7 @@ const (
 //
 // Document Structure:
 //   - token_hash: SHA-256 hash of the token (64 chars) - indexed field
-//   - token_type: Either "access" or "refresh" - used for composite indexing
+//   - token_type: "access", "refresh", or "verification" - used for composite indexing
 //   - expires_at: Expiration timestamp - TTL index for automatic cleanup
 //   - created_at: Creation timestamp for auditing and monitoring
 //
@@ -324,7 +324,7 @@ func (r *MongoTokenRepository) MarkTokenRevoke(ctx context.Context, tokenType To
 	}
 
 	// Validate token type
-	if tokenType != AccessToken && tokenType != RefreshToken {
+	if tokenType != AccessToken && tokenType != RefreshToken && tokenType != VerificationToken {
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
 
@@ -396,7 +396,7 @@ func (r *MongoTokenRepository) IsTokenRevoked(ctx context.Context, tokenType Tok
 	}
 
 	// Validate token type
-	if tokenType != AccessToken && tokenType != RefreshToken {
+	if tokenType != AccessToken && tokenType != RefreshToken && tokenType != VerificationToken {
 		return false, fmt.Errorf("invalid token type: %s", tokenType)
 	}
 
@@ -715,7 +715,7 @@ func (r *MongoTokenRepository) GetRotationTTL(ctx context.Context, token string)
 //	})
 func (r *MongoTokenRepository) CleanupExpiredRevokedTokens(ctx context.Context, tokenType TokenType) error {
 	// Validate token type
-	if tokenType != AccessToken && tokenType != RefreshToken {
+	if tokenType != AccessToken && tokenType != RefreshToken && tokenType != VerificationToken {
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
 
@@ -852,11 +852,17 @@ func (r *MongoTokenRepository) Stats(ctx context.Context) (map[string]interface{
 		return nil, fmt.Errorf("failed to count refresh tokens: %w", err)
 	}
 
+	verificationCount, err := r.revokedCollection.CountDocuments(ctx, bson.M{"token_type": string(VerificationToken)})
+	if err != nil {
+		return nil, fmt.Errorf("failed to count verification tokens: %w", err)
+	}
+
 	return map[string]interface{}{
-		"total_revoked_tokens":   revokedCount,
-		"revoked_access_tokens":  accessCount,
-		"revoked_refresh_tokens": refreshCount,
-		"rotated_tokens":         rotatedCount,
+		"total_revoked_tokens":        revokedCount,
+		"revoked_access_tokens":       accessCount,
+		"revoked_refresh_tokens":      refreshCount,
+		"revoked_verification_tokens": verificationCount,
+		"rotated_tokens":              rotatedCount,
 	}, nil
 }
 

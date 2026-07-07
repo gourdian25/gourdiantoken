@@ -57,6 +57,9 @@ func RunComprehensiveTests(ctx context.Context, tokenMaker gourdiantoken.Gourdia
 	// Basic CRUD Operations Tests
 	results = append(results, runBasicOperationsTests(ctx, tokenMaker)...)
 
+	// Verification Token Tests
+	results = append(results, runVerificationTokenTests(ctx, tokenMaker)...)
+
 	// Token Lifecycle Tests
 	results = append(results, runTokenLifecycleTests(ctx, tokenMaker)...)
 
@@ -206,6 +209,70 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 
 		timeUntilExpiry := time.Until(claims.ExpiresAt)
 		return fmt.Sprintf("Token valid, expires in: %v", timeUntilExpiry), nil
+	}))
+
+	return results
+}
+
+// runVerificationTokenTests exercises the optional GourdianTokenMakerVerification
+// interface (short-lived, single-use, use-case-scoped tokens), the way a real caller
+// would type-assert for it.
+func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.GourdianTokenMaker) []TestResult {
+	var results []TestResult
+	fmt.Printf("\n┌─ %s\n", "VERIFICATION TOKENS")
+
+	verifier, ok := tokenMaker.(gourdiantoken.GourdianTokenMakerVerification)
+	if !ok {
+		results = append(results, runTest("Verification Token Support", func() (string, error) {
+			return "GourdianTokenMakerVerification not implemented (skipped)", nil
+		}))
+		return results
+	}
+
+	userID := uuid.NewString()
+
+	// Test 1: Create and Verify
+	results = append(results, runTest("Create and Verify Verification Token", func() (string, error) {
+		token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, map[string]interface{}{"username": "alice"})
+		if err != nil {
+			if err.Error() == "verification tokens are not enabled" {
+				return "Verification tokens not enabled (skipped)", nil
+			}
+			return "", err
+		}
+
+		claims, err := verifier.VerifyVerificationToken(ctx, token.Token)
+		if err != nil {
+			return "", err
+		}
+
+		return fmt.Sprintf("Verified token for use case %q, subject %s", claims.UseCase, claims.Subject), nil
+	}))
+
+	// Test 2: Mark Used, Then Verify Fails
+	results = append(results, runTest("Mark Verification Token Used", func() (string, error) {
+		token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
+		if err != nil {
+			if err.Error() == "verification tokens are not enabled" {
+				return "Verification tokens not enabled (skipped)", nil
+			}
+			return "", err
+		}
+
+		err = verifier.MarkVerificationTokenUsed(ctx, token.Token)
+		if err != nil {
+			if strings.Contains(err.Error(), "revocation is not enabled") {
+				return "Revocation not enabled (skipped)", nil
+			}
+			return "", err
+		}
+
+		_, err = verifier.VerifyVerificationToken(ctx, token.Token)
+		if err == nil {
+			return "", fmt.Errorf("token should be rejected after being marked used but verification succeeded")
+		}
+
+		return "Token marked used and re-verification failed as expected", nil
 	}))
 
 	return results
@@ -1651,21 +1718,25 @@ func main() {
 
 		// Create token maker configuration
 		config := gourdiantoken.GourdianTokenConfig{
-			RevocationEnabled:        tokenRepo != nil,
-			RotationEnabled:          tokenRepo != nil,
-			SigningMethod:            gourdiantoken.Symmetric,
-			Algorithm:                "HS256",
-			SymmetricKey:             "test-symmetric-key-32-bytes-long!!",
-			Issuer:                   "test.gourdian.com",
-			Audience:                 []string{"api.test.com", "web.test.com"},
-			AllowedAlgorithms:        []string{"HS256", "HS384", "HS512"},
-			RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
-			AccessExpiryDuration:     15 * time.Minute,
-			AccessMaxLifetimeExpiry:  24 * time.Hour,
-			RefreshExpiryDuration:    7 * 24 * time.Hour,
-			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
-			RefreshReuseInterval:     5 * time.Minute,
-			CleanupInterval:          5 * time.Minute,
+			RevocationEnabled:                 tokenRepo != nil,
+			RotationEnabled:                   tokenRepo != nil,
+			SigningMethod:                     gourdiantoken.Symmetric,
+			Algorithm:                         "HS256",
+			SymmetricKey:                      "test-symmetric-key-32-bytes-long!!",
+			Issuer:                            "test.gourdian.com",
+			Audience:                          []string{"api.test.com", "web.test.com"},
+			AllowedAlgorithms:                 []string{"HS256", "HS384", "HS512"},
+			RequiredClaims:                    []string{"iss", "aud", "nbf", "mle"},
+			AccessExpiryDuration:              15 * time.Minute,
+			AccessMaxLifetimeExpiry:           24 * time.Hour,
+			RefreshExpiryDuration:             7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry:          30 * 24 * time.Hour,
+			RefreshReuseInterval:              5 * time.Minute,
+			CleanupInterval:                   5 * time.Minute,
+			VerificationTokensEnabled:         true,
+			VerificationAllowedUseCases:       []string{"2fa-pending", "password-reset"},
+			VerificationDefaultExpiryDuration: 5 * time.Minute,
+			VerificationMaxExpiryDuration:     1 * time.Hour,
 		}
 
 		// Create token maker

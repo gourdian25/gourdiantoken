@@ -16,9 +16,10 @@ import (
 	"time"
 )
 
-// TokenType represents the type of JWT token (access or refresh).
+// TokenType represents the type of JWT token (access, refresh, or verification).
 // Access tokens are short-lived and used for API authorization.
 // Refresh tokens are longer-lived and used to obtain new access tokens.
+// Verification tokens are short-lived, single-use, use-case-scoped tokens.
 type TokenType string
 
 const (
@@ -29,6 +30,14 @@ const (
 	// RefreshToken represents a long-lived token used to obtain new access tokens.
 	// Should be stored securely and rotated regularly.
 	RefreshToken TokenType = "refresh"
+
+	// VerificationToken represents a short-lived, single-use token scoped to a specific
+	// "use case" (e.g. a pending 2FA verification step, a password reset link, or an
+	// email verification link). Unlike AccessToken/RefreshToken, its lifetime is set
+	// per-call rather than fixed by configuration alone. Requires
+	// GourdianTokenConfig.VerificationTokensEnabled; single-use enforcement additionally
+	// requires RevocationEnabled plus a TokenRepository.
+	VerificationToken TokenType = "verification"
 )
 
 // SigningMethod represents the cryptographic approach for signing tokens.
@@ -58,6 +67,9 @@ const (
 	// ClaimMaxLifetimeExpiry is the "mle" (max lifetime expiry) claim key, a gourdiantoken-specific
 	// absolute expiry claim distinct from the standard "exp" claim.
 	ClaimMaxLifetimeExpiry = "mle"
+
+	// ClaimUseCase is the "uc" (use case) claim key, present only on VerificationTokenClaims.
+	ClaimUseCase = "uc"
 )
 
 // GourdianTokenConfig holds the configuration for token generation, validation, and lifecycle management.
@@ -142,6 +154,29 @@ type GourdianTokenConfig struct {
 	// CleanupInterval determines how often expired tokens are removed from storage.
 	// Prevents database bloat. Typical values: 1-6 hours. Must be at least 1 minute.
 	CleanupInterval time.Duration
+
+	// VerificationTokensEnabled determines whether CreateVerificationToken, VerifyVerificationToken,
+	// and MarkVerificationTokenUsed (the GourdianTokenMakerVerification optional interface) are
+	// active. Defaults to false: every config that predates this field is unaffected, and
+	// validateConfig only checks the Verification* fields below when this is true.
+	// Single-use enforcement additionally requires RevocationEnabled plus a TokenRepository.
+	VerificationTokensEnabled bool
+
+	// VerificationAllowedUseCases is a whitelist of acceptable "use case" strings for
+	// verification tokens (e.g. "2fa-pending", "password-reset", "email-verify"). If empty,
+	// any non-empty use case is accepted, mirroring the AllowedAlgorithms convention.
+	VerificationAllowedUseCases []string
+
+	// VerificationDefaultExpiryDuration is the verification token lifetime used when
+	// CreateVerificationToken is called with ttl <= 0. Must be positive when
+	// VerificationTokensEnabled is true. Typical values: 5-15 minutes.
+	VerificationDefaultExpiryDuration time.Duration
+
+	// VerificationMaxExpiryDuration is the ceiling a caller-supplied ttl in
+	// CreateVerificationToken may not exceed; requests above it are rejected. Zero means no
+	// ceiling. Must be >= VerificationDefaultExpiryDuration (when both are set) when
+	// VerificationTokensEnabled is true.
+	VerificationMaxExpiryDuration time.Duration
 }
 
 // NewGourdianTokenConfig creates a new token configuration with all parameters explicitly specified.

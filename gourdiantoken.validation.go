@@ -108,6 +108,23 @@ func validateConfig(config *GourdianTokenConfig) error {
 		return fmt.Errorf("refresh reuse interval cannot be negative")
 	}
 
+	// Gated entirely by VerificationTokensEnabled: every config that predates this field
+	// (where it defaults to false) skips this block and validates exactly as before.
+	if config.VerificationTokensEnabled {
+		if config.VerificationDefaultExpiryDuration <= 0 {
+			return fmt.Errorf("verification token default expiry duration must be positive")
+		}
+		if config.VerificationMaxExpiryDuration > 0 &&
+			config.VerificationDefaultExpiryDuration > config.VerificationMaxExpiryDuration {
+			return fmt.Errorf("verification token default expiry duration exceeds max expiry duration")
+		}
+		for _, uc := range config.VerificationAllowedUseCases {
+			if uc == "" {
+				return fmt.Errorf("verification allowed use cases cannot contain empty strings")
+			}
+		}
+	}
+
 	// Validate CleanupInterval
 	if config.CleanupInterval <= 0 {
 		return fmt.Errorf("cleanup interval must be positive (e.g., 1h, 30m)")
@@ -244,6 +261,33 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 		}
 		if !v.MaxLifetimeExpiry.IsZero() {
 			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
+		}
+		return mapClaims, nil
+	case VerificationTokenClaims:
+		// sid/usr are emitted as empty-string placeholders (VerificationTokenClaims has no
+		// session or username concept) solely so extractCommonClaims/validateTokenClaims,
+		// which unconditionally type-assert these two keys for every token type, keep working
+		// unchanged for this new type too.
+		mapClaims := jwt.MapClaims{
+			"jti": v.ID,
+			"sub": v.Subject,
+			"usr": "",
+			"sid": "",
+			"uc":  v.UseCase,
+			"iss": v.Issuer,
+			"aud": v.Audience,
+			"iat": v.IssuedAt.Unix(),
+			"exp": v.ExpiresAt.Unix(),
+			"typ": string(v.TokenType),
+		}
+		if !v.NotBefore.IsZero() {
+			mapClaims["nbf"] = v.NotBefore.Unix()
+		}
+		if !v.MaxLifetimeExpiry.IsZero() {
+			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
+		}
+		if len(v.Metadata) > 0 {
+			mapClaims["mtd"] = v.Metadata
 		}
 		return mapClaims, nil
 	default:
@@ -496,6 +540,102 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 	return refreshClaims, nil
 }
 
+// mapToVerificationClaims converts JWT MapClaims to strongly-typed VerificationTokenClaims.
+// Performs type checking and validation of all fields.
+//
+// Validation:
+//   - jti and sub must be non-empty strings
+//   - uc (use case) must be a non-empty string
+//   - Token type must be "verification"
+//   - Timestamps must be valid numbers
+//
+// Notes:
+//   - Used internally during verification token verification
+//   - common.SessionID/common.Username are discarded: VerificationTokenClaims has no
+//     session or username concept (those keys only exist in the map as placeholders,
+//     see toMapClaims)
+func mapToVerificationClaims(claims jwt.MapClaims) (*VerificationTokenClaims, error) {
+	common, err := extractCommonClaims(claims)
+	if err != nil {
+		return nil, err
+	}
+
+	typ, ok := claims["typ"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid or missing token type")
+	}
+
+	if TokenType(typ) != VerificationToken {
+		return nil, fmt.Errorf("invalid token type: expected 'verification'")
+	}
+
+	useCase, ok := claims["uc"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid use case type: expected string")
+	}
+	if useCase == "" {
+		return nil, fmt.Errorf("invalid use case: cannot be empty")
+	}
+
+	var metadata map[string]interface{}
+	if raw, present := claims["mtd"]; present {
+		metadata, ok = raw.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid metadata type: expected object")
+		}
+	}
+
+	verificationClaims := &VerificationTokenClaims{
+		ID:                common.ID,
+		Subject:           common.Subject,
+		UseCase:           useCase,
+		Issuer:            common.Issuer,
+		Audience:          common.Audience,
+		IssuedAt:          common.IssuedAt,
+		ExpiresAt:         common.ExpiresAt,
+		NotBefore:         common.NotBefore,
+		MaxLifetimeExpiry: common.MaxLifetimeExpiry,
+		Metadata:          metadata,
+		TokenType:         TokenType(typ),
+	}
+
+	return verificationClaims, nil
+}
+
+// validateUseCase checks useCase against allowed. An empty allowed list means any
+// non-empty use case is accepted, mirroring the AllowedAlgorithms "empty means
+// unrestricted" convention. Shared by CreateVerificationToken and VerifyVerificationToken
+// so the whitelist-membership check has a single implementation.
+func validateUseCase(allowed []string, useCase string) error {
+	if useCase == "" {
+		return fmt.Errorf("use case cannot be empty")
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	for _, a := range allowed {
+		if a == useCase {
+			return nil
+		}
+	}
+	return fmt.Errorf("use case %q is not in the allowed list", useCase)
+}
+
+// resolveVerificationTTL determines the effective expiry duration for a verification
+// token being created. A non-positive requested duration falls back to
+// config.VerificationDefaultExpiryDuration. A requested duration exceeding
+// config.VerificationMaxExpiryDuration (when a ceiling is configured) is rejected outright
+// rather than silently clamped, consistent with this codebase's fail-loud validation style.
+func resolveVerificationTTL(config *GourdianTokenConfig, requested time.Duration) (time.Duration, error) {
+	if requested <= 0 {
+		return config.VerificationDefaultExpiryDuration, nil
+	}
+	if config.VerificationMaxExpiryDuration > 0 && requested > config.VerificationMaxExpiryDuration {
+		return 0, fmt.Errorf("requested ttl %s exceeds maximum allowed %s", requested, config.VerificationMaxExpiryDuration)
+	}
+	return requested, nil
+}
+
 // validateTokenClaims performs comprehensive validation of JWT claims.
 // Checks required claims, timestamps, token type, and identifier claims.
 //
@@ -526,8 +666,9 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 //   - "invalid user ID: cannot be empty"
 func validateTokenClaims(claims jwt.MapClaims, expectedType TokenType, required []string) error {
 	baseRequired := map[TokenType][]string{
-		AccessToken:  {"jti", "sub", "sid", "usr", "iat", "exp", "typ", "rls"},
-		RefreshToken: {"jti", "sub", "sid", "usr", "iat", "exp", "typ"},
+		AccessToken:       {"jti", "sub", "sid", "usr", "iat", "exp", "typ", "rls"},
+		RefreshToken:      {"jti", "sub", "sid", "usr", "iat", "exp", "typ"},
+		VerificationToken: {"jti", "sub", "iat", "exp", "typ", "uc"},
 	}
 
 	for _, claim := range append(baseRequired[expectedType], required...) {
