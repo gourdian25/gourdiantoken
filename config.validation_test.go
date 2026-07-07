@@ -418,6 +418,104 @@ func TestValidateConfig_InvalidScenarios(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported algorithm in AllowedAlgorithms")
 	})
+
+	t.Run("verification tokens disabled: verification fields ignored", func(t *testing.T) {
+		// Regression guard for backward compatibility: a config that predates
+		// VerificationTokensEnabled (zero value, i.e. false) must validate exactly as
+		// before even though all Verification* fields are left at their zero values.
+		config := &GourdianTokenConfig{
+			SigningMethod:            Symmetric,
+			Algorithm:                "HS256",
+			SymmetricKey:             "test-secret-key-that-is-at-least-32-bytes-long",
+			AccessExpiryDuration:     30 * time.Minute,
+			AccessMaxLifetimeExpiry:  24 * time.Hour,
+			RefreshExpiryDuration:    7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+			CleanupInterval:          1 * time.Hour,
+		}
+
+		err := validateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("verification tokens enabled: zero default expiry duration", func(t *testing.T) {
+		config := &GourdianTokenConfig{
+			SigningMethod:                     Symmetric,
+			Algorithm:                         "HS256",
+			SymmetricKey:                      "test-secret-key-that-is-at-least-32-bytes-long",
+			AccessExpiryDuration:              30 * time.Minute,
+			AccessMaxLifetimeExpiry:           24 * time.Hour,
+			RefreshExpiryDuration:             7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry:          30 * 24 * time.Hour,
+			CleanupInterval:                   1 * time.Hour,
+			VerificationTokensEnabled:         true,
+			VerificationDefaultExpiryDuration: 0,
+		}
+
+		err := validateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "verification token default expiry duration must be positive")
+	})
+
+	t.Run("verification tokens enabled: default exceeds max expiry", func(t *testing.T) {
+		config := &GourdianTokenConfig{
+			SigningMethod:                     Symmetric,
+			Algorithm:                         "HS256",
+			SymmetricKey:                      "test-secret-key-that-is-at-least-32-bytes-long",
+			AccessExpiryDuration:              30 * time.Minute,
+			AccessMaxLifetimeExpiry:           24 * time.Hour,
+			RefreshExpiryDuration:             7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry:          30 * 24 * time.Hour,
+			CleanupInterval:                   1 * time.Hour,
+			VerificationTokensEnabled:         true,
+			VerificationDefaultExpiryDuration: 1 * time.Hour,
+			VerificationMaxExpiryDuration:     15 * time.Minute,
+		}
+
+		err := validateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "verification token default expiry duration exceeds max expiry duration")
+	})
+
+	t.Run("verification tokens enabled: empty string in allowed use cases", func(t *testing.T) {
+		config := &GourdianTokenConfig{
+			SigningMethod:                     Symmetric,
+			Algorithm:                         "HS256",
+			SymmetricKey:                      "test-secret-key-that-is-at-least-32-bytes-long",
+			AccessExpiryDuration:              30 * time.Minute,
+			AccessMaxLifetimeExpiry:           24 * time.Hour,
+			RefreshExpiryDuration:             7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry:          30 * 24 * time.Hour,
+			CleanupInterval:                   1 * time.Hour,
+			VerificationTokensEnabled:         true,
+			VerificationDefaultExpiryDuration: 5 * time.Minute,
+			VerificationAllowedUseCases:       []string{"2fa-pending", ""},
+		}
+
+		err := validateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "verification allowed use cases cannot contain empty strings")
+	})
+
+	t.Run("verification tokens enabled: valid config passes", func(t *testing.T) {
+		config := &GourdianTokenConfig{
+			SigningMethod:                     Symmetric,
+			Algorithm:                         "HS256",
+			SymmetricKey:                      "test-secret-key-that-is-at-least-32-bytes-long",
+			AccessExpiryDuration:              30 * time.Minute,
+			AccessMaxLifetimeExpiry:           24 * time.Hour,
+			RefreshExpiryDuration:             7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry:          30 * 24 * time.Hour,
+			CleanupInterval:                   1 * time.Hour,
+			VerificationTokensEnabled:         true,
+			VerificationDefaultExpiryDuration: 5 * time.Minute,
+			VerificationMaxExpiryDuration:     24 * time.Hour,
+			VerificationAllowedUseCases:       []string{"2fa-pending", "password-reset"},
+		}
+
+		err := validateConfig(config)
+		assert.NoError(t, err)
+	})
 }
 
 func TestValidateAlgorithmAndMethod(t *testing.T) {

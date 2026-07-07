@@ -629,6 +629,84 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, us
 	return response, nil
 }
 
+// CreateVerificationToken generates a new signed, short-lived, single-use-capable token
+// scoped to useCase (e.g. "2fa-pending", "password-reset"). Unlike CreateAccessToken/
+// CreateRefreshToken, its lifetime is a per-call parameter rather than fixed solely by
+// configuration: ttl <= 0 falls back to config.VerificationDefaultExpiryDuration; ttl
+// exceeding config.VerificationMaxExpiryDuration (when configured) is rejected. This
+// variable-TTL-per-use-case support is the entire reason this token type exists alongside
+// Access/Refresh tokens.
+//
+// Requires GourdianTokenConfig.VerificationTokensEnabled.
+//
+// Example:
+//
+//	token, err := maker.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
+func (maker *JWTMaker) CreateVerificationToken(ctx context.Context, userID string, useCase string, ttl time.Duration, metadata map[string]interface{}) (*VerificationTokenResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("context canceled: %w", err)
+	}
+
+	if !maker.config.VerificationTokensEnabled {
+		return nil, fmt.Errorf("verification tokens are not enabled")
+	}
+
+	if userID == "" {
+		return nil, fmt.Errorf("user ID cannot be empty")
+	}
+
+	if err := validateUseCase(maker.config.VerificationAllowedUseCases, useCase); err != nil {
+		return nil, err
+	}
+
+	effectiveTTL, err := resolveVerificationTTL(&maker.config, ttl)
+	if err != nil {
+		return nil, err
+	}
+
+	tokenID, err := newTokenID()
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(effectiveTTL)
+	claims := VerificationTokenClaims{
+		ID:                tokenID,
+		Subject:           userID,
+		UseCase:           useCase,
+		Issuer:            maker.config.Issuer,
+		Audience:          maker.config.Audience,
+		IssuedAt:          now,
+		ExpiresAt:         expiresAt,
+		NotBefore:         now,
+		MaxLifetimeExpiry: expiresAt,
+		Metadata:          metadata,
+		TokenType:         VerificationToken,
+	}
+
+	signedToken, err := maker.signClaims(ctx, claims, VerificationToken)
+	if err != nil {
+		return nil, err
+	}
+
+	response := &VerificationTokenResponse{
+		Subject:           claims.Subject,
+		UseCase:           claims.UseCase,
+		Token:             signedToken,
+		Issuer:            claims.Issuer,
+		Audience:          claims.Audience,
+		IssuedAt:          claims.IssuedAt,
+		ExpiresAt:         claims.ExpiresAt,
+		NotBefore:         claims.NotBefore,
+		MaxLifetimeExpiry: claims.MaxLifetimeExpiry,
+		Metadata:          claims.Metadata,
+		TokenType:         claims.TokenType,
+	}
+
+	return response, nil
+}
+
 // parseAndValidateToken performs the revocation check, the rotation check (for refresh
 // tokens only), signature/structure verification, and required-claims validation shared
 // by VerifyAccessToken and VerifyRefreshToken.
@@ -863,8 +941,39 @@ func (maker *JWTMaker) VerifyRefreshToken(ctx context.Context, tokenString strin
 	return mapToRefreshClaims(claims)
 }
 
+// VerifyVerificationToken validates a verification token and returns its claims.
+// Checks signature, expiration, single-use status (if RevocationEnabled and a
+// TokenRepository are configured — see MarkVerificationTokenUsed), and the use-case
+// whitelist (checked again here as defense-in-depth against a use case being removed
+// from GourdianTokenConfig.VerificationAllowedUseCases after tokens bearing it were
+// already issued).
+//
+// Requires GourdianTokenConfig.VerificationTokensEnabled.
+func (maker *JWTMaker) VerifyVerificationToken(ctx context.Context, tokenString string) (*VerificationTokenClaims, error) {
+	if !maker.config.VerificationTokensEnabled {
+		return nil, fmt.Errorf("verification tokens are not enabled")
+	}
+
+	claims, err := maker.parseAndValidateToken(ctx, tokenString, VerificationToken)
+	if err != nil {
+		return nil, err
+	}
+
+	verificationClaims, err := mapToVerificationClaims(claims)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateUseCase(maker.config.VerificationAllowedUseCases, verificationClaims.UseCase); err != nil {
+		return nil, err
+	}
+
+	return verificationClaims, nil
+}
+
 // revokeToken parses token to extract its expiration, then marks it revoked in the
-// repository. Shared by RevokeAccessToken and RevokeRefreshToken.
+// repository. Shared by RevokeAccessToken, RevokeRefreshToken, and
+// MarkVerificationTokenUsed.
 func (maker *JWTMaker) revokeToken(ctx context.Context, tokenType TokenType, token string) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context canceled: %w", err)
@@ -1053,6 +1162,28 @@ func (maker *JWTMaker) RevokeAccessToken(ctx context.Context, token string) erro
 //	// User must re-authenticate on all devices
 func (maker *JWTMaker) RevokeRefreshToken(ctx context.Context, token string) error {
 	return maker.revokeToken(ctx, RefreshToken, token)
+}
+
+// MarkVerificationTokenUsed marks a verification token as used, implemented by revoking it
+// via the same revokeToken helper used by RevokeAccessToken/RevokeRefreshToken — "mark
+// used" for a verification token and "revoke" for an access/refresh token are the same
+// underlying repository operation. A subsequent VerifyVerificationToken call on the same
+// token then fails with ErrTokenAlreadyUsed (a plain alias of ErrTokenRevoked), since
+// parseAndValidateToken's existing revocation check applies to VerificationToken the same
+// as it does to AccessToken/RefreshToken.
+//
+// Requires GourdianTokenConfig.VerificationTokensEnabled AND RevocationEnabled, plus a
+// TokenRepository — returns an error otherwise (see revokeToken).
+//
+// VerifyVerificationToken does not call this automatically: callers decide when a
+// verification token is actually consumed (e.g. only after a 2FA code check succeeds AND
+// the resulting session is issued), so a token can be verified more than once before being
+// deliberately marked used.
+func (maker *JWTMaker) MarkVerificationTokenUsed(ctx context.Context, token string) error {
+	if !maker.config.VerificationTokensEnabled {
+		return fmt.Errorf("verification tokens are not enabled")
+	}
+	return maker.revokeToken(ctx, VerificationToken, token)
 }
 
 // RotateRefreshToken exchanges an old refresh token for a new one with extended expiration.
@@ -1302,7 +1433,7 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 //
 // Behavior:
 //   - Runs at intervals specified by config.CleanupInterval
-//   - Cleans up both access and refresh tokens
+//   - Cleans up access, refresh, and verification tokens
 //   - Each cleanup has a 30-second timeout
 //   - Continues running until context cancellation
 //   - Logs errors but continues operation
@@ -1329,7 +1460,7 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 				continue
 			}
 
-			for _, tokenType := range []TokenType{AccessToken, RefreshToken} {
+			for _, tokenType := range []TokenType{AccessToken, RefreshToken, VerificationToken} {
 				// Create a timeout context for cleanup operation
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				if err := maker.tokenRepo.CleanupExpiredRevokedTokens(cleanupCtx, tokenType); err != nil {

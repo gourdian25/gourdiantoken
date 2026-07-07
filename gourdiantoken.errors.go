@@ -45,4 +45,13 @@ var (
 	// claim has passed. This is a gourdiantoken-specific absolute expiry check with
 	// no golang-jwt equivalent.
 	ErrTokenMaxLifetimeExceeded = errors.New("token exceeded maximum lifetime")
+
+	// ErrTokenAlreadyUsed is a plain alias for ErrTokenRevoked (same precedent as
+	// ErrTokenExpired/ErrInvalidSignature above), exposed under a name that reads naturally
+	// for verification-token callers ("this token was already used"). Single-use
+	// enforcement for verification tokens is implemented by calling the same
+	// MarkTokenRevoke/IsTokenRevoked machinery used for access/refresh revocation (see
+	// MarkVerificationTokenUsed), so errors.Is(err, ErrTokenAlreadyUsed) and
+	// errors.Is(err, ErrTokenRevoked) behave identically — this is a zero-new-logic alias.
+	ErrTokenAlreadyUsed = ErrTokenRevoked
 )

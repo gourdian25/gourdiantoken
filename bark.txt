@@ -6,6 +6,7 @@
 ├── README.md
 ├── concurrency_test.go
 ├── config.validation_test.go
+├── coverage.html
 ├── cryptographic_test.go
 ├── docs.go
 ├── edge.case_test.go
@@ -32,7 +33,6 @@
 ├── gourdiantoken.repository_test.go
 ├── gourdiantoken.validation.go
 ├── integration_test.go
-├── plan.md
 ├── revocation.rotation_test.go
 ├── token.bench.helper_test.go
 ├── token.creation_test.go
@@ -40,6 +40,7 @@
 ├── token.rotate_test.go
 ├── token.test.helper_test.go
 ├── token.verification_test.go
+├── token.verification_token_test.go
 └── version.go
 
-1 directories, 41 files
+1 directories, 42 files

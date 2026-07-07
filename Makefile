@@ -3,11 +3,11 @@
 .PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install goreleaser-release goreleaser-check
 
 # Variables
-VERSION := v2.0.0
+VERSION := v2.1.0
 MAIN_PACKAGE := github.com/gourdian25/gourdiantoken/v2
 MODULE := github.com/gourdian25/gourdiantoken/v2
 GO := go
-COVERAGE_MIN := 70
+COVERAGE_MIN := 80
 BUILD_DIR := ./bin
 
 # Help command - displays all available targets

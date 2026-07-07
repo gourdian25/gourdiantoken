@@ -18,7 +18,7 @@ import (
 // Database Schema:
 //   - id: Primary key with auto-increment
 //   - token_hash: SHA-256 hash of the token (64 chars) with composite unique index
-//   - token_type: Either "access" or "refresh" with index for efficient filtering
+//   - token_type: "access", "refresh", or "verification", with index for efficient filtering
 //   - expires_at: Expiration timestamp with index for efficient cleanup
 //   - created_at: Creation timestamp for auditing
 //
@@ -255,7 +255,7 @@ func (r *GormTokenRepository) MarkTokenRevoke(ctx context.Context, tokenType Tok
 	}
 
 	// Validate token type
-	if tokenType != AccessToken && tokenType != RefreshToken {
+	if tokenType != AccessToken && tokenType != RefreshToken && tokenType != VerificationToken {
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
 
@@ -330,7 +330,7 @@ func (r *GormTokenRepository) IsTokenRevoked(ctx context.Context, tokenType Toke
 	}
 
 	// Validate token type
-	if tokenType != AccessToken && tokenType != RefreshToken {
+	if tokenType != AccessToken && tokenType != RefreshToken && tokenType != VerificationToken {
 		return false, fmt.Errorf("invalid token type: %s", tokenType)
 	}
 
@@ -638,7 +638,7 @@ func (r *GormTokenRepository) GetRotationTTL(ctx context.Context, token string) 
 //	}
 func (r *GormTokenRepository) CleanupExpiredRevokedTokens(ctx context.Context, tokenType TokenType) error {
 	// Validate token type
-	if tokenType != AccessToken && tokenType != RefreshToken {
+	if tokenType != AccessToken && tokenType != RefreshToken && tokenType != VerificationToken {
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
 
@@ -766,16 +766,25 @@ func (r *GormTokenRepository) Stats(ctx context.Context) (map[string]interface{}
 		return nil, fmt.Errorf("failed to count refresh tokens: %w", err)
 	}
 
+	var verificationCount int64
+	if err := r.db.WithContext(ctx).
+		Model(&RevokedTokenType{}).
+		Where("token_type = ?", string(VerificationToken)).
+		Count(&verificationCount).Error; err != nil {
+		return nil, fmt.Errorf("failed to count verification tokens: %w", err)
+	}
+
 	var rotatedCount int64
 	if err := r.db.WithContext(ctx).Model(&RotatedTokenType{}).Count(&rotatedCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count rotated tokens: %w", err)
 	}
 
 	return map[string]interface{}{
-		"total_revoked_tokens":   totalRevoked,
-		"revoked_access_tokens":  accessCount,
-		"revoked_refresh_tokens": refreshCount,
-		"rotated_tokens":         rotatedCount,
+		"total_revoked_tokens":        totalRevoked,
+		"revoked_access_tokens":       accessCount,
+		"revoked_refresh_tokens":      refreshCount,
+		"revoked_verification_tokens": verificationCount,
+		"rotated_tokens":              rotatedCount,
 	}, nil
 }
 
@@ -814,6 +823,10 @@ func (r *GormTokenRepository) CleanupAll(ctx context.Context) error {
 
 	if err := r.CleanupExpiredRevokedTokens(ctx, RefreshToken); err != nil {
 		return fmt.Errorf("failed to cleanup refresh tokens: %w", err)
+	}
+
+	if err := r.CleanupExpiredRevokedTokens(ctx, VerificationToken); err != nil {
+		return fmt.Errorf("failed to cleanup verification tokens: %w", err)
 	}
 
 	if err := r.CleanupExpiredRotatedTokens(ctx); err != nil {

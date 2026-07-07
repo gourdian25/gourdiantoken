@@ -25,7 +25,7 @@
 //
 // ### Token Types
 //
-// The package supports two primary token types:
+// The package supports three token types:
 //
 //   - AccessToken: Short-lived tokens (default 30 minutes) containing user identity,
 //     session information, and authorization roles. Used for API authorization and
@@ -36,6 +36,22 @@
 //     access tokens without re-authentication. RefreshTokenClaims do not include
 //     roles since they're not directly used for authorization. Should be stored
 //     securely (httpOnly cookies recommended).
+//
+//   - VerificationToken: Short-lived, single-use, use-case-scoped tokens (e.g. a
+//     2FA-pending verification step between password check and full session issuance,
+//     or a password-reset/email-verify link). Unlike AccessToken/RefreshToken, its
+//     lifetime is a per-call parameter (CreateVerificationToken's ttl argument) rather
+//     than fixed solely by configuration. Requires
+//     GourdianTokenConfig.VerificationTokensEnabled; exposed via the optional
+//     GourdianTokenMakerVerification interface (following the same "separate optional
+//     interface" pattern as GourdianTokenMakerCloser) so implementing it does not
+//     break existing GourdianTokenMaker implementers. Single-use enforcement (a
+//     verification token can only be successfully verified once) piggybacks on the
+//     same revocation machinery used for access/refresh tokens: MarkVerificationTokenUsed
+//     revokes the token, and VerifyVerificationToken's existing revocation check is what
+//     then rejects a second verification attempt with ErrTokenAlreadyUsed (a plain alias
+//     of ErrTokenRevoked). This additionally requires RevocationEnabled plus a
+//     TokenRepository.
 //
 // ### Cryptographic Support
 //
@@ -113,7 +129,25 @@
 // Similar structure to AccessTokenClaims but without:
 //   - rls (Roles): Not included in refresh tokens
 //
-// Both token types include all required JWT claims and custom tracking information.
+// ### VerificationTokenClaims (JWT Payload)
+//
+// No session, username, or roles concept — correlate application-specific state via the
+// Metadata field instead.
+//
+// Standard JWT claims:
+//   - jti, sub, iss, aud, iat, exp, nbf (same meaning as AccessTokenClaims)
+//   - typ (Type): Always "verification"
+//
+// Custom claims:
+//   - uc (UseCase): Scopes the token to a specific purpose (e.g. "2fa-pending"). Must be
+//     non-empty and, if GourdianTokenConfig.VerificationAllowedUseCases is set, must
+//     appear in that whitelist (checked both at creation and at verification).
+//   - mtd (Metadata): Optional, application-defined key/value payload. Omitted from the
+//     JWT entirely when empty.
+//   - mle (Maximum Lifetime Expiry): Always equal to exp — verification tokens are never
+//     renewed, so there is no separate absolute ceiling to model.
+//
+// All three token types include all required JWT claims and custom tracking information.
 //
 // # Key Features and Behaviors
 //
@@ -193,6 +227,29 @@
 //   - Invalidate entire sessions
 //   - Trigger additional security checks (MFA, device verification)
 //
+// ## Verification Token Lifecycle
+//
+// Verification tokens follow a distinct create -> verify -> mark-used flow, useful for
+// gaps between two authentication steps (e.g. password check and full session issuance
+// when 2FA is pending):
+//
+//  1. CreateVerificationToken(ctx, userID, useCase, ttl, metadata) mints a short-lived,
+//     use-case-scoped token. ttl <= 0 falls back to VerificationDefaultExpiryDuration.
+//  2. VerifyVerificationToken(ctx, token) validates it and returns its claims. It does
+//     NOT consume the token — it can be called more than once, e.g. to re-render a
+//     confirmation page before the caller commits to the next step.
+//  3. Once whatever the token gates has actually completed (e.g. a TOTP code check
+//     passed AND a session is about to be issued), the caller explicitly calls
+//     MarkVerificationTokenUsed(ctx, token) to consume it.
+//  4. Any subsequent VerifyVerificationToken call on the same token then fails with
+//     ErrTokenAlreadyUsed (a plain alias of ErrTokenRevoked, since single-use enforcement
+//     is implemented by revoking the token via the same repository mechanism used for
+//     access/refresh revocation).
+//
+// Requires VerificationTokensEnabled; step 3/4's single-use guarantee additionally
+// requires RevocationEnabled plus a TokenRepository — without them,
+// MarkVerificationTokenUsed returns an explicit error rather than silently no-op'ing.
+//
 // # Configuration Guide
 //
 // ## GourdianTokenConfig Fields
@@ -221,6 +278,16 @@
 //   - RotationEnabled: Whether to enforce refresh token rotation (default false)
 //   - RevocationEnabled: Whether to allow token revocation (default false)
 //   - CleanupInterval: How often to remove expired tokens from storage (default 6h)
+//
+// Verification Token Configuration (all optional; default is fully disabled/backward compatible):
+//   - VerificationTokensEnabled: Master switch for CreateVerificationToken/VerifyVerificationToken/
+//     MarkVerificationTokenUsed (default false)
+//   - VerificationAllowedUseCases: Whitelist of acceptable use case strings; empty means any
+//     non-empty use case is accepted
+//   - VerificationDefaultExpiryDuration: Lifetime used when CreateVerificationToken's ttl
+//     argument is <= 0
+//   - VerificationMaxExpiryDuration: Ceiling a caller-supplied ttl may not exceed; zero means
+//     no ceiling
 //
 // ## Configuration Examples
 //
