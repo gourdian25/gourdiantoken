@@ -2,7 +2,7 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
-## v2.1.0 (Unreleased)
+## v2.1.0
 
 ### Added
 
