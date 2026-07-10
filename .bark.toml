@@ -1,8 +1,8 @@
 # File: src/default_config.toml
 
 [general]
-output      = "tree.txt"        # tree output filename
-backup_dir  = ".bark_backups"   # where backups are stored
+output      = "bark.txt"        # tree output filename
+backup_dir  = ".barks"          # where backups are stored
 max_file_size = 1048576         # skip files larger than this (bytes)
 backup      = true              # create backups before modifying files
 

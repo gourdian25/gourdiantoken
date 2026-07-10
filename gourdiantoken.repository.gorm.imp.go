@@ -4,8 +4,10 @@ package gourdiantoken
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -107,7 +109,8 @@ func (RotatedTokenType) TableName() string {
 //   - Implement connection retry logic
 //   - Consider read replicas for high read throughput
 type GormTokenRepository struct {
-	db *gorm.DB
+	db        *gorm.DB
+	closeOnce sync.Once
 }
 
 // NewGormTokenRepository creates a new GORM-based token repository.
@@ -864,10 +867,15 @@ func (r *GormTokenRepository) CleanupAll(ctx context.Context) error {
 //	    log.Printf("Failed to close token repository: %v", err)
 //	}
 func (r *GormTokenRepository) Close() error {
-	sqlDB, err := r.db.DB()
-	if err != nil {
-		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
-	}
-
-	return sqlDB.Close()
+	var err error
+	r.closeOnce.Do(func() {
+		var sqlDB *sql.DB
+		sqlDB, err = r.db.DB()
+		if err != nil {
+			err = fmt.Errorf("failed to get underlying sql.DB: %w", err)
+			return
+		}
+		err = sqlDB.Close()
+	})
+	return err
 }
