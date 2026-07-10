@@ -1,10 +1,29 @@
 # Gourdiantoken – Enterprise-Grade JWT Management for Go
 
-![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue)
+![Go Version](https://img.shields.io/badge/Go-1.26.4%2B-blue)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![GoDoc](https://pkg.go.dev/badge/github.com/gourdian25/gourdiantoken/v2)](https://pkg.go.dev/github.com/gourdian25/gourdiantoken/v2)
 
 **gourdiantoken** is a production-ready, comprehensive JWT token management system designed for modern Go applications. Built with security-first principles and performance optimization, it provides everything needed for enterprise authentication systems — from basic token generation to advanced features like automatic rotation, Redis-backed revocation, and multi-algorithm cryptographic support.
+
+## 🌐 Part of the gourdian25 ecosystem
+
+gourdiantoken is one of several small, independent Go libraries meant to be
+used together:
+
+- [grlog](https://github.com/gourdian25/grlog) — zero-dependency structured
+  logging.
+- [grcache](https://github.com/gourdian25/grcache) — backend-agnostic
+  caching abstraction, the same architectural pattern (interface + pluggable
+  backends) gourdiantoken uses for its `TokenRepository`.
+- [grevents](https://github.com/gourdian25/grevents) — an in-process event
+  bus for decoupling producers of state changes from consumers that react
+  to them.
+- [graudit](https://github.com/gourdian25/graudit) — an append-only,
+  tamper-evident audit log with pluggable storage backends.
+- [grpolicy](https://github.com/gourdian25/grpolicy) — attribute-based
+  policy evaluation (RBAC/ABAC), independent of any notion of "user" or
+  "role".
 
 ## 🎯 Why Gourdiantoken?
 
@@ -78,7 +97,7 @@
 go get github.com/gourdian25/gourdiantoken/v2@latest
 ```
 
-**Requirements**: Go 1.24 or higher
+**Requirements**: Go 1.26.4 or higher (ecosystem-aligned minimum)
 
 **Optional Dependencies** (based on storage backend):
 

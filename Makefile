@@ -3,7 +3,7 @@
 .PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install goreleaser-release goreleaser-check
 
 # Variables
-VERSION := v2.1.0
+VERSION := v2.1.1
 MAIN_PACKAGE := github.com/gourdian25/gourdiantoken/v2
 MODULE := github.com/gourdian25/gourdiantoken/v2
 GO := go
@@ -209,12 +209,12 @@ release: prerelease
 # tagging first would build/publish under the wrong (previous) version.
 goreleaser-release: release
 	@echo "Building release with goreleaser..."
-	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser@latest" && exit 1)
+	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser/v2@latest" && exit 1)
 	goreleaser release --clean
 
 # Validate .goreleaser.yml and do a full local dry-run (no publish) without needing a real tag
 goreleaser-check:
-	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser@latest" && exit 1)
+	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser/v2@latest" && exit 1)
 	goreleaser check
 	goreleaser release --snapshot --clean
 

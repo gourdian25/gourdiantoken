@@ -2,6 +2,42 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## v2.1.1
+
+Ecosystem-alignment and security pass; no breaking changes.
+
+### Fixed
+
+- **Security:** bumped `github.com/golang-jwt/jwt/v5` (`v5.2.1` → `v5.3.1`,
+  closes GO-2025-3553, a reachable excessive-memory-allocation DoS in header
+  parsing), `github.com/jackc/pgx/v5` (`v5.6.0` → `v5.10.0`, closes
+  GO-2026-5004/4772/4771), and `golang.org/x/crypto` (`v0.31.0` → `v0.53.0`,
+  clears 18 stale SSH/openpgp advisories). None were exploitable through
+  this library's own code paths in isolation, but all are now patched.
+- **`GormTokenRepository.Close()` was not idempotent** — unlike every other
+  repository implementation in this package (Redis, Memory, `JWTMaker`),
+  it had no `sync.Once` guard. A double-`Close()` call now returns the
+  cached result instead of re-closing the underlying `*sql.DB`.
+
+### Changed
+
+- `go.mod`'s `go` directive raised from `1.24.0` to `1.26.4`, aligning
+  with the rest of the gourdian25 ecosystem.
+- Dependency versions aligned with `grcache` (the freshest repo in the
+  ecosystem): `go.mongodb.org/mongo-driver`, `gorm.io/gorm`,
+  `github.com/redis/go-redis/v9`, `github.com/stretchr/testify`,
+  `github.com/klauspost/compress`, `github.com/montanaflynn/stats`,
+  `github.com/xdg-go/scram`, `github.com/cespare/xxhash/v2`.
+- `.bark.toml` corrected to match the rest of the ecosystem (was pointing
+  at a stale `tree.txt`/`.bark_backups` template).
+- `goreleaser-check` now installs `goreleaser/v2`, matching sibling repos.
+- README: added a "part of the gourdian25 ecosystem" section (previously
+  had none) and corrected the Go version badge/requirement to `1.26.4+`.
+
+### Added
+
+- `SECURITY.md` (previously missing).
+
 ## v2.1.0
 
 ### Added
