@@ -59,15 +59,19 @@ properly if broad compatibility guarantees become necessary.
 
 - Root-package coverage raised from an unmeasured baseline (previous
   full-backend numbers were never actually collected against live
-  services) to 92.7%, via direct unit tests for the PEM key parsers'
+  services) to 95%+, via direct unit tests for the PEM key parsers'
   previously-untested branches (certificate fallback paths, type-mismatch
   errors), the claims-mapping functions in `gourdiantoken.validation.go`
   (every error branch of `extractCommonClaims`/`mapToAccessClaims`/
   `mapToRefreshClaims`/`mapToVerificationClaims`/`validateTokenClaims`),
-  and repository-layer database-error branches across all four backends
+  repository-layer database-error branches across all four backends
   (closing the connection/pool/client out from under an otherwise-valid
   repository to reach error-wrapping code paths that a healthy backend
-  never exercises).
+  never exercises), and a set of narrow race-window `ctx.Err()` checks in
+  `gourdiantoken.maker.go` (guarding against a context cancelling *between*
+  two checks a few lines apart) reached via a small test-only `context.Context`
+  wrapper that succeeds a controlled number of times before reporting
+  cancelled.
 - Found and documented (not fixed, as it changes atomic-rotation semantics
   for two backends) a cross-backend inconsistency in
   `MarkTokenRotatedAtomic`: Postgres and MongoDB's `INSERT ... ON CONFLICT

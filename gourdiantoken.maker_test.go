@@ -507,7 +507,7 @@ func TestNewGourdianTokenMaker_InitializeSigningMethodFailureCancelsCleanup(t *t
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 	config.SigningMethod = Symmetric
-	config.Algorithm = "HS128"    // right prefix (passes validateAlgorithmAndMethod), not a real algorithm
+	config.Algorithm = "HS128"     // right prefix (passes validateAlgorithmAndMethod), not a real algorithm
 	config.AllowedAlgorithms = nil // skip the allow-list check so the switch's default case is reached
 
 	repo := NewMemoryTokenRepository(time.Minute)
