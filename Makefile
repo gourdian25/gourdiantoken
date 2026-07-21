@@ -1,6 +1,6 @@
 # File: Makefile
 
-.PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install goreleaser-release goreleaser-check
+.PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install goreleaser-release goreleaser-check docker-up docker-down
 
 # Variables
 VERSION := v2.1.1
@@ -35,6 +35,10 @@ help:
 	@echo "  make install          Install package locally"
 	@echo "  make release          Tag and release new version"
 	@echo "  make clean            Clean build artifacts"
+	@echo ""
+	@echo "Test Infrastructure:"
+	@echo "  make docker-up        Start the shared Postgres/Redis/Mongo test containers (idempotent)"
+	@echo "  make docker-down      Stop those containers (state preserved for a fast restart)"
 	@echo ""
 
 # Build the package
@@ -171,6 +175,36 @@ deps-update:
 deps-check:
 	@echo "Available dependency updates:"
 	$(GO) list -u -m all
+
+# docker-up is idempotent: safe to run repeatedly, and safe to run
+# alongside grnoti/grcache/graudit's own `make docker-up` since every
+# gourdian25 repo shares these same container names/ports — each just
+# gets its own database/keyspace/DB-index inside them (see CLAUDE.md).
+# gourdiantoken doesn't need Kafka or Memcached, unlike grnoti/grcache.
+docker-up:
+	@echo "Starting shared test containers..."
+	@docker inspect gourdian-postgres >/dev/null 2>&1 || docker run -d --name gourdian-postgres -p 5432:5432 \
+		-e POSTGRES_USER=postgres_user -e POSTGRES_PASSWORD=postgres_password -e POSTGRES_DB=gourdiantoken_test postgres:16
+	@docker start gourdian-postgres >/dev/null 2>&1 || true
+	@docker inspect gourdian-redis >/dev/null 2>&1 || docker run -d --name gourdian-redis -p 6379:6379 redis:7 --requirepass redis_password
+	@docker start gourdian-redis >/dev/null 2>&1 || true
+	@docker volume create gourdian-mongo-keyfile >/dev/null
+	@docker inspect gourdian-mongo-auth >/dev/null 2>&1 || (docker run --rm -v gourdian-mongo-keyfile:/keyfile-dir mongo:7 bash -c "openssl rand -base64 756 > /keyfile-dir/mongo-keyfile && chmod 400 /keyfile-dir/mongo-keyfile && chown 999:999 /keyfile-dir/mongo-keyfile" && docker run -d --name gourdian-mongo-auth -p 27018:27017 -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=mongo_password -v gourdian-mongo-keyfile:/etc/mongo-keyfile-dir mongo:7 --replSet rs0 --keyFile /etc/mongo-keyfile-dir/mongo-keyfile)
+	@docker start gourdian-mongo-auth >/dev/null 2>&1 || true
+	@echo "Waiting for Postgres..."
+	@until docker exec gourdian-postgres pg_isready -U postgres_user >/dev/null 2>&1; do sleep 1; done
+	@docker exec gourdian-postgres psql -U postgres_user -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'gourdiantoken_test'" | grep -q 1 || \
+		docker exec gourdian-postgres psql -U postgres_user -d postgres -c "CREATE DATABASE gourdiantoken_test"
+	@echo "Waiting for Redis..."
+	@until docker exec gourdian-redis redis-cli -a redis_password ping 2>/dev/null | grep -q PONG; do sleep 1; done
+	@echo "Waiting for Mongo (auth + replica set)..."
+	@until docker exec gourdian-mongo-auth mongosh --quiet -u root -p mongo_password --authenticationDatabase admin --eval 'db.runCommand({ping:1})' >/dev/null 2>&1; do sleep 1; done
+	@docker exec gourdian-mongo-auth mongosh --quiet -u root -p mongo_password --authenticationDatabase admin --eval 'rs.initiate()' >/dev/null 2>&1 || true
+	@echo "Docker test infrastructure ready (postgres/redis/mongo-auth)"
+
+docker-down:
+	@docker stop gourdian-postgres gourdian-redis gourdian-mongo-auth 2>/dev/null || true
+	@echo "Stopped (containers preserved for a fast restart via 'make docker-up')"
 
 # Generate mocks and code if needed
 generate:

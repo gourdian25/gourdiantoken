@@ -1950,6 +1950,22 @@ go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out -o coverage.html
 ```
 
+### Backend-dependent tests
+
+The `Redis`, `MongoDB`, and `GORM` (Postgres) repository subtests need real
+local services — see [CLAUDE.md](CLAUDE.md) for exact connection details.
+Start them with:
+
+```bash
+make docker-up   # starts the shared Postgres/Redis/Mongo test containers
+make docker-down # stops them when you're done
+```
+
+These containers are shared with grnoti, grcache, and graudit (each gets its
+own database/keyspace/DB-index). To iterate without any of them running,
+scope test runs to the `Memory` subtest, e.g.
+`go test -run TestMarkTokenRevoke_SuccessAccessToken/Memory ./...`.
+
 ### Unit Test Example
 
 ```go
