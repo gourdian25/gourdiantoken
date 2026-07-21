@@ -82,9 +82,10 @@
 //   - MemoryTokenRepository: In-memory storage with background cleanup. Suitable for
 //     development, testing, and single-instance deployments. Data lost on restart.
 //
-//   - GormTokenRepository: SQL database support via GORM ORM. Works with PostgreSQL,
-//     MySQL, SQLite, SQL Server, and CockroachDB. Recommended for production systems
-//     with persistent storage requirements.
+//   - PostgresTokenRepository: PostgreSQL storage via pgx/v5 and sqlc-generated
+//     queries (no ORM). Recommended for production systems with persistent
+//     storage requirements. The caller builds and owns the *pgxpool.Pool, so it
+//     can be shared across your backend.
 //
 //   - MongoTokenRepository: MongoDB document storage with optional transaction support.
 //     Provides automatic TTL index-based cleanup and horizontal scaling via sharding.
@@ -375,32 +376,28 @@
 //   - Suitable for single-instance deployments
 //   - Perfect for testing authentication logic
 //
-// ## SQL Database Token Maker (GORM)
+// ## PostgreSQL Token Maker
 //
-// For production systems with SQL databases:
+// For production systems using PostgreSQL:
 //
-//	gormDB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+//	pool, err := pgxpool.New(ctx, dsn)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
+//	defer pool.Close()
 //
-//	maker, err := gourdiantoken.NewGourdianTokenMakerWithGorm(ctx, config, gormDB)
+//	maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//
-// Supported databases:
-//   - PostgreSQL (recommended for production)
-//   - MySQL/MariaDB
-//   - SQLite (development only)
-//   - SQL Server
-//   - CockroachDB
 //
 // Features:
-//   - ACID transaction support
-//   - Complex query capabilities
-//   - Connection pooling
-//   - Automatic migrations
+//   - No ORM overhead — hand-written queries via sqlc, pgx/v5 driver
+//   - Connection pooling via the caller-provided *pgxpool.Pool, shareable
+//     across the rest of your backend
+//   - Schema applied automatically (CREATE TABLE/INDEX IF NOT EXISTS),
+//     serialized by a Postgres advisory lock so concurrent callers don't
+//     race on the DDL
 //   - Composite indexing for performance
 //
 // ## MongoDB Token Maker
@@ -668,11 +665,11 @@
 //   - Restart-based token reset acceptable
 //   - Testing authentication logic
 //
-// Use GormTokenRepository when:
-//   - Existing SQL database in use
+// Use PostgresTokenRepository when:
+//   - Existing PostgreSQL database in use
 //   - ACID transaction requirements critical
 //   - Complex query patterns needed
-//   - Multi-instance deployment with shared database
+//   - Multi-instance deployment with a shared *pgxpool.Pool
 //
 // Use MongoTokenRepository when:
 //   - Document-oriented storage preferred
@@ -692,7 +689,7 @@
 //   - Memory: 1-10 microseconds
 //   - Redis: 50-500 microseconds (network dependent)
 //   - MongoDB: 500-5000 microseconds (with indexes)
-//   - SQL (GORM): 1-10 milliseconds (with indexes)
+//   - PostgreSQL: 1-10 milliseconds (with indexes)
 //
 // Token Creation Performance:
 //   - Symmetric signing: 100,000+ tokens/second
@@ -941,7 +938,7 @@
 //   - github.com/google/uuid: internal token ID (jti) generation
 //
 // Optional dependencies (for storage backends):
-//   - gorm.io/gorm: SQL database ORM
+//   - github.com/jackc/pgx/v5: PostgreSQL driver (sqlc-generated queries, no ORM)
 //   - go.mongodb.org/mongo-driver: MongoDB database driver
 //   - github.com/redis/go-redis/v9: Redis client
 //
@@ -955,7 +952,7 @@
 //   - UUID library v1.x
 //
 // Database backend version requirements:
-//   - GORM: v1.25+
+//   - PostgreSQL: 12+ (pgx/v5 driver)
 //   - MongoDB: 4.0+ (4.2+ recommended for transactions)
 //   - Redis: 6.0+ (recommended)
 //

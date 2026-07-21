@@ -12,11 +12,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gourdian25/gourdiantoken/v2"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 // TestResult holds the results of a test operation
@@ -1619,7 +1618,7 @@ func main() {
 	printBanner()
 
 	// Hardcoded database credentials from Makefile
-	postgresDSN := "host=localhost user=postgres_user password=postgres_password dbname=postgres_db port=5432 sslmode=disable"
+	postgresDSN := "host=localhost user=postgres_user password=postgres_password dbname=gourdiantoken_test port=5432 sslmode=disable"
 	redisAddr := "localhost:6379"
 	redisPassword := "redis_password"
 	mongoURI := "mongodb://root:mongo_password@localhost:27018/?directConnection=true" // see plan.md's "Mongo verification gap" for why
@@ -1657,15 +1656,20 @@ func main() {
 			},
 		},
 		{
-			Name:        "PostgreSQL/GORM Repository",
-			Description: "Persistent storage with ACID compliance",
+			Name:        "PostgreSQL Repository",
+			Description: "Persistent storage with ACID compliance (pgx/v5 + sqlc)",
 			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
-				db, err := gorm.Open(postgres.Open(postgresDSN), &gorm.Config{})
+				pool, err := pgxpool.New(ctx, postgresDSN)
 				if err != nil {
 					return nil, fmt.Errorf("postgres unavailable: %w", err)
 				}
 
-				return gourdiantoken.NewGormTokenRepository(db)
+				repo, err := gourdiantoken.NewPostgresTokenRepository(ctx, pool)
+				if err != nil {
+					pool.Close()
+					return nil, fmt.Errorf("postgres unavailable: %w", err)
+				}
+				return repo, nil
 			},
 			Cleanup: func() error {
 				return nil
@@ -1684,7 +1688,7 @@ func main() {
 					return nil, fmt.Errorf("mongodb unavailable: %w", err)
 				}
 
-				db := client.Database("gourdian_test")
+				db := client.Database("gourdiantoken_test")
 				return gourdiantoken.NewMongoTokenRepository(db, false)
 			},
 			Cleanup: func() error {

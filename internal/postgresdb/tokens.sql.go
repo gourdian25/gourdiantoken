@@ -1,0 +1,183 @@
+// File: internal/postgresdb/tokens.sql.go
+
+// versions:
+//   sqlc v1.31.1
+// source: tokens.sql
+
+package postgresdb
+
+import (
+	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+const countAllRevokedTokens = `-- name: CountAllRevokedTokens :one
+SELECT COUNT(*) FROM gourdiantoken_revoked_tokens
+`
+
+func (q *Queries) CountAllRevokedTokens(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAllRevokedTokens)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRevokedToken = `-- name: CountRevokedToken :one
+SELECT COUNT(*) FROM gourdiantoken_revoked_tokens
+WHERE token_hash = $1 AND token_type = $2 AND expires_at > $3
+`
+
+type CountRevokedTokenParams struct {
+	TokenHash string             `db:"token_hash" json:"token_hash"`
+	TokenType string             `db:"token_type" json:"token_type"`
+	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+}
+
+func (q *Queries) CountRevokedToken(ctx context.Context, arg CountRevokedTokenParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRevokedToken, arg.TokenHash, arg.TokenType, arg.ExpiresAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRevokedTokensByType = `-- name: CountRevokedTokensByType :one
+SELECT COUNT(*) FROM gourdiantoken_revoked_tokens WHERE token_type = $1
+`
+
+func (q *Queries) CountRevokedTokensByType(ctx context.Context, tokenType string) (int64, error) {
+	row := q.db.QueryRow(ctx, countRevokedTokensByType, tokenType)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRotatedToken = `-- name: CountRotatedToken :one
+SELECT COUNT(*) FROM gourdiantoken_rotated_tokens
+WHERE token_hash = $1 AND expires_at > $2
+`
+
+type CountRotatedTokenParams struct {
+	TokenHash string             `db:"token_hash" json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+}
+
+func (q *Queries) CountRotatedToken(ctx context.Context, arg CountRotatedTokenParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRotatedToken, arg.TokenHash, arg.ExpiresAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRotatedTokens = `-- name: CountRotatedTokens :one
+SELECT COUNT(*) FROM gourdiantoken_rotated_tokens
+`
+
+func (q *Queries) CountRotatedTokens(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countRotatedTokens)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteExpiredRevokedTokens = `-- name: DeleteExpiredRevokedTokens :execrows
+DELETE FROM gourdiantoken_revoked_tokens WHERE token_type = $1 AND expires_at <= $2
+`
+
+type DeleteExpiredRevokedTokensParams struct {
+	TokenType string             `db:"token_type" json:"token_type"`
+	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+}
+
+func (q *Queries) DeleteExpiredRevokedTokens(ctx context.Context, arg DeleteExpiredRevokedTokensParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredRevokedTokens, arg.TokenType, arg.ExpiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteExpiredRotatedTokens = `-- name: DeleteExpiredRotatedTokens :execrows
+DELETE FROM gourdiantoken_rotated_tokens WHERE expires_at <= $1
+`
+
+func (q *Queries) DeleteExpiredRotatedTokens(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredRotatedTokens, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getRotatedTokenExpiresAt = `-- name: GetRotatedTokenExpiresAt :one
+SELECT expires_at FROM gourdiantoken_rotated_tokens WHERE token_hash = $1
+`
+
+func (q *Queries) GetRotatedTokenExpiresAt(ctx context.Context, tokenHash string) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getRotatedTokenExpiresAt, tokenHash)
+	var expires_at pgtype.Timestamptz
+	err := row.Scan(&expires_at)
+	return expires_at, err
+}
+
+const insertRotatedTokenIfNotExists = `-- name: InsertRotatedTokenIfNotExists :execrows
+INSERT INTO gourdiantoken_rotated_tokens (token_hash, expires_at, created_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (token_hash) DO NOTHING
+`
+
+type InsertRotatedTokenIfNotExistsParams struct {
+	TokenHash string             `db:"token_hash" json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) InsertRotatedTokenIfNotExists(ctx context.Context, arg InsertRotatedTokenIfNotExistsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertRotatedTokenIfNotExists, arg.TokenHash, arg.ExpiresAt, arg.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const upsertRevokedToken = `-- name: UpsertRevokedToken :exec
+
+INSERT INTO gourdiantoken_revoked_tokens (token_hash, token_type, expires_at, created_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (token_hash, token_type) DO UPDATE SET expires_at = EXCLUDED.expires_at
+`
+
+type UpsertRevokedTokenParams struct {
+	TokenHash string             `db:"token_hash" json:"token_hash"`
+	TokenType string             `db:"token_type" json:"token_type"`
+	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+// File: internal/postgresdb/queries/tokens.sql
+func (q *Queries) UpsertRevokedToken(ctx context.Context, arg UpsertRevokedTokenParams) error {
+	_, err := q.db.Exec(ctx, upsertRevokedToken,
+		arg.TokenHash,
+		arg.TokenType,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const upsertRotatedToken = `-- name: UpsertRotatedToken :exec
+INSERT INTO gourdiantoken_rotated_tokens (token_hash, expires_at, created_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (token_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at
+`
+
+type UpsertRotatedTokenParams struct {
+	TokenHash string             `db:"token_hash" json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) UpsertRotatedToken(ctx context.Context, arg UpsertRotatedTokenParams) error {
+	_, err := q.db.Exec(ctx, upsertRotatedToken, arg.TokenHash, arg.ExpiresAt, arg.CreatedAt)
+	return err
+}

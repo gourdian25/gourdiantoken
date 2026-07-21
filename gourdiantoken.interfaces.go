@@ -22,7 +22,7 @@ import (
 //   - Ensure MarkTokenRotatedAtomic is truly atomic to prevent race conditions
 //   - Implementations may enforce a minimum TTL floor (e.g. the Redis implementation clamps
 //     any TTL below 100ms up to 100ms, as a safeguard against near-zero-TTL races). This is
-//     implementation-specific and not part of the interface contract — the in-memory, GORM,
+//     implementation-specific and not part of the interface contract — the in-memory, Postgres,
 //     and MongoDB implementations currently apply no such floor.
 type TokenRepository interface {
 	// MarkTokenRevoke marks a token as revoked with a time-to-live.

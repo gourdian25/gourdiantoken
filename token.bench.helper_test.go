@@ -7,12 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 // ============================================================================
@@ -142,10 +141,10 @@ func getBenchRepositoryFactories() map[string]BenchRepositoryFactory {
 				return nil, func() {}
 			}
 
-			db := client.Database("gourdian_bench")
+			db := client.Database("gourdiantoken_bench")
 
-			_ = db.Collection("revoked_tokens").Drop(ctx)
-			_ = db.Collection("rotated_tokens").Drop(ctx)
+			_ = db.Collection(mongoRevokedCollectionName).Drop(ctx)
+			_ = db.Collection(mongoRotatedCollectionName).Drop(ctx)
 
 			repo, err := NewMongoTokenRepository(db, false)
 			if err != nil {
@@ -155,8 +154,8 @@ func getBenchRepositoryFactories() map[string]BenchRepositoryFactory {
 
 			cleanup := func() {
 				ctx := context.Background()
-				_, _ = db.Collection("revoked_tokens").DeleteMany(ctx, bson.M{})
-				_, _ = db.Collection("rotated_tokens").DeleteMany(ctx, bson.M{})
+				_, _ = db.Collection(mongoRevokedCollectionName).DeleteMany(ctx, bson.M{})
+				_, _ = db.Collection(mongoRotatedCollectionName).DeleteMany(ctx, bson.M{})
 
 				if err := client.Disconnect(ctx); err != nil {
 					println("MongoDB Disconnect error:", err.Error())
@@ -165,31 +164,38 @@ func getBenchRepositoryFactories() map[string]BenchRepositoryFactory {
 			return repo, cleanup
 		},
 
-		"GORM": func(b *testing.B) (TokenRepository, func()) {
-			postgresDSN := "host=localhost user=postgres_user password=postgres_password dbname=postgres_db port=5432 sslmode=disable"
+		"Postgres": func(b *testing.B) (TokenRepository, func()) {
+			postgresDSN := "host=localhost user=postgres_user password=postgres_password dbname=gourdiantoken_test port=5432 sslmode=disable"
 
-			db, err := gorm.Open(postgres.Open(postgresDSN), &gorm.Config{})
+			ctx := context.Background()
+			pool, err := pgxpool.New(ctx, postgresDSN)
 			if err != nil {
-				println("GORM connection error:", err.Error())
+				println("Postgres connection error:", err.Error())
+				return nil, func() {}
+			}
+			if err := pool.Ping(ctx); err != nil {
+				println("Postgres ping error:", err.Error())
+				pool.Close()
 				return nil, func() {}
 			}
 
-			_ = db.Exec("TRUNCATE TABLE revoked_tokens RESTART IDENTITY CASCADE")
-			_ = db.Exec("TRUNCATE TABLE rotated_tokens RESTART IDENTITY CASCADE")
+			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_revoked_tokens RESTART IDENTITY CASCADE")
+			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_rotated_tokens RESTART IDENTITY CASCADE")
 
-			repo, err := NewGormTokenRepository(db)
+			repo, err := NewPostgresTokenRepository(ctx, pool)
 			if err != nil {
-				println("GORM repository creation error:", err.Error())
+				println("Postgres repository creation error:", err.Error())
 				return nil, func() {}
 			}
 
 			cleanup := func() {
-				_ = db.Exec("TRUNCATE TABLE revoked_tokens RESTART IDENTITY CASCADE")
-				_ = db.Exec("TRUNCATE TABLE rotated_tokens RESTART IDENTITY CASCADE")
+				ctx := context.Background()
+				_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_revoked_tokens RESTART IDENTITY CASCADE")
+				_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_rotated_tokens RESTART IDENTITY CASCADE")
 
-				if gormRepo, ok := repo.(*GormTokenRepository); ok {
-					if err := gormRepo.Close(); err != nil {
-						println("GORM Close error:", err.Error())
+				if pgRepo, ok := repo.(*PostgresTokenRepository); ok {
+					if err := pgRepo.Close(); err != nil {
+						println("Postgres Close error:", err.Error())
 					}
 				}
 			}
