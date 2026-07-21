@@ -21,6 +21,31 @@ func TestNewMemoryTokenRepository_DefaultCleanupInterval(t *testing.T) {
 	require.NoError(t, memRepo.Close())
 }
 
+// TestMarkTokenRotatedAtomic_ValidationBranches exercises the empty-token
+// and non-positive-TTL guard clauses at the top of MarkTokenRotatedAtomic,
+// across every backend — none of the shared table-driven tests happen to
+// call it with invalid input, only the happy-path and conflict cases.
+func TestMarkTokenRotatedAtomic_ValidationBranches(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+
+			_, err := repo.MarkTokenRotatedAtomic(ctx, "", time.Hour)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "token cannot be empty")
+
+			_, err = repo.MarkTokenRotatedAtomic(ctx, "some-token", 0)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "ttl must be positive")
+		})
+	}
+}
+
 // TestMarkTokenRotatedAtomic_ReMarksAfterExpiry exercises the branch where
 // an existing rotation entry is present but has already expired:
 // MarkTokenRotatedAtomic must fall through and re-mark (returning true
