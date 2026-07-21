@@ -15,7 +15,7 @@ Build/test tooling is centralized in the `Makefile`; use it rather than raw `go`
 - `go test -run TestName ./...` — run a single test
 - `go test -run TestName/SubtestName ./...` — run a specific subtest (many tests are table-driven over repository backends, see below)
 - `make bench` / `make bench-<Name>` — run all/one benchmark
-- `make coverage` / `make coverage-summary` / `make coverage-check` — coverage report / summary / 70% threshold gate
+- `make coverage` / `make coverage-summary` / `make coverage-check` — coverage report / summary / 95% threshold gate (root package, real backends live — see "Backend-dependent tests" below). Measured coverage as of the pgx+sqlc migration is 92.7%; `make coverage-check` currently fails the 95% gate — see CHANGELOG.md's v2.2.0 "Testing" section for what's covered and what structurally resists further unit testing (race-window context-cancellation branches, database-error sub-branches that only fire after a prior call in the same function already succeeded).
 - `make vet` / `make lint` (golangci-lint) / `make staticcheck` / `make fmt` (goimports + gofmt) / `make quality` (all of the above)
 - `make precommit` — clean, fmt, vet, lint, coverage-check
 - `make prerelease` — precommit checks plus race detector, run before tagging a release

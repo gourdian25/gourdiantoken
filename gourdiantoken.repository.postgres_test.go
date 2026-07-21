@@ -35,6 +35,24 @@ func TestNewPostgresTokenRepository_PingFailure(t *testing.T) {
 	require.Contains(t, err.Error(), "database connection failed")
 }
 
+// TestNewGourdianTokenMakerWithPostgres_WrapsRepositoryError exercises the
+// factory's own error-wrapping branch when NewPostgresTokenRepository
+// fails, distinct from calling NewPostgresTokenRepository directly (see
+// TestNewPostgresTokenRepository_PingFailure).
+func TestNewGourdianTokenMakerWithPostgres_WrapsRepositoryError(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), "host=127.0.0.1 port=1 user=nobody dbname=nowhere sslmode=disable connect_timeout=1")
+	require.NoError(t, err)
+	defer pool.Close()
+
+	config := DefaultTestConfig()
+	config.RevocationEnabled = true
+	config.RotationEnabled = true
+
+	_, err = NewGourdianTokenMakerWithPostgres(context.Background(), config, pool)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to initialize Postgres token repository")
+}
+
 // TestApplyPostgresSchema_AcquireFailure exercises applyPostgresSchema's
 // connection-acquire error branch: a closed pool fails Acquire immediately
 // with a clean, non-panicking error.
@@ -57,6 +75,44 @@ func TestApplyPostgresSchema_AcquireFailure(t *testing.T) {
 // returns a clean "closed pool" error rather than panicking, so every
 // method's own error-wrapping path is reachable deterministically without
 // needing to simulate a live connection dropping mid-operation.
+// TestPostgresRepository_Stats_RotatedCountFails and
+// TestPostgresRepository_CleanupAll_RotatedCleanupFails reach the specific
+// late-stage error branches in Stats/CleanupAll that only fire once every
+// prior call in the sequence has already succeeded — unreachable via the
+// closed-pool technique in TestPostgresRepository_OperationsAfterPoolClosed,
+// since closing the pool fails every call including the first.
+func TestPostgresRepository_Stats_RotatedCountFails(t *testing.T) {
+	factories := getTestRepositoryFactories()
+	repo, cleanup := factories["Postgres"](t)
+	defer cleanup()
+
+	pgRepo := repo.(*PostgresTokenRepository)
+	ctx := context.Background()
+
+	_, err := pgRepo.pool.Exec(ctx, "DROP TABLE gourdiantoken_rotated_tokens")
+	require.NoError(t, err)
+
+	_, err = pgRepo.Stats(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to count rotated tokens")
+}
+
+func TestPostgresRepository_CleanupAll_RotatedCleanupFails(t *testing.T) {
+	factories := getTestRepositoryFactories()
+	repo, cleanup := factories["Postgres"](t)
+	defer cleanup()
+
+	pgRepo := repo.(*PostgresTokenRepository)
+	ctx := context.Background()
+
+	_, err := pgRepo.pool.Exec(ctx, "DROP TABLE gourdiantoken_rotated_tokens")
+	require.NoError(t, err)
+
+	err = pgRepo.CleanupAll(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to cleanup rotated tokens")
+}
+
 func TestPostgresRepository_OperationsAfterPoolClosed(t *testing.T) {
 	factories := getTestRepositoryFactories()
 	repo, cleanup := factories["Postgres"](t)

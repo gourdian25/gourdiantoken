@@ -55,6 +55,27 @@ this release ships breaking changes under a `v2.x.y` tag rather than
 following strict semver. A future breaking release will move to `/v3`
 properly if broad compatibility guarantees become necessary.
 
+### Testing
+
+- Root-package coverage raised from an unmeasured baseline (previous
+  full-backend numbers were never actually collected against live
+  services) to 92.7%, via direct unit tests for the PEM key parsers'
+  previously-untested branches (certificate fallback paths, type-mismatch
+  errors), the claims-mapping functions in `gourdiantoken.validation.go`
+  (every error branch of `extractCommonClaims`/`mapToAccessClaims`/
+  `mapToRefreshClaims`/`mapToVerificationClaims`/`validateTokenClaims`),
+  and repository-layer database-error branches across all four backends
+  (closing the connection/pool/client out from under an otherwise-valid
+  repository to reach error-wrapping code paths that a healthy backend
+  never exercises).
+- Found and documented (not fixed, as it changes atomic-rotation semantics
+  for two backends) a cross-backend inconsistency in
+  `MarkTokenRotatedAtomic`: Postgres and MongoDB's `INSERT ... ON CONFLICT
+  DO NOTHING`/upsert-based implementation treats any existing rotation
+  record as a conflict regardless of whether it has logically expired,
+  while Memory and Redis correctly allow re-marking an expired entry. See
+  `TestMarkTokenRotatedAtomic_ReMarksAfterExpiry`.
+
 ## v2.1.1
 
 Ecosystem-alignment and security pass; no breaking changes.

@@ -10,7 +10,99 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// TestNewMongoTokenRepository_NilDatabase exercises the repository
+// constructor's own nil check directly. NewGourdianTokenMakerWithMongo has
+// its own, earlier nil check that returns before ever reaching this one, so
+// this path is otherwise never exercised.
+func TestNewMongoTokenRepository_NilDatabase(t *testing.T) {
+	_, err := NewMongoTokenRepository(nil, false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "database cannot be nil")
+}
+
+// TestNewMongoTokenRepository_PingFailure exercises the connectivity-check
+// error branch against an address nothing listens on. mongo.Connect only
+// validates the URI and never dials eagerly, so this constructs
+// successfully while Ping fails immediately.
+func TestNewMongoTokenRepository_PingFailure(t *testing.T) {
+	client, err := mongo.Connect(context.Background(), options.Client().
+		ApplyURI("mongodb://127.0.0.1:1/?connectTimeoutMS=200&serverSelectionTimeoutMS=200"))
+	require.NoError(t, err)
+	defer func() { _ = client.Disconnect(context.Background()) }()
+
+	_, err = NewMongoTokenRepository(client.Database("nowhere"), false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mongodb connection failed")
+}
+
+// TestNewGourdianTokenMakerWithMongo_WrapsRepositoryError exercises the
+// factory's own error-wrapping branch when NewMongoTokenRepository fails,
+// distinct from calling NewMongoTokenRepository directly (see
+// TestNewMongoTokenRepository_PingFailure).
+func TestNewGourdianTokenMakerWithMongo_WrapsRepositoryError(t *testing.T) {
+	client, err := mongo.Connect(context.Background(), options.Client().
+		ApplyURI("mongodb://127.0.0.1:1/?connectTimeoutMS=200&serverSelectionTimeoutMS=200"))
+	require.NoError(t, err)
+	defer func() { _ = client.Disconnect(context.Background()) }()
+
+	config := DefaultTestConfig()
+	config.RevocationEnabled = true
+	config.RotationEnabled = true
+
+	_, err = NewGourdianTokenMakerWithMongo(context.Background(), config, client.Database("nowhere"), false)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to initialize MongoDB token repository")
+}
+
+// TestMongoRepository_OperationsAfterDisconnected exercises every
+// MongoTokenRepository method's underlying-database-error branch by
+// disconnecting the client out from under an otherwise-valid repository —
+// the driver returns a clean "client is disconnected" error rather than
+// panicking.
+func TestMongoRepository_OperationsAfterDisconnected(t *testing.T) {
+	factories := getTestRepositoryFactories()
+	repo, cleanup := factories["MongoDB"](t)
+	defer cleanup()
+
+	mongoRepo := repo.(*MongoTokenRepository)
+	ctx := context.Background()
+
+	require.NoError(t, mongoRepo.MarkTokenRotated(ctx, "disconnected-token", time.Hour))
+
+	require.NoError(t, mongoRepo.revokedCollection.Database().Client().Disconnect(ctx))
+
+	err := mongoRepo.MarkTokenRevoke(ctx, AccessToken, "x", time.Hour)
+	require.Error(t, err)
+
+	_, err = mongoRepo.IsTokenRevoked(ctx, AccessToken, "x")
+	require.Error(t, err)
+
+	err = mongoRepo.MarkTokenRotated(ctx, "x", time.Hour)
+	require.Error(t, err)
+
+	_, err = mongoRepo.MarkTokenRotatedAtomic(ctx, "x", time.Hour)
+	require.Error(t, err)
+
+	_, err = mongoRepo.IsTokenRotated(ctx, "x")
+	require.Error(t, err)
+
+	_, err = mongoRepo.GetRotationTTL(ctx, "disconnected-token")
+	require.Error(t, err)
+
+	err = mongoRepo.CleanupExpiredRevokedTokens(ctx, AccessToken)
+	require.Error(t, err)
+
+	err = mongoRepo.CleanupExpiredRotatedTokens(ctx)
+	require.Error(t, err)
+
+	_, err = mongoRepo.Stats(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to count revoked tokens")
+}
 
 // TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions is the
 // Phase 4 item 1 regression test for the MarkTokenRotatedAtomic duplicate-key fix.
