@@ -2,6 +2,84 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## v2.2.0
+
+**Breaking changes, despite the minor-looking version number** — see
+[README.md's "Upgrading to v2.2.0"](./README.md#️-upgrading-to-v220-gorm-removed-storage-names-changed)
+for the full migration guide. Part of the gourdian25 ecosystem-wide
+GORM→pgx+sqlc migration.
+
+### Breaking
+
+- **Removed GORM.** `GormTokenRepository` and `NewGourdianTokenMakerWithGorm`
+  are gone, replaced by `PostgresTokenRepository` and
+  `NewGourdianTokenMakerWithPostgres`, built on `pgx/v5` and sqlc-generated
+  queries — no ORM. The new constructor takes a caller-built
+  `*pgxpool.Pool` (which this package never dials itself and never closes
+  except via the repository's own `Close()`) instead of a `*gorm.DB`,
+  matching the shared-pool pattern already used by `grnoti`. Schema
+  (`gourdiantoken_revoked_tokens`, `gourdiantoken_rotated_tokens`) is
+  applied automatically via `CREATE TABLE/INDEX IF NOT EXISTS`, serialized
+  by a Postgres advisory lock so concurrent callers building a repository
+  against the same fresh database don't race on the DDL.
+- **Storage names now carry a `gourdiantoken_`/`gourdiantoken:` prefix**:
+  Postgres tables `revoked_tokens`/`rotated_tokens` →
+  `gourdiantoken_revoked_tokens`/`gourdiantoken_rotated_tokens`; Mongo
+  collections, same rename; Redis key prefixes `revoked:access:` /
+  `revoked:refresh:` / `revoked:verification:` / `rotated:` →
+  `gourdiantoken:revoked:access:` / `gourdiantoken:revoked:refresh:` /
+  `gourdiantoken:revoked:verification:` / `gourdiantoken:rotated:`. **This
+  is a new storage location, not an in-place rename** — upgrading
+  deployments will not see previously-revoked/rotated tokens under the old
+  names unless they migrate the data themselves first. See the README
+  migration guide before deploying this to a system with real users.
+- Removed `gorm.io/gorm` and `gorm.io/driver/postgres` from `go.mod`;
+  `github.com/jackc/pgx/v5` is now a direct dependency (previously
+  indirect, pulled in only by GORM's Postgres driver).
+
+### Changed
+
+- `token.test.helper_test.go`'s repository test factories now skip
+  (`t.Skipf`) rather than hard-fail when a backend service (Redis, Mongo,
+  Postgres) is unreachable, matching the rest of the gourdian25 ecosystem's
+  convention (see `grnoti`).
+- Test/example Mongo database name aligned to `gourdiantoken_test`
+  (previously the inconsistent `gourdian_test`).
+
+### Why the module path is still `/v2`
+
+A real `v3.0.0` release would require Go's tooling-mandated `/v3` import
+path bump, forcing every consumer to update their imports. This library
+has few external consumers today, so that churn isn't justified yet —
+this release ships breaking changes under a `v2.x.y` tag rather than
+following strict semver. A future breaking release will move to `/v3`
+properly if broad compatibility guarantees become necessary.
+
+### Testing
+
+- Root-package coverage raised from an unmeasured baseline (previous
+  full-backend numbers were never actually collected against live
+  services) to 95%+, via direct unit tests for the PEM key parsers'
+  previously-untested branches (certificate fallback paths, type-mismatch
+  errors), the claims-mapping functions in `gourdiantoken.validation.go`
+  (every error branch of `extractCommonClaims`/`mapToAccessClaims`/
+  `mapToRefreshClaims`/`mapToVerificationClaims`/`validateTokenClaims`),
+  repository-layer database-error branches across all four backends
+  (closing the connection/pool/client out from under an otherwise-valid
+  repository to reach error-wrapping code paths that a healthy backend
+  never exercises), and a set of narrow race-window `ctx.Err()` checks in
+  `gourdiantoken.maker.go` (guarding against a context cancelling *between*
+  two checks a few lines apart) reached via a small test-only `context.Context`
+  wrapper that succeeds a controlled number of times before reporting
+  cancelled.
+- Found and documented (not fixed, as it changes atomic-rotation semantics
+  for two backends) a cross-backend inconsistency in
+  `MarkTokenRotatedAtomic`: Postgres and MongoDB's `INSERT ... ON CONFLICT
+  DO NOTHING`/upsert-based implementation treats any existing rotation
+  record as a conflict regardless of whether it has logically expired,
+  while Memory and Redis correctly allow re-marking an expired entry. See
+  `TestMarkTokenRotatedAtomic_ReMarksAfterExpiry`.
+
 ## v2.1.1
 
 Ecosystem-alignment and security pass; no breaking changes.

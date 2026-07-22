@@ -38,7 +38,7 @@ considerations for users are:
   application's responsibility (though `checkFilePermissions` will refuse to
   load a private key file with overly permissive mode bits).
 - **Revocation/rotation state trust**: the `TokenRepository` backends (Redis,
-  Mongo, GORM, in-memory) are trusted stores — gourdiantoken assumes whatever
+  Mongo, Postgres, in-memory) are trusted stores — gourdiantoken assumes whatever
   backend it's pointed at is not tamperable by an attacker. If that store is
   compromised, an attacker can un-revoke or replay tokens; securing the
   backend (network isolation, auth, TLS) is the deployer's job, not this

@@ -4,6 +4,7 @@
 ├── LICENSE
 ├── Makefile
 ├── README.md
+├── SECURITY.md
 ├── concurrency_test.go
 ├── config.validation_test.go
 ├── cryptographic_test.go
@@ -24,15 +25,26 @@
 ├── gourdiantoken.interfaces.go
 ├── gourdiantoken.keys.go
 ├── gourdiantoken.maker.go
-├── gourdiantoken.repository.gorm.imp.go
 ├── gourdiantoken.repository.inmemory.imp.go
 ├── gourdiantoken.repository.mongo.imp.go
 ├── gourdiantoken.repository.mongo_test.go
+├── gourdiantoken.repository.postgres.imp.go
+├── gourdiantoken.repository.postgres_test.go
 ├── gourdiantoken.repository.redis.imp.go
 ├── gourdiantoken.repository_test.go
 ├── gourdiantoken.validation.go
 ├── integration_test.go
+├── internal/
+│   └── postgresdb/
+│       ├── db.go
+│       ├── models.go
+│       ├── querier.go
+│       ├── queries/
+│       │   └── tokens.sql
+│       ├── schema.sql
+│       └── tokens.sql.go
 ├── revocation.rotation_test.go
+├── sqlc.yaml
 ├── token.bench.helper_test.go
 ├── token.creation_test.go
 ├── token.revocation_test.go
@@ -42,4 +54,4 @@
 ├── token.verification_token_test.go
 └── version.go
 
-1 directories, 41 files
+4 directories, 50 files

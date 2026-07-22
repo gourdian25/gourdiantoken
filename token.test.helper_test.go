@@ -7,13 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 func setupTestMaker(t *testing.T) *JWTMaker {
@@ -98,10 +97,12 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 			})
 
 			ctx := context.Background()
-			err := client.Ping(ctx).Err()
-			require.NoError(t, err)
+			if err := client.Ping(ctx).Err(); err != nil {
+				_ = client.Close()
+				t.Skipf("Redis not available at %s, skipping: %v", redisAddr, err)
+			}
 
-			err = client.FlushDB(ctx).Err()
+			err := client.FlushDB(ctx).Err()
 			require.NoError(t, err)
 
 			repo, err := NewRedisTokenRepository(client)
@@ -147,21 +148,23 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 			client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 			require.NoError(t, err)
 
-			err = client.Ping(ctx, nil)
-			require.NoError(t, err)
+			if err := client.Ping(ctx, nil); err != nil {
+				_ = client.Disconnect(ctx)
+				t.Skipf("MongoDB not available at %s, skipping: %v", mongoURI, err)
+			}
 
-			db := client.Database("gourdian_test")
+			db := client.Database("gourdiantoken_test")
 
-			_ = db.Collection("revoked_tokens").Drop(ctx)
-			_ = db.Collection("rotated_tokens").Drop(ctx)
+			_ = db.Collection(mongoRevokedCollectionName).Drop(ctx)
+			_ = db.Collection(mongoRotatedCollectionName).Drop(ctx)
 
 			repo, err := NewMongoTokenRepository(db, false)
 			require.NoError(t, err)
 
 			cleanup := func() {
 				ctx := context.Background()
-				_, _ = db.Collection("revoked_tokens").DeleteMany(ctx, bson.M{})
-				_, _ = db.Collection("rotated_tokens").DeleteMany(ctx, bson.M{})
+				_, _ = db.Collection(mongoRevokedCollectionName).DeleteMany(ctx, bson.M{})
+				_, _ = db.Collection(mongoRotatedCollectionName).DeleteMany(ctx, bson.M{})
 
 				if err := client.Disconnect(ctx); err != nil {
 					t.Logf("cleanup MongoDB Disconnect error: %v", err)
@@ -170,25 +173,32 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 			return repo, cleanup
 		},
 
-		"GORM": func(t *testing.T) (TokenRepository, func()) {
-			postgresDSN := "host=localhost user=postgres_user password=postgres_password dbname=postgres_db port=5432 sslmode=disable"
+		"Postgres": func(t *testing.T) (TokenRepository, func()) {
+			postgresDSN := "host=localhost user=postgres_user password=postgres_password dbname=gourdiantoken_test port=5432 sslmode=disable"
 
-			db, err := gorm.Open(postgres.Open(postgresDSN), &gorm.Config{})
+			ctx := context.Background()
+			pool, err := pgxpool.New(ctx, postgresDSN)
 			require.NoError(t, err)
 
-			_ = db.Exec("TRUNCATE TABLE revoked_tokens RESTART IDENTITY CASCADE")
-			_ = db.Exec("TRUNCATE TABLE rotated_tokens RESTART IDENTITY CASCADE")
+			if err := pool.Ping(ctx); err != nil {
+				pool.Close()
+				t.Skipf("PostgreSQL not available, skipping: %v", err)
+			}
 
-			repo, err := NewGormTokenRepository(db)
+			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_revoked_tokens RESTART IDENTITY CASCADE")
+			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_rotated_tokens RESTART IDENTITY CASCADE")
+
+			repo, err := NewPostgresTokenRepository(ctx, pool)
 			require.NoError(t, err)
 
 			cleanup := func() {
-				_ = db.Exec("TRUNCATE TABLE revoked_tokens RESTART IDENTITY CASCADE")
-				_ = db.Exec("TRUNCATE TABLE rotated_tokens RESTART IDENTITY CASCADE")
+				ctx := context.Background()
+				_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_revoked_tokens RESTART IDENTITY CASCADE")
+				_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_rotated_tokens RESTART IDENTITY CASCADE")
 
-				if gormRepo, ok := repo.(*GormTokenRepository); ok {
-					if err := gormRepo.Close(); err != nil {
-						t.Logf("cleanup GORM Close error: %v", err)
+				if pgRepo, ok := repo.(*PostgresTokenRepository); ok {
+					if err := pgRepo.Close(); err != nil {
+						t.Logf("cleanup Postgres Close error: %v", err)
 					}
 				}
 			}

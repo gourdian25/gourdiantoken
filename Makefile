@@ -7,7 +7,7 @@ VERSION := v2.1.1
 MAIN_PACKAGE := github.com/gourdian25/gourdiantoken/v2
 MODULE := github.com/gourdian25/gourdiantoken/v2
 GO := go
-COVERAGE_MIN := 80
+COVERAGE_MIN := 95
 BUILD_DIR := ./bin
 
 # Help command - displays all available targets

@@ -77,7 +77,7 @@ used together:
 
 ### Storage & Scalability
 
-- **Multiple Backends**: In-memory, Redis, GORM (PostgreSQL/MySQL/SQLite), MongoDB
+- **Multiple Backends**: In-memory, Redis, PostgreSQL (pgx/v5, no ORM), MongoDB
 - **Automatic Cleanup**: Background goroutines remove expired entries
 - **Atomic Operations**: Race-condition-free rotation with compare-and-swap semantics
 - **Production Scale**: Designed for distributed systems and high-throughput APIs
@@ -105,9 +105,8 @@ go get github.com/gourdian25/gourdiantoken/v2@latest
 # For Redis support
 go get github.com/redis/go-redis/v9
 
-# For SQL databases (PostgreSQL, MySQL, SQLite)
-go get gorm.io/gorm
-go get gorm.io/driver/postgres  # or mysql, sqlite
+# For PostgreSQL
+go get github.com/jackc/pgx/v5
 
 # For MongoDB
 go get go.mongodb.org/mongo-driver
@@ -118,6 +117,37 @@ go get go.mongodb.org/mongo-driver
 ## ⬆️ Migrating from v1.x
 
 **v2.0.0 is a breaking release**: `ID`/`Subject`/`SessionID` on `AccessTokenClaims`/`RefreshTokenClaims`, and `Subject`/`SessionID` on `AccessTokenResponse`/`RefreshTokenResponse`, changed from `uuid.UUID` to plain `string`. Likewise, the `userID`/`sessionID` parameters on `CreateAccessToken`/`CreateRefreshToken` are now `string` instead of `uuid.UUID`. Any non-empty string is now accepted — values no longer need to be UUID-shaped. If you were calling `.String()` on these fields, drop that call; they're already strings. See [CHANGELOG.md](./CHANGELOG.md) for the full list of changes, including several non-breaking fixes bundled into this release. Since `google/uuid` is now only used internally (for the token ID / `jti`), v2 consumers who only pass their own string identifiers no longer need to import it themselves at all — it remains a direct dependency of this module only for that internal use.
+
+## ⚠️ Upgrading to v2.2.0 (GORM removed, storage names changed)
+
+**v2.2.0 contains breaking changes despite the minor-looking version bump** — the module path stays `/v2` by choice (see below), but the changes are not backward compatible:
+
+1. **GORM is gone.** `GormTokenRepository` and `NewGourdianTokenMakerWithGorm` no longer exist. Replace them with `PostgresTokenRepository` / `NewGourdianTokenMakerWithPostgres`, which take a `*pgxpool.Pool` you build and own yourself instead of a `*gorm.DB`:
+
+   ```go
+   // Before (v2.1.x)
+   db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+   maker, err := gourdiantoken.NewGourdianTokenMakerWithGorm(ctx, config, db)
+
+   // After (v2.2.0+)
+   pool, _ := pgxpool.New(ctx, dsn)
+   defer pool.Close()
+   maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
+   ```
+
+2. **Storage names changed to a `gourdiantoken`-prefixed convention**, matching the rest of the gourdian25 ecosystem:
+
+   | Storage | Old name | New name |
+   |---|---|---|
+   | Postgres tables | `revoked_tokens`, `rotated_tokens` | `gourdiantoken_revoked_tokens`, `gourdiantoken_rotated_tokens` |
+   | Mongo collections | `revoked_tokens`, `rotated_tokens` | `gourdiantoken_revoked_tokens`, `gourdiantoken_rotated_tokens` |
+   | Redis key prefixes | `revoked:access:`, `revoked:refresh:`, `revoked:verification:`, `rotated:` | `gourdiantoken:revoked:access:`, `gourdiantoken:revoked:refresh:`, `gourdiantoken:revoked:verification:`, `gourdiantoken:rotated:` |
+
+   **This is a new location, not an in-place rename.** Any revoked or rotated tokens recorded under the old names will not be visible after upgrading — previously-revoked tokens could appear valid again until they're revoked a second time or naturally expire. Before deploying this upgrade to a system with real users:
+   - Either migrate existing rows/documents/keys to the new names yourself (a straightforward `INSERT INTO gourdiantoken_revoked_tokens SELECT * FROM revoked_tokens` for Postgres, an equivalent copy for Mongo/Redis), **or**
+   - Accept a one-time revocation-state reset (safe only if you can tolerate previously-revoked tokens being accepted again for the remainder of their natural expiry).
+
+3. **Why the module path didn't change to `/v3`**: Go's own tooling requires a `/v3` import path for a real `v3.0.0` tag, which would force every consumer to update their import statements. Since this library has few external consumers today, that churn wasn't worth it — this release intentionally does not follow strict semver (a breaking change shipped as a `v2.x.y` bump). If that changes and broad compatibility guarantees become necessary, a future breaking release will move to `/v3` properly.
 
 ---
 
@@ -455,7 +485,7 @@ maker, _ := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 |---------|----------|-------------|-------------|-------------|
 | **In-Memory** | Development, Testing | ⚡⚡⚡ | ❌ | ❌ |
 | **Redis** | Production, High-Performance | ⚡⚡⚡ | ✅ (optional) | ✅ |
-| **GORM (SQL)** | Enterprise, Complex Queries | ⚡⚡ | ✅ | ✅ |
+| **PostgreSQL** | Enterprise, Complex Queries | ⚡⚡ | ✅ | ✅ |
 | **MongoDB** | Document-Oriented, Scaling | ⚡⚡ | ✅ | ✅ |
 
 ### 1. No Storage (Stateless)
@@ -527,33 +557,26 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisCli
 - Microservices architectures
 - Real-time applications
 
-### 4. SQL Storage (GORM)
+### 4. PostgreSQL Storage
 
 ```go
-import "gorm.io/driver/postgres"
+import "github.com/jackc/pgx/v5/pgxpool"
 
-db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-maker, err := gourdiantoken.NewGourdianTokenMakerWithGorm(ctx, config, db)
+pool, _ := pgxpool.New(ctx, dsn)
+defer pool.Close()
+maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
 ```
-
-**Supported Databases:**
-
-- PostgreSQL (recommended)
-- MySQL/MariaDB
-- SQLite (development only)
-- SQL Server
-- CockroachDB
 
 **Features:**
 
+- pgx/v5 + sqlc-generated queries — no ORM overhead
 - ACID transactions
-- Complex queries
-- Automatic migrations
-- Connection pooling
+- Schema applied automatically (`CREATE TABLE/INDEX IF NOT EXISTS`, advisory-lock-guarded so concurrent callers don't race)
+- Connection pooling via the caller-provided `*pgxpool.Pool` — share one pool across your whole backend instead of opening a separate one per store
 
 **Best For:**
 
-- Existing SQL infrastructure
+- Existing PostgreSQL infrastructure
 - Complex audit requirements
 - Enterprise applications
 
@@ -1952,7 +1975,7 @@ go tool cover -html=coverage.out -o coverage.html
 
 ### Backend-dependent tests
 
-The `Redis`, `MongoDB`, and `GORM` (Postgres) repository subtests need real
+The `Redis`, `MongoDB`, and `Postgres` repository subtests need real
 local services — see [CLAUDE.md](CLAUDE.md) for exact connection details.
 Start them with:
 
@@ -2047,7 +2070,8 @@ MIT License - see [LICENSE](./LICENSE) file
 - [golang-jwt/jwt](https://github.com/golang-jwt/jwt) - JWT implementation
 - [google/uuid](https://github.com/google/uuid) - UUID support
 - [redis/go-redis](https://github.com/redis/go-redis) - Redis client
-- [gorm.io/gorm](https://github.com/go-gorm/gorm) - ORM framework
+- [jackc/pgx](https://github.com/jackc/pgx) - PostgreSQL driver
+- [sqlc-dev/sqlc](https://github.com/sqlc-dev/sqlc) - typed query code generation
 - [mongodb/mongo-go-driver](https://github.com/mongodb/mongo-go-driver) - MongoDB driver
 
 ---

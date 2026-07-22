@@ -6,9 +6,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/mongo"
-	"gorm.io/gorm"
 )
 
 // NewGourdianTokenMakerNoStorage creates a GourdianTokenMaker without any token storage backend.
@@ -180,53 +180,47 @@ func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenCo
 	return NewGourdianTokenMaker(ctx, config, tokenRepo, opts...)
 }
 
-// NewGourdianTokenMakerWithGorm creates a GourdianTokenMaker with a GORM-based token repository.
-// This supports any database that GORM supports (PostgreSQL, MySQL, SQLite, etc.).
-// Suitable for production deployments with persistent token revocation and rotation tracking.
+// NewGourdianTokenMakerWithPostgres creates a GourdianTokenMaker with a
+// PostgreSQL-based token repository (pgx/v5, sqlc-generated queries).
+// Suitable for production deployments with persistent token revocation and
+// rotation tracking.
 //
 // Use Cases:
-//   - Production applications with existing SQL databases
+//   - Production applications with an existing PostgreSQL database
 //   - Applications requiring ACID compliance for token operations
-//   - Systems with complex relational data models
 //   - Environments where SQL expertise exists
-//   - Applications requiring complex queries for token analytics
-//
-// Supported Databases:
-//   - PostgreSQL (recommended for production)
-//   - MySQL/MariaDB
-//   - SQLite (development only)
-//   - SQL Server
-//   - CockroachDB
 //
 // Performance Characteristics:
-//   - Good read/write performance with proper indexing
-//   - Network latency to database
-//   - Supports connection pooling
-//   - Transaction support for data consistency
+//   - Good read/write performance with proper indexing (schema ships with
+//     composite/expiry indexes out of the box)
+//   - Connection pooling via the caller-provided *pgxpool.Pool
+//   - No ORM overhead — hand-written queries via sqlc
 //
 // Setup Requirements:
-//   - Database migrations run automatically
-//   - Proper indexes created for performance
-//   - Database connection pooling configured
-//   - Regular maintenance (vacuum/optimize) for SQL databases
+//   - Schema is applied automatically (CREATE TABLE/INDEX IF NOT EXISTS),
+//     serialized by a Postgres advisory lock so concurrent callers building
+//     a repository against the same fresh database don't race on the DDL
+//   - The caller builds and owns the *pgxpool.Pool — share one pool across
+//     your backend instead of each store opening its own; see
+//     docs/postgres.md for the recommended pattern
 //
 // Parameters:
 //   - ctx: Context for initialization (cancellation, timeout support)
 //   - config: Configuration for the token maker
-//   - db: Initialized GORM database instance with connection to target database
+//   - pool: An already-constructed *pgxpool.Pool connected to PostgreSQL
 //
 // Returns:
-//   - GourdianTokenMaker: A configured token maker instance with GORM storage
-//   - error: If database connection fails, migration fails, configuration is invalid,
-//     or context is cancelled
+//   - GourdianTokenMaker: A configured token maker instance with Postgres storage
+//   - error: If the connectivity check fails, schema application fails,
+//     configuration is invalid, or context is cancelled
 //
-// Example (PostgreSQL production):
+// Example:
 //
-//	// Initialize GORM first
-//	gormDB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+//	pool, err := pgxpool.New(ctx, dsn)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
+//	defer pool.Close()
 //
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
@@ -244,45 +238,22 @@ func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenCo
 //	    CleanupInterval: 24 * time.Hour,
 //	}
 //
-//	maker, err := gourdiantoken.NewGourdianTokenMakerWithGorm(ctx, config, gormDB)
+//	maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//
-// Example (SQLite development):
-//
-//	gormDB, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
-//	config := gourdiantoken.GourdianTokenConfig{
-//	    SigningMethod: gourdiantoken.Symmetric,
-//	    Algorithm: "HS256",
-//	    SymmetricKey: "dev-key-for-sqlite-testing",
-//	    Issuer: "dev-auth",
-//	    Audience: []string{"dev-api"},
-//	    RevocationEnabled: true,
-//	    RotationEnabled: true,
-//	    AccessExpiryDuration: 1 * time.Hour,
-//	    RefreshExpiryDuration: 24 * time.Hour,
-//	    CleanupInterval: 6 * time.Hour,
-//	}
-//
-//	maker, err := gourdiantoken.NewGourdianTokenMakerWithGorm(ctx, config, gormDB)
-func NewGourdianTokenMakerWithGorm(ctx context.Context, config GourdianTokenConfig, db *gorm.DB, opts ...Option) (GourdianTokenMaker, error) {
+func NewGourdianTokenMakerWithPostgres(ctx context.Context, config GourdianTokenConfig, pool *pgxpool.Pool, opts ...Option) (GourdianTokenMaker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
 
-	if db == nil {
-		return nil, fmt.Errorf("gorm database instance cannot be nil")
+	if pool == nil {
+		return nil, fmt.Errorf("pgx pool cannot be nil")
 	}
 
-	// Create GORM-based repository
-	tokenRepo, err := NewGormTokenRepository(db)
+	tokenRepo, err := NewPostgresTokenRepository(ctx, pool)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize GORM token repository: %w", err)
+		return nil, fmt.Errorf("failed to initialize Postgres token repository: %w", err)
 	}
 
 	return NewGourdianTokenMaker(ctx, config, tokenRepo, opts...)
@@ -378,7 +349,7 @@ func NewGourdianTokenMakerWithGorm(ctx context.Context, config GourdianTokenConf
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 //
-// Note: unlike its NewGourdianTokenMakerWithGorm/WithRedis siblings, this factory takes
+// Note: unlike its NewGourdianTokenMakerWithPostgres/WithRedis siblings, this factory takes
 // an extra transactionsEnabled positional parameter, breaking the otherwise-consistent
 // (ctx, config, handle) shape shared by the other backend factories. This is a known
 // inconsistency, flagged here rather than fixed — changing it would require an options

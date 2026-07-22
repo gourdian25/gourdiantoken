@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	mongoRevokedCollectionName = "revoked_tokens"
-	mongoRotatedCollectionName = "rotated_tokens"
+	mongoRevokedCollectionName = "gourdiantoken_revoked_tokens"
+	mongoRotatedCollectionName = "gourdiantoken_rotated_tokens"
 )
 
 // tokenDocument represents a token entry in MongoDB.
@@ -553,7 +553,7 @@ func (r *MongoTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token
 		// value, making commit behavior driver-version-dependent if handled internally.
 		// Checking after withTransaction returns means the transaction has already been
 		// aborted/rolled back, and "already rotated by someone else" is decided cleanly at
-		// the outer boundary — the same pattern Redis's SetNX and GORM's OnConflict use.
+		// the outer boundary — the same pattern Redis's SetNX and Postgres's ON CONFLICT use.
 		if mongo.IsDuplicateKeyError(err) {
 			return false, nil
 		}

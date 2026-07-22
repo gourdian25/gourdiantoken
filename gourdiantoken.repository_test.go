@@ -1988,10 +1988,10 @@ func TestRepositoryStats_AllBackends(t *testing.T) {
 				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
 				assert.EqualValues(t, 1, stats["rotated_tokens"])
 				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
-			case "GORM":
-				gormRepo, ok := repo.(*GormTokenRepository)
+			case "Postgres":
+				pgRepo, ok := repo.(*PostgresTokenRepository)
 				require.True(t, ok)
-				stats, err := gormRepo.Stats(ctx)
+				stats, err := pgRepo.Stats(ctx)
 				require.NoError(t, err)
 				assert.EqualValues(t, 1, stats["revoked_access_tokens"])
 				assert.EqualValues(t, 1, stats["revoked_refresh_tokens"])
@@ -2044,39 +2044,39 @@ func TestMarkTokenRotatedAtomic_AllBackends(t *testing.T) {
 	}
 }
 
-// TestGormRepository_CleanupAll verifies the GORM-specific CleanupAll convenience
+// TestPostgresRepository_CleanupAll verifies the Postgres-specific CleanupAll convenience
 // method sweeps expired access, refresh, and verification revocations plus expired
 // rotation records in one call.
-func TestGormRepository_CleanupAll(t *testing.T) {
+func TestPostgresRepository_CleanupAll(t *testing.T) {
 	factories := getTestRepositoryFactories()
-	factory, ok := factories["GORM"]
+	factory, ok := factories["Postgres"]
 	require.True(t, ok)
 
 	repo, cleanup := factory(t)
 	defer cleanup()
 
-	gormRepo, ok := repo.(*GormTokenRepository)
+	pgRepo, ok := repo.(*PostgresTokenRepository)
 	require.True(t, ok)
 
 	ctx := context.Background()
-	require.NoError(t, gormRepo.MarkTokenRevoke(ctx, AccessToken, "cleanup-all-access", 50*time.Millisecond))
-	require.NoError(t, gormRepo.MarkTokenRevoke(ctx, RefreshToken, "cleanup-all-refresh", 50*time.Millisecond))
-	require.NoError(t, gormRepo.MarkTokenRevoke(ctx, VerificationToken, "cleanup-all-verification", 50*time.Millisecond))
-	require.NoError(t, gormRepo.MarkTokenRotated(ctx, "cleanup-all-rotated", 50*time.Millisecond))
+	require.NoError(t, pgRepo.MarkTokenRevoke(ctx, AccessToken, "cleanup-all-access", 50*time.Millisecond))
+	require.NoError(t, pgRepo.MarkTokenRevoke(ctx, RefreshToken, "cleanup-all-refresh", 50*time.Millisecond))
+	require.NoError(t, pgRepo.MarkTokenRevoke(ctx, VerificationToken, "cleanup-all-verification", 50*time.Millisecond))
+	require.NoError(t, pgRepo.MarkTokenRotated(ctx, "cleanup-all-rotated", 50*time.Millisecond))
 
 	time.Sleep(100 * time.Millisecond)
 
-	require.NoError(t, gormRepo.CleanupAll(ctx))
+	require.NoError(t, pgRepo.CleanupAll(ctx))
 
-	revoked, err := gormRepo.IsTokenRevoked(ctx, AccessToken, "cleanup-all-access")
+	revoked, err := pgRepo.IsTokenRevoked(ctx, AccessToken, "cleanup-all-access")
 	require.NoError(t, err)
 	assert.False(t, revoked)
 
-	revoked, err = gormRepo.IsTokenRevoked(ctx, VerificationToken, "cleanup-all-verification")
+	revoked, err = pgRepo.IsTokenRevoked(ctx, VerificationToken, "cleanup-all-verification")
 	require.NoError(t, err)
 	assert.False(t, revoked)
 
-	rotated, err := gormRepo.IsTokenRotated(ctx, "cleanup-all-rotated")
+	rotated, err := pgRepo.IsTokenRotated(ctx, "cleanup-all-rotated")
 	require.NoError(t, err)
 	assert.False(t, rotated)
 }
@@ -2104,7 +2104,7 @@ func TestMemoryRepository_Close(t *testing.T) {
 	assert.NoError(t, err, "operations should work after close")
 }
 
-// TestRepositoryClose_Idempotent verifies that Close() on the Redis, GORM, and MongoDB
+// TestRepositoryClose_Idempotent verifies that Close() on the Redis, Postgres, and MongoDB
 // repository backends is safe to call more than once, mirroring the coverage
 // TestMemoryRepository_Close already provides for MemoryTokenRepository. Prior to this test,
 // only MemoryTokenRepository.Close() had any test coverage at all.
@@ -2124,7 +2124,7 @@ func TestRepositoryClose_Idempotent(t *testing.T) {
 			switch r := repo.(type) {
 			case *RedisTokenRepository:
 				closeFn = r.Close
-			case *GormTokenRepository:
+			case *PostgresTokenRepository:
 				closeFn = r.Close
 			case *MongoTokenRepository:
 				closeFn = func() error { return r.Close(context.Background()) }
