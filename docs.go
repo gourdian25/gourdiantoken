@@ -125,16 +125,22 @@
 // # Functional Options
 //
 // Option (type Option func(*JWTMaker)) configures optional JWTMaker behavior
-// at construction time. As of this version there is exactly one:
-// WithLogger(logf func(format string, args ...any)) Option, which redirects
-// error reports from the background cleanup goroutines away from the
-// default fmt.Printf-based logger. logf is a bare printf-style callback — it
-// is NOT the shared gourdian25-ecosystem Logger interface
-// (Infof/Warnf/Errorf(format string, args ...interface{})) implemented by
-// *grlog.Logger and consumed by grcache/grevents/graudit/grpolicy. A caller
-// migrating from one of those libraries cannot pass a *grlog.Logger directly;
-// adapt it, e.g. WithLogger(func(format string, args ...any) {
-// grlogger.Errorf(format, args...) }).
+// at construction time. There are two logging-related options:
+//
+// WithLogger(logf func(format string, args ...any)) Option is the
+// original hook, predating the rest of the ecosystem's logging convention.
+// It redirects error reports from the background cleanup goroutines away
+// from the default fmt.Printf-based logger. logf is a bare printf-style
+// callback.
+//
+// WithStructuredLogger(logger Logger) Option is additive: Logger
+// (Debug/Info/Warn/Error(msg string, args ...any)) matches *slog.Logger's
+// own signatures exactly — the same shape grcache/grevents/graudit/grpolicy/
+// grnoti's own Logger interfaces use — so *slog.Logger, including one
+// backed by grlog via slog.New(grlog.NewSlogHandler(...)), satisfies it
+// with no adapter. When set, it is used instead of logf for the same two
+// background-cleanup error reports; when unset, logf's existing behavior
+// is completely unchanged.
 //
 // # Thread Safety and Context Handling
 //

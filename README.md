@@ -534,7 +534,8 @@ maker, _ := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB, t
 ### Functional Options: `WithLogger`
 
 Every constructor (`NewGourdianTokenMaker` and all `NewGourdianTokenMakerWith*`
-factories) accepts variadic `...Option`. There is currently exactly one:
+factories) accepts variadic `...Option`. `WithLogger` is the original
+logging hook, predating the rest of the ecosystem's convention:
 
 ```go
 maker, err := gourdiantoken.NewGourdianTokenMakerWithRedis(
@@ -547,20 +548,37 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithRedis(
 
 `WithLogger` redirects error reports from the background cleanup goroutines
 away from the default `fmt.Printf`-based logger. Its signature is a bare
-`func(format string, args ...any)` printf-style callback.
+`func(format string, args ...any)` printf-style callback. It is unchanged
+and continues to work exactly as before — see `WithStructuredLogger` below
+for a second, additive option that plugs directly into the rest of the
+ecosystem's logging convention.
 
-> **Not the ecosystem `Logger` interface.** grcache, grevents, graudit, and
-> grpolicy all accept a shared `Logger` interface
-> (`Infof`/`Warnf`/`Errorf(format string, args ...interface{})`) that
-> `*grlog.Logger` satisfies directly. `gourdiantoken.Option`/`WithLogger`
-> predates that convention and is **not** the same interface — you cannot
-> pass a `*grlog.Logger` straight in. Adapt it instead:
->
-> ```go
-> gourdiantoken.WithLogger(func(format string, args ...any) {
->     grlogger.Errorf(format, args...) // *grlog.Logger, or any Errorf-shaped method
-> })
-> ```
+### Functional Options: `WithStructuredLogger`
+
+grcache, grevents, graudit, grpolicy, and grnoti all accept a shared
+`Logger` interface (`Debug`/`Info`/`Warn`/`Error(msg string, args ...any)`)
+matching `*slog.Logger`'s own signatures. `gourdiantoken.WithStructuredLogger`
+accepts the same shape:
+
+```go
+import (
+    "log/slog"
+
+    "github.com/gourdian25/grlog"
+)
+
+logger := slog.New(grlog.NewSlogHandler(grlog.NewDefaultLogger()))
+
+maker, err := gourdiantoken.NewGourdianTokenMakerWithRedis(
+    ctx, config, redisClient,
+    gourdiantoken.WithStructuredLogger(logger), // *slog.Logger satisfies Logger directly
+)
+```
+
+When set, it's used instead of `WithLogger`'s `logf` callback for the same
+two background-cleanup error reports; when unset, `logf`'s behavior is
+completely unaffected. The two options are independent — set one, the
+other, both, or neither.
 
 ---
 

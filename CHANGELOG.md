@@ -2,6 +2,22 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `WithStructuredLogger(logger Logger) Option` — a new, additive logging
+  hook alongside the existing `WithLogger`. `Logger`
+  (`Debug`/`Info`/`Warn`/`Error(msg string, args ...any)`) matches
+  `*slog.Logger`'s own signatures, the same shape now used by
+  grcache/grevents/graudit/grpolicy/grnoti's own `Logger` interfaces, so
+  `*slog.Logger` — including one backed by grlog via
+  `slog.New(grlog.NewSlogHandler(...))` — satisfies it with no adapter.
+  When set, it's used instead of `WithLogger`'s `logf` callback for the two
+  background-cleanup error reports; when unset, `logf`'s existing behavior
+  is completely unchanged. No breaking changes — `WithLogger`/`Option`/
+  `logf` are untouched.
+
 ## v2.2.0
 
 **Breaking changes, despite the minor-looking version number** — see
