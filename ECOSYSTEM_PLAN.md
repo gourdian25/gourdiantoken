@@ -14,8 +14,8 @@
 | Stage 0 | Docker test infra (all repos) | ✅ Done |
 | Stage 1 | grlog, gourdiantoken | ✅ Done |
 | Stage 2 | grevents, grpolicy, grcache | ✅ Done |
-| Stage 3 | graudit | ⬜ Not started |
-| Stage 4 | grnoti (touch-ups) | ⬜ Not started |
+| Stage 3 | graudit | ✅ Done |
+| Stage 4 | grnoti (touch-ups) | ✅ Done |
 
 ## Context
 
@@ -231,32 +231,123 @@ test factory. Coverage raised 84.7-96.7% (per-subpackage) →
 against real Docker containers. `make ci`/race clean; `example/` runs
 successfully against all 5 live backends.
 
-## Stage 3 (Tier 2) — graudit ⬜ Not started
+## Stage 3 (Tier 2) — graudit ✅ Done
 
-Flatten `postgres/`, `mongostore/`, `memory/`, `conformance/` into root
-package (`postgres.go`, `mongo.go`, `memory.go`). Replace GORM with
-pgx+sqlc (schema.sql for the audit-entry table; the one existing raw
-`pg_advisory_xact_lock` Exec carries over naturally since everything is
-raw SQL via pgx now anyway). Update graudit's Mongo backend to the
-authenticated-replica-set standard for its primary usage, while preserving
-its **separate, deliberate** standalone-required regression test pointed
-at Stage 0's no-auth standalone container — this test's hard-fail-if-
-skipped nature is a documented, intentional exception to the
-skip-gracefully convention adopted everywhere else. Fix stale
-`CLAUDE.md`/`docs/architecture.md` `mongo`→`mongostore` references (moot
-post-flattening — rewrite to describe the new flat shape + pgx backend).
-Raise coverage 89.9%/91.7% → 95%+ merged, with real postgres/mongo numbers
-against live standardized containers. General bug-fix pass.
+Flattened `postgres/`, `mongostore/`, `memory/`, `conformance/` into the
+root package (`postgres.go`, `mongo.go`, `memory.go`,
+`contract_audit_test.go`), the same shape every other flattened repo in
+the ecosystem now uses. Each backend's concrete `AuditLog` implementation
+had to be renamed (`memoryAuditLog`/`postgresAuditLog`/`mongoAuditLog`,
+unexported) since all three previously named their own struct plain
+`AuditLog` in separate packages — a collision once merged into one
+package alongside the shared, exported `AuditLog` interface.
 
-## Stage 4 (Tier 3) — grnoti touch-ups ⬜ Not started
+Replaced GORM with pgx/v5 + sqlc (`internal/postgresdb`, generated from a
+new `schema.sql`/`queries/audit.sql`), matching gourdiantoken's, grnoti's,
+and grcache's own Postgres backend pattern. `EntryID` is still explicitly
+assigned inside the same `pg_advisory_xact_lock`-held transaction as
+before (never `BIGSERIAL`); a *second*, distinct advisory lock
+(`grauditSchemaLockKey`, `5_198_204_733`) now serializes schema
+application at connect time, separate from the existing per-Record
+`chainLockKey`. `QueryFilter`'s dynamic multi-condition filtering (any
+combination of ActorID/EntityType/EntityID/From/To/Limit) was implemented
+as one sqlc query using `sqlc.narg()` nullable parameters — no prior repo
+in the ecosystem had needed this pattern before.
 
-Already flat, already pgx+sqlc, already 94.9% coverage — only remaining
-work is adopting Stage 0's standardized authenticated Mongo (currently
-assumes no-auth standalone): update the Mongo connection config in
-`tokenstore.mongo.go`/`dlq.mongo.go`-equivalent, its `CLAUDE.md` docker
-commands, and test constants. Nudge coverage past 95% if any easy gaps
-remain. Confirm `docs/postgres.md` still reads correctly — no changes
-expected there.
+Updated graudit's Mongo backend test suite to the workspace's standardized
+**authenticated** single-node replica set (`root`/`mongo_password` on
+27018), matching grcache's/gourdiantoken's own connection string exactly,
+while preserving the separate, deliberately no-auth standalone container
+(27019) required by `TestNewMongoAuditLog_RequiresReplicaSet` — that
+test's hard-fail-if-skipped nature remains a documented, intentional
+exception to the skip-gracefully convention adopted everywhere else.
+
+**A real test-coverage gap found and fixed** (not a behavioral bug — the
+implementation was already correct): `Verify()`'s "Check B" (chain-linkage
+integrity — each entry's stored `PrevHash` must equal the immediately
+preceding entry's stored `Hash`) had no dedicated regression test on any
+of the three backends. The shared contract suite's `VerifyDetectsTamper`
+scenario only ever corrupts a stored entry's `Payload` (exercising "Check
+A", per-entry hash integrity) — never `PrevHash` directly. Added
+`Test<Backend>AuditLog_VerifyDetectsChainLinkageBreak` for all three
+backends, directly corrupting `PrevHash` via each backend's own
+tamper mechanism (raw SQL, raw driver call, direct struct mutation) and
+confirming `Verify` correctly localizes the break.
+
+Also removed two lines of genuinely dead code found during the coverage
+pass: `encodeCanonical`'s two `json.Marshal`-of-a-plain-Go-string error
+checks can never fail (marshaling a Go string never errors) — deleted
+per the "don't add error handling for scenarios that can't happen"
+convention, rather than defended with a permanent-gap comment.
+
+Coverage raised 89.9%/91.7% (previous per-subpackage numbers) → **95.2%**
+merged, via a new white-box `internal_coverage_test.go` using the
+established close-the-connection-out-from-under-it technique plus three
+deliberate-fault-injection tests unique to this repo: a Postgres `CHECK
+(false)` constraint added directly to reject an insert mid-Record, a
+MongoDB collection validator added directly to reject the chain-state
+upsert, and a table dropped out from under an already-open connection
+pool (each restoring the schema/removing the constraint/validator
+afterward so later tests aren't affected). A handful of branches remain
+documented as permanently unreachable (e.g. `DecodeStoredPayload`'s error
+branch on the Postgres backend — a `jsonb` column guarantees valid JSON
+at the type level, so SQL-level corruption can never produce an
+undecodable payload there) rather than force-covered.
+
+`go build`/`go vet`/`golangci-lint run` (0 issues, including one new
+class of finding — gosec G115 flagging the `EntryID`(uint64)⟷Postgres-
+`bigint`(int64) conversions introduced by the pgx rewrite, fixed via two
+small, well-documented `pgEntryID`/`toPgEntryID` helpers rather than
+scattering `//nolint` comments) and `-race` all clean. `example/` runs
+correctly end-to-end. `bark tag` run from the repo root correctly
+prepended `// File:` headers to all four sqlc-generated files with no
+debris.
+
+## Stage 4 (Tier 3) — grnoti touch-ups ✅ Done
+
+Already flat, already pgx+sqlc — the only structural work was adopting
+Stage 0's standardized authenticated containers. `MongoTokenStoreConfig`/
+`MongoDLQHandlerConfig`/`RedisRateLimiterConfig`/`grcache.RedisConfig`
+already accepted arbitrary URIs/passwords, so no production code needed
+changing for auth — only test constants: `testMongoURI`
+(`tokenstore.mongo_test.go`) moved from the old no-auth
+`mongodb://localhost:27017` to the workspace-standard
+`mongodb://root:mongo_password@localhost:27018/?directConnection=true`
+(confirmed, like graudit/grcache/gourdiantoken, that `directConnection=
+true` alone suffices — no `replicaSet=rs0`/`authSource=admin` needed on
+the connection string itself, even though the container is a real
+authenticated replica set); a new `testRedisPassword` constant
+(`ratelimiter.redis_test.go`) wired into every Redis-backed test
+(rate-limiter and the `grcache`-backed cache adapter tests). `CLAUDE.md`'s
+connection-info table updated to drop the "not yet wired in" caveats it
+had carried since Stage 0.
+
+Also found and fixed along the way: `cache_test.go`/`cache.redis_test.go`/
+`service_test.go`/`example/main.go` were still importing grcache's
+pre-flattening `grcache/memory`/`grcache/redis` subpackages — stale since
+Stage 2 flattened grcache into a single package and tagged it as v0.2.0
+(the version grnoti's `go.mod` already pinned). These were realigned to
+`grcache.NewMemoryCache`/`grcache.NewRedisCache`.
+
+Coverage was 94.9% before this stage; two genuine small gaps were closed
+(`fcmPayloadValidator.EstimateSize`'s `ImageURL`-set branch untested;
+`applyPostgresSchema`'s `pool.Acquire` failure branch untested, closed via
+a closed-pool fault-injection test) bringing it to 95.1% — `COVERAGE_MIN`
+in the `Makefile` raised from 90 to 95 to match every other repo's own
+gate. Two remaining error branches in `applyPostgresSchema` (the
+advisory-lock and schema-apply `Exec` calls) are left as a documented,
+accepted gap — reachable only via a connection breaking mid-function,
+which isn't deterministically triggerable against a live Postgres without
+a flaky timing race (confirmed empirically: a canceled/deadline context
+sometimes fails at `Acquire` and sometimes at the first `Exec`,
+non-deterministically, depending on timing).
+
+`docs/postgres.md` doesn't reference Mongo/Redis at all, so it needed no
+changes. Full validation: `go build`/`vet`/`golangci-lint` (0 issues),
+`go test -race .` clean, `make coverage-check` → "OK: 95.1%", every
+Mongo- and Redis-backed test passing against the real authenticated
+containers (not skipped), `example/` builds and runs end-to-end, `bark
+check` reports all headers current.
 
 ## Cross-cutting, every stage
 
