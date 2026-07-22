@@ -2,7 +2,12 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
-## [Unreleased]
+## v2.2.0
+
+**Breaking changes, despite the minor-looking version number** — see
+[README.md's "Upgrading to v2.2.0"](./README.md#️-upgrading-to-v220-gorm-removed-storage-names-changed)
+for the full migration guide. Part of the gourdian25 ecosystem-wide
+GORM→pgx+sqlc migration.
 
 ### Added
 
@@ -15,15 +20,8 @@ All notable changes to `gourdiantoken` are documented in this file.
   `slog.New(grlog.NewSlogHandler(...))` — satisfies it with no adapter.
   When set, it's used instead of `WithLogger`'s `logf` callback for the two
   background-cleanup error reports; when unset, `logf`'s existing behavior
-  is completely unchanged. No breaking changes — `WithLogger`/`Option`/
-  `logf` are untouched.
-
-## v2.2.0
-
-**Breaking changes, despite the minor-looking version number** — see
-[README.md's "Upgrading to v2.2.0"](./README.md#️-upgrading-to-v220-gorm-removed-storage-names-changed)
-for the full migration guide. Part of the gourdian25 ecosystem-wide
-GORM→pgx+sqlc migration.
+  is completely unchanged. No breaking changes of its own — `WithLogger`/
+  `Option`/`logf` are untouched.
 
 ### Breaking
 
