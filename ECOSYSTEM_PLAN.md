@@ -13,7 +13,7 @@
 |---|---|---|
 | Stage 0 | Docker test infra (all repos) | ✅ Done |
 | Stage 1 | grlog, gourdiantoken | ✅ Done |
-| Stage 2 | grevents, grpolicy, grcache | ⬜ Not started |
+| Stage 2 | grevents, grpolicy, grcache | ✅ Done |
 | Stage 3 | graudit | ⬜ Not started |
 | Stage 4 | grnoti (touch-ups) | ⬜ Not started |
 
@@ -177,30 +177,59 @@ Coverage raised 88.3% → **95.0-95.1%**. All tests/race/lint clean.
   reproducible in isolation) — attributed to environmental timing, not a
   regression from this stage's changes.
 
-## Stage 2 (Tier 1) — grevents, grcache, grpolicy ⬜ Not started
+## Stage 2 (Tier 1) — grevents, grcache, grpolicy ✅ Done
 
-**grevents**: already flat, no DB, already 95.2% coverage. Work: read
-`conformance/conformance.go` and fold it into root-package test files
-(mirroring grnoti's `contract_*_test.go` pattern); general bug-fix pass.
+**grevents**: folded `conformance/conformance.go` into root-package
+`contract_bus_test.go` (`runBusContract`/`TestBus_Contract`), dropping the
+vestigial unused `RunOption` extension point in the process. Found and
+fixed a real bug: `Bus.Close()` never closed a caller-supplied
+`DeadLetterSink` for a sync-only bus (sync mode never delivers through it,
+but a caller who wired one up via `WithDeadLetterSink` still expects
+`Close` to release it). Coverage raised 94.9% → **100%**. Stale
+"pre-implementation" `CLAUDE.md` (the repo was already fully built)
+rewritten to describe the actual shipped architecture. `make ci`/race
+clean.
 
-**grpolicy**: fold `conformance/` into root-package test files the same
-way; raise coverage 88.7% → 95%+; general bug-fix pass. No DB, no GORM —
-smallest repo in this stage.
+**grpolicy**: folded `conformance/conformance.go` into root-package
+`contract_engine_test.go` (`runEngineContract`/`TestEngine_Contract`),
+same vestigial-option cleanup. Found and fixed two real bugs: (1)
+`evalArray`/`evalArgs` didn't stub not-yet-reached elements/arguments in
+`Decision.Trace` when an earlier one failed, unlike every binary operator's
+own eval* function, which already did this for its unevaluated sibling —
+inconsistent partial-trace shape; (2) `Compile`'s non-identifier-call-target
+rejection (e.g. `a.b()`) wrapped no sentinel at all, so
+`errors.Is(err, ErrCompileFailed)` returned false for it. Coverage raised
+88.7% → **99.8%** (two branches accepted as permanent gaps: a structurally
+unreachable defensive check in `policyCache.put`, and `noopLogger`'s
+empty-bodied methods — a Go tooling artifact for zero-statement functions).
+`make ci`/race clean.
 
-**grcache** (biggest lift in this tier): flatten `postgres/`, `mongostore/`,
-`redis/`, `memcached/`, `memory/`, and `conformance/` into the root package.
-Single concern ("cache"), so files become `postgres.go`, `mongo.go`,
-`redis.go`, `memcached.go`, `memory.go` directly (flattening incidentally
-resolves the `mongo`→`mongostore` rename-for-collision issue). Replace GORM
-with pgx+sqlc (new schema.sql for `cache_entry`/`cache_entry_tag`, same
-advisory-lock schema-apply pattern). Fix the latent bug in Makefile's
-`coverage-check` (`./mongo` doesn't exist, silently mis-measuring coverage)
-— moot once flattened. Standardize Docker info; fix redis test's fragile
-pass (currently working by accident against a differently-configured Redis);
-adopt skip-gracefully convention; add memcached value-key prefix (mirroring
-`redis.go`'s `valuePrefix`/`tagPrefix` pattern — the one internal naming gap
-found); raise coverage to 95%+ with all 5 backends genuinely live; general
-bug-fix pass.
+**grcache** (biggest lift in this tier): flattened `postgres/`,
+`mongostore/`, `redis/`, `memcached/`, `memory/`, and `conformance/` into
+the root package (`postgres.go`, `mongo.go`, `redis.go`, `memcached.go`,
+`memory.go`, `contract_cache_test.go`) — each backend's former exported
+`Cache` struct renamed to an unexported `<backend>Cache` to avoid colliding
+with the shared `Cache` interface now in the same package; the
+`mongostore`→`mongo` rename-for-collision issue resolved incidentally,
+since a file isn't a separate importable package. Replaced GORM with
+pgx/v5 + sqlc (`internal/postgresdb`, schema for `grcache_entries`/
+`grcache_entry_tags`, advisory-lock schema-apply pattern matching
+gourdiantoken/grnoti; `expires_at` changed from GORM's zero-time convention
+to a genuine nullable `TIMESTAMPTZ`). Fixed the latent Makefile
+`coverage-check` bug (iterated over a stale `./mongo` entry that never
+matched the actual `mongostore` directory, silently under-measuring
+coverage every run) — moot now that there's one package. Fixed the real
+memcached value-key prefix gap (cache values were stored bare; only
+tag-list keys were namespaced) by adding `memcachedValuePrefix =
+"grcache:val:"`, applied consistently to Get/Set/Delete/Exists/
+InvalidateTag. Re-verified the "redis test fragility" flagged during
+research predates Stage 0's Docker standardization — confirmed genuinely
+passing against the now-standardized shared container, not by accident.
+Adopted the skip-gracefully convention across every networked backend's
+test factory. Coverage raised 84.7-96.7% (per-subpackage) →
+**95.6%** (root package, aggregate) with all 5 backends genuinely live
+against real Docker containers. `make ci`/race clean; `example/` runs
+successfully against all 5 live backends.
 
 ## Stage 3 (Tier 2) — graudit ⬜ Not started
 
