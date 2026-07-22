@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	revokedAccessPrefix       = "revoked:access:"
-	revokedRefreshPrefix      = "revoked:refresh:"
-	revokedVerificationPrefix = "revoked:verification:"
-	rotatedPrefix             = "rotated:"
+	revokedAccessPrefix       = "gourdiantoken:revoked:access:"
+	revokedRefreshPrefix      = "gourdiantoken:revoked:refresh:"
+	revokedVerificationPrefix = "gourdiantoken:revoked:verification:"
+	rotatedPrefix             = "gourdiantoken:rotated:"
 
 	// Minimum TTL to avoid Redis timing issues
 	// Redis has millisecond precision but very short TTLs can cause race conditions
@@ -137,7 +137,7 @@ func NewRedisTokenRepository(client *redis.Client) (TokenRepository, error) {
 //
 // Redis Operation:
 //   - SET key value EX seconds
-//   - Key format: "revoked:access:{hash}" or "revoked:refresh:{hash}"
+//   - Key format: "gourdiantoken:revoked:access:{hash}" or "gourdiantoken:revoked:refresh:{hash}"
 //   - Value: "1" (simple marker)
 //   - TTL: Automatic expiration after specified duration
 //
@@ -171,7 +171,7 @@ func NewRedisTokenRepository(client *redis.Client) (TokenRepository, error) {
 //
 // Redis Command:
 //
-//	SET revoked:access:token_hash "1" EX 900
+//	SET gourdiantoken:revoked:access:token_hash "1" EX 900
 func (r *RedisTokenRepository) MarkTokenRevoke(ctx context.Context, tokenType TokenType, token string, ttl time.Duration) error {
 	if token == "" {
 		return fmt.Errorf("token cannot be empty")
@@ -250,7 +250,7 @@ func (r *RedisTokenRepository) MarkTokenRevoke(ctx context.Context, tokenType To
 //
 // Redis Command:
 //
-//	GET revoked:access:token_hash
+//	GET gourdiantoken:revoked:access:token_hash
 func (r *RedisTokenRepository) IsTokenRevoked(ctx context.Context, tokenType TokenType, token string) (bool, error) {
 	if token == "" {
 		return false, fmt.Errorf("token cannot be empty")
@@ -293,7 +293,7 @@ func (r *RedisTokenRepository) IsTokenRevoked(ctx context.Context, tokenType Tok
 //
 // Redis Operation:
 //   - SET key value EX seconds
-//   - Key format: "rotated:{hash}"
+//   - Key format: "gourdiantoken:rotated:{hash}"
 //   - Value: "1" (simple marker)
 //   - TTL: Automatic expiration after specified duration
 //
@@ -314,7 +314,7 @@ func (r *RedisTokenRepository) IsTokenRevoked(ctx context.Context, tokenType Tok
 //
 // Redis Command:
 //
-//	SET rotated:token_hash "1" EX 604800
+//	SET gourdiantoken:rotated:token_hash "1" EX 604800
 func (r *RedisTokenRepository) MarkTokenRotated(ctx context.Context, token string, ttl time.Duration) error {
 	if token == "" {
 		return fmt.Errorf("token cannot be empty")
@@ -382,8 +382,8 @@ func (r *RedisTokenRepository) MarkTokenRotated(ctx context.Context, token strin
 //
 // Redis Commands:
 //
-//	SETNX rotated:token_hash "1"
-//	EXPIRE rotated:token_hash 86400
+//	SETNX gourdiantoken:rotated:token_hash "1"
+//	EXPIRE gourdiantoken:rotated:token_hash 86400
 func (r *RedisTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token string, ttl time.Duration) (bool, error) {
 	if token == "" {
 		return false, fmt.Errorf("token cannot be empty")
@@ -445,7 +445,7 @@ func (r *RedisTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token
 //
 // Redis Command:
 //
-//	GET rotated:token_hash
+//	GET gourdiantoken:rotated:token_hash
 func (r *RedisTokenRepository) IsTokenRotated(ctx context.Context, token string) (bool, error) {
 	if token == "" {
 		return false, fmt.Errorf("token cannot be empty")
@@ -502,7 +502,7 @@ func (r *RedisTokenRepository) IsTokenRotated(ctx context.Context, token string)
 //
 // Redis Command:
 //
-//	PTTL rotated:token_hash
+//	PTTL gourdiantoken:rotated:token_hash
 func (r *RedisTokenRepository) GetRotationTTL(ctx context.Context, token string) (time.Duration, error) {
 	if token == "" {
 		return 0, fmt.Errorf("token cannot be empty")

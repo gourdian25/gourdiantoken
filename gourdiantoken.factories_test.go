@@ -232,15 +232,15 @@ func TestNewGourdianTokenMakerWithMemory_SupportsRevocationAndRotation(t *testin
 }
 
 // ============================================================================
-// Tests for NewGourdianTokenMakerWithGorm
+// Tests for NewGourdianTokenMakerWithPostgres
 // ============================================================================
 
-func TestNewGourdianTokenMakerWithGorm_AllRepositories(t *testing.T) {
+func TestNewGourdianTokenMakerWithPostgres_AllRepositories(t *testing.T) {
 	factories := getTestRepositoryFactories()
 
 	for repoName := range factories {
-		// Skip non-GORM repositories
-		if repoName != "GORM" {
+		// Skip non-Postgres repositories
+		if repoName != "Postgres" {
 			continue
 		}
 
@@ -252,29 +252,29 @@ func TestNewGourdianTokenMakerWithGorm_AllRepositories(t *testing.T) {
 			config.RevocationEnabled = true
 			config.RotationEnabled = true
 
-			gormRepo, ok := repo.(*GormTokenRepository)
+			pgRepo, ok := repo.(*PostgresTokenRepository)
 			require.True(t, ok)
 
-			maker, err := NewGourdianTokenMakerWithGorm(context.Background(), config, gormRepo.db)
+			maker, err := NewGourdianTokenMakerWithPostgres(context.Background(), config, pgRepo.pool)
 			require.NoError(t, err)
 			require.NotNil(t, maker)
 		})
 	}
 }
 
-func TestNewGourdianTokenMakerWithGorm_NilDatabaseFails(t *testing.T) {
+func TestNewGourdianTokenMakerWithPostgres_NilDatabaseFails(t *testing.T) {
 	config := DefaultTestConfig()
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	_, err := NewGourdianTokenMakerWithGorm(context.Background(), config, nil)
+	_, err := NewGourdianTokenMakerWithPostgres(context.Background(), config, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "database instance cannot be nil")
+	assert.Contains(t, err.Error(), "pgx pool cannot be nil")
 }
 
-func TestNewGourdianTokenMakerWithGorm_FailsWithCancelledContext(t *testing.T) {
+func TestNewGourdianTokenMakerWithPostgres_FailsWithCancelledContext(t *testing.T) {
 	factories := getTestRepositoryFactories()
-	repo, cleanup := factories["GORM"](t)
+	repo, cleanup := factories["Postgres"](t)
 	defer cleanup()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -284,23 +284,23 @@ func TestNewGourdianTokenMakerWithGorm_FailsWithCancelledContext(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	gormRepo := repo.(*GormTokenRepository)
-	_, err := NewGourdianTokenMakerWithGorm(ctx, config, gormRepo.db)
+	pgRepo := repo.(*PostgresTokenRepository)
+	_, err := NewGourdianTokenMakerWithPostgres(ctx, config, pgRepo.pool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
 
-func TestNewGourdianTokenMakerWithGorm_SupportsRevocationAndRotation(t *testing.T) {
+func TestNewGourdianTokenMakerWithPostgres_SupportsRevocationAndRotation(t *testing.T) {
 	factories := getTestRepositoryFactories()
-	repo, cleanup := factories["GORM"](t)
+	repo, cleanup := factories["Postgres"](t)
 	defer cleanup()
 
 	config := DefaultTestConfig()
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	gormRepo := repo.(*GormTokenRepository)
-	maker, err := NewGourdianTokenMakerWithGorm(context.Background(), config, gormRepo.db)
+	pgRepo := repo.(*PostgresTokenRepository)
+	maker, err := NewGourdianTokenMakerWithPostgres(context.Background(), config, pgRepo.pool)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -354,7 +354,7 @@ func TestNewGourdianTokenMakerWithMongo_NilDatabaseFails(t *testing.T) {
 
 	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil, false)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "database instance cannot be nil")
+	assert.Contains(t, err.Error(), "mongo database instance cannot be nil")
 }
 
 func TestNewGourdianTokenMakerWithMongo_FailsWithCancelledContext(t *testing.T) {
@@ -674,11 +674,11 @@ func TestAllFactories_InvalidConfigurationsFail(t *testing.T) {
 
 		factories := getTestRepositoryFactories()
 
-		t.Run("GORM", func(t *testing.T) {
-			repo, cleanup := factories["GORM"](t)
+		t.Run("Postgres", func(t *testing.T) {
+			repo, cleanup := factories["Postgres"](t)
 			defer cleanup()
-			gormRepo := repo.(*GormTokenRepository)
-			_, err := NewGourdianTokenMakerWithGorm(context.Background(), invalidConfig, gormRepo.db)
+			pgRepo := repo.(*PostgresTokenRepository)
+			_, err := NewGourdianTokenMakerWithPostgres(context.Background(), invalidConfig, pgRepo.pool)
 			require.Error(t, err)
 		})
 

@@ -50,6 +50,11 @@ type JWTMaker struct {
 	// Defaults to a fmt.Printf-based logger; override via WithLogger.
 	logf func(format string, args ...any)
 
+	// structuredLogger, when set via WithStructuredLogger, is used instead
+	// of logf for the same two background-cleanup error reports. nil means
+	// logf remains the reporting path (the original, unaffected behavior).
+	structuredLogger Logger
+
 	// closeOnce ensures Close is idempotent.
 	closeOnce sync.Once
 }
@@ -1416,7 +1421,11 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 			// Create a timeout context for cleanup operation
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			if err := maker.tokenRepo.CleanupExpiredRotatedTokens(cleanupCtx); err != nil {
-				maker.logf("Error cleaning up rotated tokens: %v\n", err)
+				if maker.structuredLogger != nil {
+					maker.structuredLogger.Error("gourdiantoken: cleanup rotated tokens failed", "error", err)
+				} else {
+					maker.logf("Error cleaning up rotated tokens: %v\n", err)
+				}
 			}
 			cancel()
 		}
@@ -1464,7 +1473,11 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 				// Create a timeout context for cleanup operation
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				if err := maker.tokenRepo.CleanupExpiredRevokedTokens(cleanupCtx, tokenType); err != nil {
-					maker.logf("Error cleaning up revoked %s tokens: %v\n", tokenType, err)
+					if maker.structuredLogger != nil {
+						maker.structuredLogger.Error("gourdiantoken: cleanup revoked tokens failed", "token_type", tokenType, "error", err)
+					} else {
+						maker.logf("Error cleaning up revoked %s tokens: %v\n", tokenType, err)
+					}
 				}
 				cancel()
 			}
