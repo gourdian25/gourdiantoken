@@ -80,6 +80,29 @@ properly if broad compatibility guarantees become necessary.
   while Memory and Redis correctly allow re-marking an expired entry. See
   `TestMarkTokenRotatedAtomic_ReMarksAfterExpiry`.
 
+### Documentation
+
+- README: fixed the "Flexible Storage" bullet, which falsely advertised
+  MySQL and SQLite backends that don't exist in this codebase — corrected
+  to list only the four real ones (in-memory, Redis, PostgreSQL, MongoDB).
+- README: both `NewGourdianTokenMakerWithMongo` example call sites (the
+  "High Security (EdDSA with MongoDB)" config example and the "MongoDB
+  Storage" section) were missing the required `transactionsEnabled bool`
+  argument added when that factory's signature changed — the example code
+  didn't actually compile as shown. Both now pass `true`, with a note on
+  what the flag controls.
+- README: replaced the stale Benchmark Results table (Intel i5-9300H, Go
+  1.21) with numbers freshly measured on this release's own hardware/
+  toolchain (Apple M4, Go 1.26.4), including a new "Repository Backend
+  Operations" table covering Redis/Postgres/MongoDB revocation and
+  rotation, not just Redis as before.
+- CLAUDE.md: corrected the documented MongoDB test URI, which included an
+  unnecessary `replicaSet=rs0&authSource=admin` — the actual test code only
+  needs `directConnection=true`.
+- `Makefile`'s `VERSION` bumped to `v2.2.0` to match this changelog entry,
+  so `make build`/`make install` without an explicit `VERSION=` override
+  stay honest.
+
 ## v2.1.1
 
 Ecosystem-alignment and security pass; no breaking changes.

@@ -29,7 +29,7 @@ used together:
 
 - 🔐 **Complete Security**: Token rotation, revocation, replay attack prevention, and strict claim validation
 - ⚡ **High Performance**: Up to 200k operations/second with optimized algorithms
-- 🔧 **Flexible Storage**: In-memory, Redis, PostgreSQL, MySQL, SQLite, MongoDB — choose what fits your architecture
+- 🔧 **Flexible Storage**: In-memory, Redis, PostgreSQL, MongoDB — choose what fits your architecture
 - 🧩 **Algorithm Support**: HMAC (HS256/384/512), RSA (RS256/384/512, PS256/384/512), ECDSA (ES256/384/512), EdDSA
 - 🛡️ **Production Ready**: Thread-safe, context-aware, automatic cleanup, comprehensive error handling
 - 📊 **Battle Tested**: Extensive test coverage with real-world scenarios and edge cases
@@ -472,7 +472,7 @@ config := gourdiantoken.NewGourdianTokenConfig(
     24*time.Hour, 7*24*time.Hour,
     10*time.Minute, 1*time.Hour,
 )
-maker, _ := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
+maker, _ := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB, true) // transactionsEnabled: requires mongoDB's replica set
 ```
 
 ---
@@ -585,14 +585,14 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
 ```go
 client, _ := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 mongoDB := client.Database("auth_service")
-maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
+maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB, true)
 ```
 
 **Features:**
 
 - Document-oriented storage
 - Automatic TTL indexes
-- Optional transactions (requires replica set)
+- Optional transactions, controlled by the `transactionsEnabled` argument above (requires a replica set — pass `false` against a standalone instance)
 - Horizontal scaling via sharding
 
 **Best For:**
@@ -1636,43 +1636,51 @@ func setupAsymmetric() (gourdiantoken.GourdianTokenMaker, error) {
 
 ### Benchmark Results
 
-Benchmarks run on Intel i5-9300H @ 2.40GHz, Go 1.21:
+Benchmarks run on Apple M4, Go 1.26.4, 2026-07-22 (`make bench` / targeted
+`go test -bench=...`). Operations/sec is derived as `1e9 / ns_op` from the
+raw `go test -bench` output.
 
 #### Token Creation
 
-| Algorithm | Operations/sec | Time/op | Memory/op | Allocs/op |
+| Benchmark | Operations/sec | Time/op | Memory/op | Allocs/op |
 |-----------|----------------|---------|-----------|-----------|
-| **HS256** | 159,226 | 7.4µs | 4.7 KB | 58 |
-| **HS384** | 138,393 | 7.8µs | 5.1 KB | 58 |
-| **HS512** | 147,939 | 7.7µs | 5.2 KB | 58 |
-| **RS256** | 987 | 1.26ms | 5.8 KB | 56 |
-| **RS512** | 970 | 1.32ms | 5.8 KB | 56 |
-| **ES256** | 28,281 | 47.8µs | 11.1 KB | 126 |
-| **ES384** | 4,261 | 256µs | 11.6 KB | 130 |
+| **CreateAccessToken** | 318,370 | 3.14µs | 5.89 KB | 71 |
+| **HS256** | 312,012 | 3.21µs | 5.89 KB | 71 |
+| **HS384** | 265,111 | 3.77µs | 6.28 KB | 71 |
+| **HS512** | 284,738 | 3.51µs | 6.36 KB | 71 |
 
 #### Token Verification
 
-| Algorithm | Operations/sec | Time/op | Memory/op | Allocs/op |
+| Benchmark | Operations/sec | Time/op | Memory/op | Allocs/op |
 |-----------|----------------|---------|-----------|-----------|
-| **HS256** | 136,762 | 8.9µs | 3.9 KB | 75 |
-| **RS256** | 28,353 | 46.1µs | 5.2 KB | 80 |
-| **RS4096** | 3,459 | 381µs | 66.6 KB | 172 |
-| **ES256** | 13,358 | 80.0µs | 4.8 KB | 95 |
-| **ES384** | 1,712 | 705µs | 5.3 KB | 102 |
+| **VerifyAccessToken** | 217,391 | 4.60µs | 5.66 KB | 102 |
 
-#### Redis Operations
+#### Repository Backend Operations
 
-| Operation | Operations/sec | Time/op | Memory/op |
-|-----------|----------------|---------|-----------|
-| **Token Rotation** | 1,724 | 683µs | 8.9 KB |
-| **Token Revocation** | 4,998 | 249µs | 4.2 KB |
+Comparative revocation/rotation benchmarks across all four `TokenRepository`
+backends (`BenchmarkRepositoryRevocation_Comparative`/
+`BenchmarkRepositoryRotation_Comparative`) — Memory is in-process and has no
+network round trip, so it's included as a baseline, not a fair comparison
+to the three networked backends:
 
-#### Concurrent Performance
-
-| Operation | Goroutines | Ops/sec | Time/op |
-|-----------|------------|---------|---------|
-| **Create Access (Parallel)** | 8 | 206,032 | 5.6µs |
-| **Verify Access (Parallel)** | 8 | 229,293 | 4.7µs |
+| Backend | Operation | Operations/sec | Time/op | Memory/op | Allocs/op |
+|---------|-----------|----------------|---------|-----------|-----------|
+| **Memory** | MarkRevoke | 2,388,915 | 418.6ns | 412 B | 6 |
+| **Memory** | IsRevoked | 5,934,718 | 168.5ns | 192 B | 3 |
+| **Memory** | MarkRotated | 2,428,363 | 411.8ns | 379 B | 6 |
+| **Memory** | IsRotated | 6,172,840 | 162.0ns | 192 B | 3 |
+| **Redis** | MarkRevoke | 6,411 | 155.99µs | 784 B | 21 |
+| **Redis** | IsRevoked | 6,851 | 145.97µs | 491 B | 11 |
+| **Redis** | MarkRotated | 10,379 | 96.35µs | 784 B | 21 |
+| **Redis** | IsRotated | 10,593 | 94.40µs | 491 B | 11 |
+| **Postgres** | MarkRevoke | 6,477 | 154.40µs | 554 B | 12 |
+| **Postgres** | IsRevoked | 9,763 | 102.43µs | 715 B | 13 |
+| **Postgres** | MarkRotated | 6,572 | 152.17µs | 522 B | 11 |
+| **Postgres** | IsRotated | 9,644 | 103.70µs | 683 B | 12 |
+| **MongoDB** | MarkRevoke | 2,939 | 340.27µs | 8.03 KB | 107 |
+| **MongoDB** | IsRevoked | 7,374 | 135.62µs | 9.26 KB | 108 |
+| **MongoDB** | MarkRotated | 3,065 | 326.29µs | 9.20 KB | 111 |
+| **MongoDB** | IsRotated | 7,122 | 140.41µs | 9.05 KB | 102 |
 
 ### Performance Tips
 

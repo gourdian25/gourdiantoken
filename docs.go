@@ -410,7 +410,7 @@
 //	}
 //
 //	mongoDB := client.Database("auth_service")
-//	maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
+//	maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB, true)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
