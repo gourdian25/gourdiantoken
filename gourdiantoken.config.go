@@ -177,6 +177,14 @@ type GourdianTokenConfig struct {
 	// ceiling. Must be >= VerificationDefaultExpiryDuration (when both are set) when
 	// VerificationTokensEnabled is true.
 	VerificationMaxExpiryDuration time.Duration
+
+	// MultiTenantEnabled determines whether CreateAccessToken/CreateRefreshToken require a
+	// non-empty tenantID (carried in the "tid" claim) and whether VerifyAccessToken/
+	// VerifyRefreshToken require the token to carry one. Defaults to false: every config
+	// that predates this field is unaffected, and a tenantID passed while this is false is
+	// rejected outright (ErrTenantIDNotAllowed) rather than silently ignored. Opt-in rather
+	// than always-on so this library stays usable by any single-tenant consumer too.
+	MultiTenantEnabled bool
 }
 
 // NewGourdianTokenConfig creates a new token configuration with all parameters explicitly specified.

@@ -243,6 +243,9 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 		if !v.MaxLifetimeExpiry.IsZero() {
 			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
 		}
+		if v.TenantID != "" {
+			mapClaims["tid"] = v.TenantID
+		}
 		return mapClaims, nil
 	case RefreshTokenClaims:
 		mapClaims := jwt.MapClaims{
@@ -261,6 +264,9 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 		}
 		if !v.MaxLifetimeExpiry.IsZero() {
 			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
+		}
+		if v.TenantID != "" {
+			mapClaims["tid"] = v.TenantID
 		}
 		return mapClaims, nil
 	case VerificationTokenClaims:
@@ -466,11 +472,24 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		return nil, fmt.Errorf("invalid token type: expected string")
 	}
 
+	// tid is not part of baseRequired (only mandatory when the maker's config has
+	// MultiTenantEnabled true, enforced upstream in parseAndValidateToken), so an absent
+	// tid claim is not an error here — only a present-but-wrong-typed one is. Mirrors how
+	// extractCommonClaims already treats the optional "iss" claim.
+	var tenantID string
+	if raw, present := claims["tid"]; present {
+		tenantID, ok = raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid tenant ID type: expected string")
+		}
+	}
+
 	accessClaims := &AccessTokenClaims{
 		ID:                common.ID,
 		Subject:           common.Subject,
 		Username:          common.Username,
 		SessionID:         common.SessionID,
+		TenantID:          tenantID,
 		Issuer:            common.Issuer,
 		Audience:          common.Audience,
 		IssuedAt:          common.IssuedAt,
@@ -523,11 +542,22 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 		return nil, fmt.Errorf("invalid token type: expected 'refresh'")
 	}
 
+	// tid is optional here for the same reason as in mapToAccessClaims — see that
+	// function's comment.
+	var tenantID string
+	if raw, present := claims["tid"]; present {
+		tenantID, ok = raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid tenant ID type: expected string")
+		}
+	}
+
 	refreshClaims := &RefreshTokenClaims{
 		ID:                common.ID,
 		Subject:           common.Subject,
 		Username:          common.Username,
 		SessionID:         common.SessionID,
+		TenantID:          tenantID,
 		Issuer:            common.Issuer,
 		Audience:          common.Audience,
 		IssuedAt:          common.IssuedAt,
@@ -619,6 +649,24 @@ func validateUseCase(allowed []string, useCase string) error {
 		}
 	}
 	return fmt.Errorf("use case %q is not in the allowed list", useCase)
+}
+
+// validateTenantID enforces GourdianTokenConfig.MultiTenantEnabled against a tenantID
+// supplied to CreateAccessToken/CreateRefreshToken: required and non-empty when true,
+// forbidden (must be empty) when false. Fails loud in both directions rather than
+// silently ignoring a caller-supplied tenant ID — the one thing this whole feature exists
+// to prevent.
+func validateTenantID(multiTenantEnabled bool, tenantID string) error {
+	if multiTenantEnabled {
+		if tenantID == "" {
+			return fmt.Errorf("%w", ErrTenantIDRequired)
+		}
+		return nil
+	}
+	if tenantID != "" {
+		return fmt.Errorf("%w", ErrTenantIDNotAllowed)
+	}
+	return nil
 }
 
 // resolveVerificationTTL determines the effective expiry duration for a verification

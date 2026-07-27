@@ -140,6 +140,9 @@ type GourdianTokenMaker interface {
 	//   - username: Human-readable username (max 1024 characters)
 	//   - roles: Authorization roles (must contain at least one non-empty role)
 	//   - sessionID: Session identifier for tracking (may be empty for sessionless tokens)
+	//   - tenantID: Tenant identifier (carried in the "tid" claim). Must be non-empty when
+	//     GourdianTokenConfig.MultiTenantEnabled is true, and must be empty otherwise —
+	//     pass "" if you don't use multi-tenancy.
 	//
 	// Returns:
 	//   - *AccessTokenResponse: Generated token with metadata
@@ -153,8 +156,9 @@ type GourdianTokenMaker interface {
 	//	    "john.doe",
 	//	    []string{"user", "admin"},
 	//	    sessionID,
+	//	    "",
 	//	)
-	CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error)
+	CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string, tenantID string) (*AccessTokenResponse, error)
 
 	// CreateRefreshToken generates a new signed refresh token.
 	//
@@ -163,6 +167,8 @@ type GourdianTokenMaker interface {
 	//   - userID: The user's unique identifier (must not be empty)
 	//   - username: Human-readable username (max 1024 characters)
 	//   - sessionID: Session identifier for tracking (may be empty for sessionless tokens)
+	//   - tenantID: Tenant identifier (carried in the "tid" claim). Same contract as
+	//     CreateAccessToken's tenantID parameter — pass "" if you don't use multi-tenancy.
 	//
 	// Returns:
 	//   - *RefreshTokenResponse: Generated token with metadata
@@ -175,8 +181,9 @@ type GourdianTokenMaker interface {
 	//	    userID,
 	//	    "john.doe",
 	//	    sessionID,
+	//	    "",
 	//	)
-	CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error)
+	CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string, tenantID string) (*RefreshTokenResponse, error)
 
 	// VerifyAccessToken validates an access token and returns its claims.
 	// Checks signature, expiration, revocation status, and required claims.

@@ -443,7 +443,7 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //	defer cancel()
 //
 //	token, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
-func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error) {
+func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string, tenantID string) (*AccessTokenResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -462,6 +462,10 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 		}
 	}
 
+	if err := validateTenantID(maker.config.MultiTenantEnabled, tenantID); err != nil {
+		return nil, err
+	}
+
 	tokenID, err := newTokenID()
 	if err != nil {
 		return nil, err
@@ -473,6 +477,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 		Subject:           userID,
 		SessionID:         sessionID,
 		Username:          username,
+		TenantID:          tenantID,
 		Issuer:            maker.config.Issuer,
 		Audience:          maker.config.Audience,
 		Roles:             roles,
@@ -494,6 +499,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 		Token:             signedToken,
 		Issuer:            claims.Issuer,
 		Username:          claims.Username,
+		TenantID:          claims.TenantID,
 		Roles:             roles,
 		Audience:          claims.Audience,
 		IssuedAt:          claims.IssuedAt,
@@ -583,12 +589,16 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 //	    AccessToken:  accessToken.Token,
 //	    RefreshToken: refreshToken.Token,
 //	}
-func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error) {
+func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string, tenantID string) (*RefreshTokenResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
 
 	if err := validateUserAndUsername(userID, username); err != nil {
+		return nil, err
+	}
+
+	if err := validateTenantID(maker.config.MultiTenantEnabled, tenantID); err != nil {
 		return nil, err
 	}
 
@@ -603,6 +613,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, us
 		Subject:           userID,
 		SessionID:         sessionID,
 		Username:          username,
+		TenantID:          tenantID,
 		Issuer:            maker.config.Issuer,
 		Audience:          maker.config.Audience,
 		IssuedAt:          now,
@@ -623,6 +634,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, us
 		Token:             signedToken,
 		Issuer:            claims.Issuer,
 		Username:          claims.Username,
+		TenantID:          claims.TenantID,
 		Audience:          claims.Audience,
 		IssuedAt:          claims.IssuedAt,
 		ExpiresAt:         claims.ExpiresAt,
@@ -1356,7 +1368,7 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 	// Failure Mode" note above this function, which described the lockout this reordering
 	// fixes). The trade-off: a losing concurrent request (see below) does this signing work
 	// for nothing — cheap, since it's pure cryptographic signing with no repository call.
-	newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID)
+	newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID, claims.TenantID)
 	if err != nil {
 		return nil, err
 	}
