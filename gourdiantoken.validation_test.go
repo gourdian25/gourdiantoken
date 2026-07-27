@@ -281,6 +281,80 @@ func TestMapToVerificationClaims(t *testing.T) {
 	})
 }
 
+// TestTenantIDClaim_MapConversions covers the "tid" claim's optional-extraction branches in
+// mapToAccessClaims/mapToRefreshClaims (tid is only mandatory when the maker's config has
+// MultiTenantEnabled true, enforced upstream in parseAndValidateToken - not here), plus
+// confirms toMapClaims's VerificationTokenClaims branch never emits a "tid" key, since tenant
+// scoping for verification tokens is a Metadata convention, not a struct field.
+func TestTenantIDClaim_MapConversions(t *testing.T) {
+	t.Run("mapToAccessClaims tid absent", func(t *testing.T) {
+		got, err := mapToAccessClaims(validAccessClaims())
+		require.NoError(t, err)
+		assert.Empty(t, got.TenantID)
+	})
+
+	t.Run("mapToAccessClaims tid present", func(t *testing.T) {
+		claims := validAccessClaims()
+		claims["tid"] = "acme-corp"
+		got, err := mapToAccessClaims(claims)
+		require.NoError(t, err)
+		assert.Equal(t, "acme-corp", got.TenantID)
+	})
+
+	t.Run("mapToAccessClaims tid wrong type", func(t *testing.T) {
+		claims := validAccessClaims()
+		claims["tid"] = 123
+		_, err := mapToAccessClaims(claims)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid tenant ID type")
+	})
+
+	t.Run("mapToRefreshClaims tid absent", func(t *testing.T) {
+		got, err := mapToRefreshClaims(validRefreshClaims())
+		require.NoError(t, err)
+		assert.Empty(t, got.TenantID)
+	})
+
+	t.Run("mapToRefreshClaims tid present", func(t *testing.T) {
+		claims := validRefreshClaims()
+		claims["tid"] = "acme-corp"
+		got, err := mapToRefreshClaims(claims)
+		require.NoError(t, err)
+		assert.Equal(t, "acme-corp", got.TenantID)
+	})
+
+	t.Run("mapToRefreshClaims tid wrong type", func(t *testing.T) {
+		claims := validRefreshClaims()
+		claims["tid"] = 123
+		_, err := mapToRefreshClaims(claims)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid tenant ID type")
+	})
+
+	t.Run("toMapClaims never emits tid for access/refresh when TenantID is empty", func(t *testing.T) {
+		accessMap, err := toMapClaims(AccessTokenClaims{
+			ID: "id", Subject: "sub", Username: "usr", Roles: []string{"admin"}, TokenType: AccessToken,
+		})
+		require.NoError(t, err)
+		assert.NotContains(t, accessMap, "tid")
+
+		refreshMap, err := toMapClaims(RefreshTokenClaims{
+			ID: "id", Subject: "sub", Username: "usr", TokenType: RefreshToken,
+		})
+		require.NoError(t, err)
+		assert.NotContains(t, refreshMap, "tid")
+	})
+
+	t.Run("toMapClaims never emits tid for verification tokens", func(t *testing.T) {
+		verMap, err := toMapClaims(VerificationTokenClaims{
+			ID: "id", Subject: "sub", UseCase: "2fa-pending", TokenType: VerificationToken,
+			Metadata: map[string]interface{}{"tenant_id": "acme-corp"},
+		})
+		require.NoError(t, err)
+		assert.NotContains(t, verMap, "tid", "tenant scoping for verification tokens is a Metadata convention, not a tid claim")
+	})
+}
+
 func TestValidateTokenClaims(t *testing.T) {
 	t.Run("valid access claims", func(t *testing.T) {
 		err := validateTokenClaims(validAccessClaims(), AccessToken, nil)

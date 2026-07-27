@@ -87,7 +87,7 @@ func TestNewGourdianTokenMakerNoStorage_CanCreateAndVerifyTokens(t *testing.T) {
 	sessionID := generateTestUUID()
 
 	// Should be able to create tokens
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 	require.NotNil(t, accessToken)
 
@@ -110,7 +110,7 @@ func TestDefaultGourdianTokenMaker_NilRepo(t *testing.T) {
 	userID := generateTestUUID()
 	sessionID := generateTestUUID()
 
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 
 	claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
@@ -132,7 +132,7 @@ func TestDefaultGourdianTokenMaker_WithRepo(t *testing.T) {
 	userID := generateTestUUID()
 	sessionID := generateTestUUID()
 
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 
 	require.NoError(t, maker.RevokeAccessToken(ctx, accessToken.Token))
@@ -205,10 +205,10 @@ func TestNewGourdianTokenMakerWithMemory_SupportsRevocationAndRotation(t *testin
 	sessionID := generateTestUUID()
 
 	// Create tokens
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 
-	refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
+	refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID, "")
 	require.NoError(t, err)
 
 	// Revoke access token
@@ -308,7 +308,7 @@ func TestNewGourdianTokenMakerWithPostgres_SupportsRevocationAndRotation(t *test
 	sessionID := generateTestUUID()
 
 	// Create and revoke token
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 
 	err = maker.RevokeAccessToken(ctx, accessToken.Token)
@@ -473,7 +473,7 @@ func TestNewGourdianTokenMakerWithRedis_SupportsHighPerformanceOperations(t *tes
 	// Create and verify many tokens to test performance
 	start := time.Now()
 	for i := 0; i < 100; i++ {
-		token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+		token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 		require.NoError(t, err)
 
 		// Should be able to verify immediately
@@ -532,7 +532,7 @@ func TestAllFactories_CreatesValidTokenMakers(t *testing.T) {
 			sessionID := generateTestUUID()
 
 			// Test access token creation and verification
-			accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user", "admin"}, sessionID)
+			accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user", "admin"}, sessionID, "")
 			require.NoError(t, err)
 			require.NotNil(t, accessToken)
 
@@ -543,7 +543,7 @@ func TestAllFactories_CreatesValidTokenMakers(t *testing.T) {
 			assert.ElementsMatch(t, []string{"user", "admin"}, claims.Roles)
 
 			// Test refresh token creation and verification
-			refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
+			refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID, "")
 			require.NoError(t, err)
 
 			refreshClaims, err := maker.VerifyRefreshToken(ctx, refreshToken.Token)
@@ -597,7 +597,7 @@ func TestAllFactories_TokenExpirationWorks(t *testing.T) {
 			sessionID := generateTestUUID()
 
 			// Create token with 1 second expiry
-			token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+			token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 			require.NoError(t, err)
 
 			// Should verify immediately

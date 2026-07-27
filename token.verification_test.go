@@ -24,7 +24,7 @@ func TestVerifyAccessToken_Valid(t *testing.T) {
 	roles := []string{"admin", "user"}
 
 	t.Run("verifies valid access token", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		claims, err := maker.VerifyAccessToken(ctx, response.Token)
@@ -39,7 +39,7 @@ func TestVerifyAccessToken_Valid(t *testing.T) {
 	})
 
 	t.Run("verifies token claims match", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		claims, err := maker.VerifyAccessToken(ctx, response.Token)
@@ -61,7 +61,7 @@ func TestVerifyAccessToken_Valid(t *testing.T) {
 		shortMaker, err := NewGourdianTokenMaker(ctx, config, nil)
 		require.NoError(t, err)
 
-		response, err := shortMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := shortMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Wait almost until expiry
@@ -89,7 +89,7 @@ func TestVerifyAccessToken_Expired(t *testing.T) {
 		shortMaker, err := NewGourdianTokenMaker(ctx, config, nil)
 		require.NoError(t, err)
 
-		response, err := shortMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := shortMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Wait for token to expire
@@ -143,7 +143,7 @@ func TestVerifyAccessToken_InvalidSignature(t *testing.T) {
 
 	t.Run("rejects token with wrong signature", func(t *testing.T) {
 		// Create token with one key
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Try to verify with different key
@@ -158,7 +158,7 @@ func TestVerifyAccessToken_InvalidSignature(t *testing.T) {
 	})
 
 	t.Run("rejects token with wrong algorithm", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		token, _ := jwt.Parse(response.Token, func(token *jwt.Token) (interface{}, error) {
@@ -185,7 +185,7 @@ func TestVerifyAccessToken_InvalidSignature(t *testing.T) {
 	})
 
 	t.Run("rejects token with wrong algorithm (simpler)", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Parse the token to extract claims
@@ -220,7 +220,7 @@ func TestVerifyAccessToken_InvalidSignature(t *testing.T) {
 	})
 
 	t.Run("rejects token with missing signature", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Remove the last part (signature) to create an invalid token
@@ -246,7 +246,7 @@ func TestVerifyRefreshToken_Valid(t *testing.T) {
 	username := "testuser"
 
 	t.Run("verifies valid refresh token", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		claims, err := maker.VerifyRefreshToken(ctx, response.Token)
@@ -260,7 +260,7 @@ func TestVerifyRefreshToken_Valid(t *testing.T) {
 	})
 
 	t.Run("verifies token claims match", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		claims, err := maker.VerifyRefreshToken(ctx, response.Token)
@@ -287,7 +287,7 @@ func TestVerifyRefreshToken_Invalid(t *testing.T) {
 		shortMaker, err := NewGourdianTokenMaker(ctx, config, nil)
 		require.NoError(t, err)
 
-		response, err := shortMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := shortMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		time.Sleep(2 * time.Second)
@@ -298,7 +298,7 @@ func TestVerifyRefreshToken_Invalid(t *testing.T) {
 	})
 
 	t.Run("rejects access token as refresh token", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, []string{"admin"}, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, []string{"admin"}, sessionID, "")
 		require.NoError(t, err)
 
 		claims, err := maker.VerifyRefreshToken(ctx, response.Token)
@@ -634,7 +634,7 @@ func TestVerifyAccessToken_ContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		assert.Error(t, err)
 		assert.Nil(t, response)
 		assert.Contains(t, err.Error(), "context canceled")
@@ -642,7 +642,7 @@ func TestVerifyAccessToken_ContextCancellation(t *testing.T) {
 
 	t.Run("returns error when context is canceled during verification", func(t *testing.T) {
 		// Create token first with valid context
-		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Create cancelled context for verification
@@ -658,7 +658,7 @@ func TestVerifyAccessToken_ContextCancellation(t *testing.T) {
 
 	t.Run("verification succeeds with valid context", func(t *testing.T) {
 		// Create token with valid context
-		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Verify with valid context
@@ -672,7 +672,7 @@ func TestVerifyAccessToken_ContextCancellation(t *testing.T) {
 
 	t.Run("returns error when context times out during verification", func(t *testing.T) {
 		// Create token first with valid context
-		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Create context with immediate timeout
@@ -697,7 +697,7 @@ func TestVerifyRefreshToken_ContextCancellation(t *testing.T) {
 
 	t.Run("returns error when context is canceled during verification", func(t *testing.T) {
 		// Create token first with valid context
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Create cancelled context for verification
@@ -711,7 +711,7 @@ func TestVerifyRefreshToken_ContextCancellation(t *testing.T) {
 	})
 
 	t.Run("verification succeeds with valid context", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		claims, err := maker.VerifyRefreshToken(context.Background(), response.Token)
@@ -733,7 +733,7 @@ func TestVerifyAccessToken_ContextCancellation_WithRepository(t *testing.T) {
 
 	t.Run("returns error when context is canceled during verification with repository", func(t *testing.T) {
 		// Create token first with valid context
-		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Create cancelled context for verification
@@ -954,7 +954,7 @@ func TestVerifyRefreshToken_Revocation(t *testing.T) {
 	username := "testuser"
 
 	t.Run("rejects revoked refresh token", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Revoke the token using the actual revocation mechanism
@@ -969,7 +969,7 @@ func TestVerifyRefreshToken_Revocation(t *testing.T) {
 	})
 
 	t.Run("allows non-revoked refresh token", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Token should verify successfully before revocation
@@ -991,7 +991,7 @@ func TestVerifyAccessToken_Revocation(t *testing.T) {
 	roles := []string{"admin"}
 
 	t.Run("rejects revoked access token", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Revoke the token using the actual revocation mechanism
@@ -1006,7 +1006,7 @@ func TestVerifyAccessToken_Revocation(t *testing.T) {
 	})
 
 	t.Run("allows non-revoked access token", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Token should verify successfully before revocation
@@ -1031,10 +1031,10 @@ func TestVerifyToken_RevocationEdgeCases(t *testing.T) {
 
 	t.Run("revocation works with multiple tokens", func(t *testing.T) {
 		// Create multiple tokens
-		token1, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token1, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
-		token2, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token2, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Revoke only one token
@@ -1053,7 +1053,7 @@ func TestVerifyToken_RevocationEdgeCases(t *testing.T) {
 	})
 
 	t.Run("revocation persists across verification attempts", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// First verification should work
@@ -1089,7 +1089,7 @@ func TestContextCancellation_Integration(t *testing.T) {
 		ctx := context.Background()
 
 		// Create access token
-		accessResp, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		accessResp, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		assert.NoError(t, err)
 		assert.NotNil(t, accessResp)
 
@@ -1099,7 +1099,7 @@ func TestContextCancellation_Integration(t *testing.T) {
 		assert.NotNil(t, accessClaims)
 
 		// Create refresh token
-		refreshResp, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		refreshResp, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		assert.NoError(t, err)
 		assert.NotNil(t, refreshResp)
 
@@ -1114,18 +1114,18 @@ func TestContextCancellation_Integration(t *testing.T) {
 		cancel() // Cancel immediately
 
 		// All operations should fail
-		accessResp, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		accessResp, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		assert.Error(t, err)
 		assert.Nil(t, accessResp)
 
-		refreshResp, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		refreshResp, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		assert.Error(t, err)
 		assert.Nil(t, refreshResp)
 	})
 
 	t.Run("respects context timeout", func(t *testing.T) {
 		// Create token with valid context
-		accessResp, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		accessResp, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Try to verify with expired context

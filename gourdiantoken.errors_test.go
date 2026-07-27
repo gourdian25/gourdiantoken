@@ -18,7 +18,7 @@ func TestErrTokenRevoked_ErrorsIs(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
 	ctx := context.Background()
 
-	token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+	token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 	require.NoError(t, err)
 
 	require.NoError(t, maker.RevokeAccessToken(ctx, token.Token))
@@ -32,7 +32,7 @@ func TestErrTokenRotated_ErrorsIs(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
 	ctx := context.Background()
 
-	token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+	token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 	require.NoError(t, err)
 
 	_, err = maker.RotateRefreshToken(ctx, token.Token)
@@ -99,6 +99,34 @@ func TestErrTokenExpired_ErrorsIs(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrTokenExpired)
 	assert.True(t, errors.Is(err, jwt.ErrTokenExpired))
+}
+
+func TestErrTenantIDRequired_ErrorsIs(t *testing.T) {
+	config := DefaultTestConfig()
+	config.MultiTenantEnabled = true
+	maker := setupTestMakerWithConfig(t, config, nil)
+	ctx := context.Background()
+
+	_, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTenantIDRequired)
+
+	_, err = maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTenantIDRequired)
+}
+
+func TestErrTenantIDNotAllowed_ErrorsIs(t *testing.T) {
+	maker := setupTestMakerWithConfig(t, DefaultTestConfig(), nil)
+	ctx := context.Background()
+
+	_, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "acme")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTenantIDNotAllowed)
+
+	_, err = maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "acme")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTenantIDNotAllowed)
 }
 
 func TestErrTokenMaxLifetimeExceeded_ErrorsIs(t *testing.T) {

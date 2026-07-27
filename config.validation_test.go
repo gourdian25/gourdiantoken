@@ -134,6 +134,25 @@ func TestValidateConfig_Symmetric(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must be empty for symmetric signing")
 	})
+
+	t.Run("MultiTenantEnabled has no dependent sub-fields to validate", func(t *testing.T) {
+		config := &GourdianTokenConfig{
+			SigningMethod:            Symmetric,
+			Algorithm:                "HS256",
+			SymmetricKey:             "test-secret-key-that-is-at-least-32-bytes-long",
+			Issuer:                   "test.com",
+			AccessExpiryDuration:     30 * time.Minute,
+			AccessMaxLifetimeExpiry:  24 * time.Hour,
+			RefreshExpiryDuration:    7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+			RefreshReuseInterval:     5 * time.Minute,
+			CleanupInterval:          1 * time.Hour,
+			MultiTenantEnabled:       true,
+		}
+
+		err := validateConfig(config)
+		assert.NoError(t, err)
+	})
 }
 
 func TestValidateConfig_Asymmetric(t *testing.T) {

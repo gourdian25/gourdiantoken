@@ -1112,7 +1112,7 @@ func TestAllSupportedAlgorithms(t *testing.T) {
 			username := "testuser"
 			roles := []string{"admin"}
 
-			accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+			accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 			require.NoError(t, err, "failed to create access token for %s", alg.name)
 			require.NotNil(t, accessToken)
 			assert.NotEmpty(t, accessToken.Token)
@@ -1125,7 +1125,7 @@ func TestAllSupportedAlgorithms(t *testing.T) {
 			assert.Equal(t, roles, claims.Roles)
 
 			// Create and verify refresh token
-			refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+			refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 			require.NoError(t, err, "failed to create refresh token for %s", alg.name)
 			require.NotNil(t, refreshToken)
 			assert.NotEmpty(t, refreshToken.Token)
@@ -1346,7 +1346,7 @@ func TestCrossAlgorithmVerification(t *testing.T) {
 		maker256, _ := NewGourdianTokenMaker(ctx, config256, nil)
 
 		userID := uuid.NewString()
-		token, err := maker256.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString())
+		token, err := maker256.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Try to verify with HS512
@@ -1366,7 +1366,7 @@ func TestCrossAlgorithmVerification(t *testing.T) {
 		maker1, _ := NewGourdianTokenMaker(ctx, config1, nil)
 
 		userID := uuid.NewString()
-		token, err := maker1.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString())
+		token, err := maker1.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Try to verify with second key

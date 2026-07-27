@@ -418,6 +418,7 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //	    "john.doe",
 //	    []string{"user", "admin"},
 //	    sessionID,
+//	    "",
 //	)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create token: %w", err)
@@ -435,6 +436,7 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //	    "admin@example.com",
 //	    []string{"user", "admin", "moderator"},
 //	    sessionID,
+//	    "",
 //	)
 //
 // Example (With context timeout):
@@ -442,7 +444,7 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 //	defer cancel()
 //
-//	token, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+//	token, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string, tenantID string) (*AccessTokenResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
@@ -558,6 +560,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 //	    userID,
 //	    "john.doe",
 //	    sessionID,
+//	    "",
 //	)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create refresh token: %w", err)
@@ -575,12 +578,12 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 //
 // Example (Create token pair):
 //
-//	accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+//	accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 //	if err != nil {
 //	    return err
 //	}
 //
-//	refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+//	refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 //	if err != nil {
 //	    return err
 //	}
@@ -787,6 +790,18 @@ func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString st
 		return nil, err
 	}
 
+	// tid is required on access/refresh tokens (never verification tokens, which use
+	// Metadata for any tenant scoping instead — see VerificationTokenClaims) once
+	// MultiTenantEnabled is true. This is the verify-side counterpart to validateTenantID,
+	// which only guards the create side; without this check a pre-existing or
+	// maliciously-crafted token missing "tid" would otherwise verify successfully.
+	if maker.config.MultiTenantEnabled && (tokenType == AccessToken || tokenType == RefreshToken) {
+		tid, _ := claims["tid"].(string)
+		if tid == "" {
+			return nil, fmt.Errorf("%w", ErrTenantIDRequired)
+		}
+	}
+
 	return claims, nil
 }
 
@@ -938,6 +953,7 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 //	    refreshClaims.Username,
 //	    []string{"user"}, // Load roles from database
 //	    refreshClaims.SessionID,
+//	    refreshClaims.TenantID,
 //	)
 //
 // Example (With rotation):
@@ -1289,6 +1305,7 @@ func (maker *JWTMaker) MarkVerificationTokenUsed(ctx context.Context, token stri
 //	        claims.Username,
 //	        getUserRoles(claims.Subject), // Load from DB
 //	        claims.SessionID,
+//	        claims.TenantID,
 //	    )
 //
 //	    // Return new token pair

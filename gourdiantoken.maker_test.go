@@ -158,14 +158,14 @@ func TestSignClaims_SigningError(t *testing.T) {
 
 func TestCreateAccessToken_SigningErrorPropagates(t *testing.T) {
 	maker := badKeyMaker(t)
-	_, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	_, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to sign")
 }
 
 func TestCreateRefreshToken_SigningErrorPropagates(t *testing.T) {
 	maker := badKeyMaker(t)
-	_, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	_, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to sign")
 }
@@ -183,14 +183,14 @@ func TestCreateAccessToken_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := maker.CreateAccessToken(ctx, "user-1", "user", []string{"admin"}, "session-1")
+	_, err := maker.CreateAccessToken(ctx, "user-1", "user", []string{"admin"}, "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
 
 func TestCreateAccessToken_EmptyRoleString(t *testing.T) {
 	maker := setupTestMaker(t)
-	_, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin", ""}, "session-1")
+	_, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin", ""}, "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "roles cannot contain empty strings")
 }
@@ -200,7 +200,7 @@ func TestCreateRefreshToken_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := maker.CreateRefreshToken(ctx, "user-1", "user", "session-1")
+	_, err := maker.CreateRefreshToken(ctx, "user-1", "user", "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
@@ -238,7 +238,7 @@ func TestParseAndValidateToken_RevocationCheckError(t *testing.T) {
 	repo := &erroringRepo{isTokenRevokedErr: fmt.Errorf("boom")}
 	maker := makerWithRepo(t, repo)
 
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	_, err = maker.VerifyAccessToken(context.Background(), token.Token)
@@ -250,7 +250,7 @@ func TestParseAndValidateToken_RotationCheckError(t *testing.T) {
 	repo := &erroringRepo{isTokenRotatedErr: fmt.Errorf("boom")}
 	maker := makerWithRepo(t, repo)
 
-	token, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	token, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	_, err = maker.VerifyRefreshToken(context.Background(), token.Token)
@@ -317,7 +317,7 @@ func TestVerifyVerificationToken_UseCaseNoLongerAllowed(t *testing.T) {
 
 func TestParseAndValidateToken_ContextCancelledDuringParsing(t *testing.T) {
 	maker := setupTestMaker(t)
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	// 1 call succeeds (the top check); the 2nd, inside jwt.Parse's own
@@ -329,7 +329,7 @@ func TestParseAndValidateToken_ContextCancelledDuringParsing(t *testing.T) {
 
 func TestParseAndValidateToken_ContextCancelledDuringClaimsProcessing(t *testing.T) {
 	maker := setupTestMaker(t)
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	// 2 calls succeed (top check + inside keyFunc); the 3rd, right after
@@ -384,7 +384,7 @@ func TestRevokeToken_MissingExpClaim(t *testing.T) {
 
 func TestRevokeToken_ContextCancelledDuringParsing(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	err = maker.revokeToken(newCountedContext(1), AccessToken, token.Token)
@@ -394,7 +394,7 @@ func TestRevokeToken_ContextCancelledDuringParsing(t *testing.T) {
 
 func TestRevokeToken_ContextCancelledBeforeRevocation(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	err = maker.revokeToken(newCountedContext(2), AccessToken, token.Token)
@@ -418,7 +418,7 @@ func TestRotateRefreshToken_NotEnabled(t *testing.T) {
 // reports it lost the race.
 func TestRotateRefreshToken_ContextCancelledBeforeCreatingNewToken(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	// 4 ctx.Err() calls succeed before this point: RotateRefreshToken's own
@@ -432,7 +432,7 @@ func TestRotateRefreshToken_ContextCancelledBeforeCreatingNewToken(t *testing.T)
 
 func TestRotateRefreshToken_ContextCancelledBeforeRotationCheck(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	// As above, plus CreateRefreshToken's own top check and signClaims'
@@ -448,7 +448,7 @@ func TestRotateRefreshToken_MarkAtomicReturnsFalse(t *testing.T) {
 	repo := &erroringRepo{markTokenRotatedAtomic: false}
 	maker := makerWithRepo(t, repo)
 
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	_, err = maker.RotateRefreshToken(context.Background(), refresh.Token)
@@ -460,7 +460,7 @@ func TestRotateRefreshToken_RepositoryError(t *testing.T) {
 	repo := &erroringRepo{markTokenRotatedAtomErr: fmt.Errorf("boom")}
 	maker := makerWithRepo(t, repo)
 
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	_, err = maker.RotateRefreshToken(context.Background(), refresh.Token)
@@ -518,7 +518,7 @@ func TestNewGourdianTokenMaker_InitializeSigningMethodFailureCancelsCleanup(t *t
 
 func TestRotateRefreshToken_CreateNewTokenErrorPropagates(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	// Break signing only after the original token already exists: the

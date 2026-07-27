@@ -31,7 +31,7 @@ func TestConcurrentTokenCreation(t *testing.T) {
 				defer wg.Done()
 
 				userID := uuid.NewString()
-				token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString())
+				token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString(), "")
 				if err != nil {
 					errors <- err
 					return
@@ -78,7 +78,7 @@ func TestConcurrentTokenCreation(t *testing.T) {
 			go func() {
 				defer wg.Done()
 
-				token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+				token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 				if err != nil {
 					errorCount.Add(1)
 					return
@@ -109,7 +109,7 @@ func TestConcurrentTokenCreation(t *testing.T) {
 			go func(index int) {
 				defer wg.Done()
 
-				token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, sessionID)
+				token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, sessionID, "")
 				require.NoError(t, err)
 				tokens[index] = token.Token
 			}(i)
@@ -151,7 +151,7 @@ func TestConcurrentTokenCreation(t *testing.T) {
 					case <-stopChan:
 						return
 					default:
-						_, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+						_, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 						if err != nil {
 							errorCount.Add(1)
 						} else {
@@ -177,7 +177,7 @@ func TestConcurrentTokenVerification(t *testing.T) {
 		ctx := context.Background()
 
 		// Create one token
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		const numGoroutines = 100
@@ -208,7 +208,7 @@ func TestConcurrentTokenVerification(t *testing.T) {
 		const numTokens = 50
 		tokens := make([]string, numTokens)
 		for i := 0; i < numTokens; i++ {
-			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 			require.NoError(t, err)
 			tokens[i] = token.Token
 		}
@@ -254,7 +254,7 @@ func TestConcurrentTokenVerification(t *testing.T) {
 					case <-stopChan:
 						return
 					default:
-						token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+						token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 						if err == nil {
 							createCount.Add(1)
 							select {
@@ -306,7 +306,7 @@ func TestConcurrentRevocation(t *testing.T) {
 		const numTokens = 50
 		tokens := make([]*AccessTokenResponse, numTokens)
 		for i := 0; i < numTokens; i++ {
-			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 			require.NoError(t, err)
 			tokens[i] = token
 		}
@@ -342,7 +342,7 @@ func TestConcurrentRevocation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		const numGoroutines = 20
@@ -378,7 +378,7 @@ func TestConcurrentRevocation(t *testing.T) {
 		const numTokens = 20
 		oldTokens := make([]string, numTokens)
 		for i := 0; i < numTokens; i++ {
-			token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+			token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 			require.NoError(t, err)
 			oldTokens[i] = token.Token
 		}
@@ -424,7 +424,7 @@ func TestConcurrentRevocation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		const numGoroutines = 50
@@ -748,7 +748,7 @@ func TestRaceConditions(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, _ = maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+				_, _ = maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 			}()
 		}
 		wg.Wait()
@@ -758,7 +758,7 @@ func TestRaceConditions(t *testing.T) {
 		maker := setupTestMaker(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		var wg sync.WaitGroup
@@ -778,7 +778,7 @@ func TestRaceConditions(t *testing.T) {
 
 		tokens := make([]string, 10)
 		for i := range tokens {
-			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 			require.NoError(t, err)
 			tokens[i] = token.Token
 		}
@@ -809,7 +809,7 @@ func TestDeadlockPrevention(t *testing.T) {
 			// Create tokens
 			tokens := make([]string, 10)
 			for i := range tokens {
-				token, _ := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+				token, _ := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 				if token != nil {
 					tokens[i] = token.Token
 				}
@@ -850,7 +850,7 @@ func TestDeadlockPrevention(t *testing.T) {
 		done := make(chan bool, 1)
 		go func() {
 			for i := 0; i < 100; i++ {
-				_, _ = maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+				_, _ = maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 				if ctx.Err() != nil {
 					break
 				}
@@ -959,7 +959,7 @@ func TestLoadBalancing(t *testing.T) {
 						return
 					default:
 						// Create token
-						token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+						token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 						if err != nil {
 							errorCount.Add(1)
 							continue
@@ -1008,7 +1008,7 @@ func TestLoadBalancing(t *testing.T) {
 				go func() {
 					defer wg.Done()
 
-					token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+					token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 					if err == nil && token != nil {
 						successCount.Add(1)
 					}
@@ -1055,7 +1055,7 @@ func TestConcurrentMakerCreation(t *testing.T) {
 		// All makers should be independent
 		for i, maker := range makers {
 			if maker != nil {
-				token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+				token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 				assert.NoError(t, err, "Maker %d should work", i)
 				assert.NotNil(t, token)
 			}

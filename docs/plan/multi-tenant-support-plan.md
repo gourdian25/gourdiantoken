@@ -61,7 +61,7 @@ described below.
 
 | Stage | Scope | Status |
 |---|---|---|
-| Stage 1 | Tenant claim foundation | Not started |
+| Stage 1 | Tenant claim foundation | ✅ Done |
 | Stage 2 | Interface consolidation | Not started |
 | Stage 3 | Tenant-scoped bulk revocation | Not started |
 | Stage 4 | Repository backend standardization | Not started |
@@ -200,6 +200,71 @@ never emits `tid`; a `MultiTenantEnabled=true` passes `validateConfig` case in
 `make coverage-check`; run `go test -run TestCreate ./...` and
 `go test -run TestRotate ./...` in isolation first to catch argument-order
 mistakes before the full suite.
+
+### Stage 1 completion notes
+
+Landed on `dev#manish#feat_support_for_tenant_id`. The struct/config/error/
+interface/claim-mapping changes described above (commit `7994564`) were
+already in place when this stage was picked back up; what was missing and
+got finished in this pass:
+
+- **The verify-side `tid`-required check was never actually added** —
+  `validateTenantID` only guards `CreateAccessToken`/`CreateRefreshToken`
+  (create side). `mapToAccessClaims`/`mapToRefreshClaims`'s own doc comments
+  already claimed "enforced upstream in `parseAndValidateToken`", but that
+  check didn't exist, so a pre-existing or hand-crafted token missing `tid`
+  verified successfully even with `MultiTenantEnabled=true`. Added a guarded
+  check in `parseAndValidateToken` (after the existing `validateTokenClaims`
+  call, `AccessToken`/`RefreshToken` only, never `VerificationToken`) that
+  returns `ErrTenantIDRequired` when `tid` is absent/empty. Covered by
+  `TestMultiTenant_TenantIDValidation/MultiTenantEnabled=true/token_missing_tid_claim_fails_verification`.
+- **`example/example.go` and all ~294 existing `CreateAccessToken`/
+  `CreateRefreshToken` call sites** (across every test file listed above)
+  needed the new trailing `tenantID` argument — this was the "largest
+  mechanical diff" the stage description warned about. Done via a small
+  one-off `go/ast`-based codemod (parse each file, find `CallExpr`s with the
+  old 5-arg/4-arg arity, insert `, ""` right after the last argument's `End()`
+  position rather than before `Rparen`, to stay correct across both
+  single-line and multi-line/trailing-comma call styles) rather than by hand
+  or via a blind regex — verified gofmt-clean and diff-minimal on a sample
+  file before running it across the rest. `go build ./...`/`go vet ./...`
+  went from failing (on `example`) to clean.
+- Fixed 8 stale doc-comment example snippets in `gourdiantoken.maker.go`
+  still showing the pre-tenantID call signatures (`CreateAccessToken`'s and
+  `CreateRefreshToken`'s own doc comments, plus the examples inside
+  `VerifyRefreshToken`'s and `RotateRefreshToken`'s doc comments).
+  `gourdiantoken.interfaces.go`'s doc-comment examples were already correct
+  from the original commit.
+- Added the "New cases" tests the stage called for: sentinel `errors.Is`
+  tests (`TestErrTenantIDRequired_ErrorsIs`/`TestErrTenantIDNotAllowed_ErrorsIs`
+  in `gourdiantoken.errors_test.go`), the enabled/disabled × empty/non-empty
+  matrix plus a full create→verify round trip
+  (`TestMultiTenant_TenantIDValidation` in `token.creation_test.go`), the
+  rotation tenant-propagation regression test
+  (`TestRotateRefreshToken_PropagatesTenantID` in `token.rotate_test.go` —
+  confirmed `RotateRefreshToken`'s `claims.TenantID` forwarding, already
+  correct in the original commit, actually holds end-to-end), the `tid`
+  present/absent/wrong-type branch tests plus the "verification tokens never
+  emit tid" check (`TestTenantIDClaim_MapConversions` in
+  `gourdiantoken.validation_test.go`), and the `MultiTenantEnabled=true`
+  `validateConfig` case (in `TestValidateConfig_Symmetric`,
+  `config.validation_test.go`).
+- Full verification suite green against all 4 live backends (started via
+  `make docker-up`, none were running beforehand): `go build ./...`,
+  `go vet ./...`, `gofmt -l .` (clean), `go test -count=1 -timeout=5m -cover .`
+  (95.4% coverage), `make race`, `make coverage-check` (95.4%, meets the 95%
+  gate), and `go run ./example` end-to-end (46/46 scenarios × all 4 backends
+  + stateless mode, 230/230 passed).
+- Note for whoever runs the full suite unfiltered in an environment with no
+  live services: the MongoDB repository factory's `client.Ping` call in
+  `token.test.helper_test.go` has no context timeout, so with no Mongo
+  reachable it burns the driver's default 30s server-selection timeout
+  *per repository-backed test function* rather than skipping fast — enough
+  of those add up to blow past a 5-minute suite timeout even though Redis/
+  Postgres skip quickly. Not a regression from this stage; pre-existing.
+  Easiest fix if it comes up again: `make docker-up` first (as done here),
+  or scope runs to `-run '.../Memory'`-style subtests per CLAUDE.md's
+  existing guidance.
 
 ## Stage 2 — Interface consolidation
 

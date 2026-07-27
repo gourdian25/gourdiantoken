@@ -18,7 +18,7 @@ func TestRevokeAccessToken(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Verify token works before revocation
@@ -41,7 +41,7 @@ func TestRevokeAccessToken(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Revoke first time
@@ -69,7 +69,7 @@ func TestRevokeAccessToken(t *testing.T) {
 		maker := setupTestMaker(t) // No repository
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		err = maker.RevokeAccessToken(ctx, token.Token)
@@ -84,7 +84,7 @@ func TestRevokeRefreshToken(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Verify token works
@@ -107,7 +107,7 @@ func TestRevokeRefreshToken(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Revoke token
@@ -124,7 +124,7 @@ func TestRevokeRefreshToken(t *testing.T) {
 	t.Run("revocation with canceled context", func(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -154,7 +154,7 @@ func TestRevocation_Disabled(t *testing.T) {
 		ctx := context.Background()
 
 		// Create an access token
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Attempt revocation should fail
@@ -167,7 +167,7 @@ func TestRevocation_Disabled(t *testing.T) {
 		ctx := context.Background()
 
 		// Create a refresh token
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Attempt revocation should fail
@@ -180,10 +180,10 @@ func TestRevocation_Disabled(t *testing.T) {
 		ctx := context.Background()
 
 		// Create both token types
-		accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
-		refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Both should be verifiable
@@ -223,7 +223,7 @@ func TestRevocation_Disabled(t *testing.T) {
 		assert.NotNil(t, maker)
 
 		// Token creation and verification should work
-		token, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		token, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		assert.NoError(t, err)
 		assert.NotNil(t, token)
 
@@ -239,7 +239,7 @@ func TestRevocation_Disabled(t *testing.T) {
 		maker := setupTestMaker(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		err = maker.RevokeAccessToken(ctx, token.Token)
@@ -251,7 +251,7 @@ func TestRevocation_Disabled(t *testing.T) {
 		maker := setupTestMaker(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Try to revoke (will fail)
@@ -270,7 +270,7 @@ func TestRevocationAndRotationTogether(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		oldToken, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		oldToken, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate
@@ -294,7 +294,7 @@ func TestRevocationAndRotationTogether(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Revoke first
@@ -312,7 +312,7 @@ func TestRevocationAndRotationTogether(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		oldToken, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		oldToken, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate
@@ -334,7 +334,7 @@ func TestRevocationAndRotationTogether(t *testing.T) {
 		ctx := context.Background()
 
 		userID := uuid.NewString()
-		currentToken, err := maker.CreateRefreshToken(ctx, userID, "user", uuid.NewString())
+		currentToken, err := maker.CreateRefreshToken(ctx, userID, "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Perform rapid operations
@@ -366,7 +366,7 @@ func TestRevocationTTL(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Revoke immediately
@@ -390,7 +390,7 @@ func TestRevocationTTL(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, nil) // No repo
 		ctx := context.Background()
 
-		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Wait for expiry
@@ -413,7 +413,7 @@ func TestRotationChain(t *testing.T) {
 		sessionID := uuid.NewString()
 		username := "chainuser"
 
-		currentToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		currentToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Track all tokens
@@ -452,7 +452,7 @@ func TestRotationChain(t *testing.T) {
 		ctx := context.Background()
 
 		// Create chain
-		token1, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token1, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		token2, err := maker.RotateRefreshToken(ctx, token1.Token)
@@ -486,7 +486,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Wait only 20% of expiry time (plenty of buffer)
@@ -520,7 +520,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Wait until token is expired
@@ -544,7 +544,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Wait until very close to expiry (85% of lifetime)
@@ -580,7 +580,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate early (well before expiry)
@@ -645,7 +645,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Wait until very close to expiry
@@ -669,7 +669,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Immediately verify - should work
@@ -682,7 +682,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token1, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token1, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// First rotation
@@ -708,7 +708,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Revoke the token
@@ -725,7 +725,7 @@ func TestEdgeCasesRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token1, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token1, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate the token
@@ -772,7 +772,7 @@ func TestConcurrentRevocationRotation(t *testing.T) {
 		// Create multiple tokens
 		tokens := make([]*AccessTokenResponse, 20)
 		for i := range tokens {
-			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+			token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 			require.NoError(t, err)
 			tokens[i] = token
 		}
@@ -807,7 +807,7 @@ func TestConcurrentRevocationRotation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Try to rotate and revoke simultaneously

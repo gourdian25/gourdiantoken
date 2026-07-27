@@ -28,7 +28,7 @@ func TestRevokeAccessToken_ContextCancellation(t *testing.T) {
 
 	t.Run("returns error when context is canceled", func(t *testing.T) {
 		// Create token first
-		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -40,7 +40,7 @@ func TestRevokeAccessToken_ContextCancellation(t *testing.T) {
 	})
 
 	t.Run("succeeds with valid context", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		err = maker.RevokeAccessToken(context.Background(), response.Token)
@@ -67,7 +67,7 @@ func TestRevokeRefreshToken_ContextCancellation(t *testing.T) {
 	username := "testuser"
 
 	t.Run("returns error when context is canceled", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -79,7 +79,7 @@ func TestRevokeRefreshToken_ContextCancellation(t *testing.T) {
 	})
 
 	t.Run("succeeds with valid context", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		err = maker.RevokeRefreshToken(context.Background(), response.Token)
@@ -105,7 +105,7 @@ func TestRevokeAccessToken_FeatureDisabled(t *testing.T) {
 	roles := []string{"admin"}
 
 	t.Run("returns error when revocation is disabled", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		err = maker.RevokeAccessToken(context.Background(), response.Token)
@@ -126,7 +126,7 @@ func TestRevokeRefreshToken_FeatureDisabled(t *testing.T) {
 	username := "testuser"
 
 	t.Run("returns error when revocation is disabled", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		err = maker.RevokeRefreshToken(context.Background(), response.Token)

@@ -34,7 +34,7 @@ func TestContextCancellation(t *testing.T) {
 		cancel()
 
 		userID := uuid.NewString()
-		token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString(), "")
 
 		assert.Error(t, err)
 		assert.Nil(t, token)
@@ -45,7 +45,7 @@ func TestContextCancellation(t *testing.T) {
 		maker := setupTestMaker(t)
 
 		// Create token with valid context
-		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Verify with canceled context
@@ -67,7 +67,7 @@ func TestContextCancellation(t *testing.T) {
 		time.Sleep(10 * time.Millisecond) // Ensure timeout
 
 		userID := uuid.NewString()
-		token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(ctx, userID, "user", []string{"admin"}, uuid.NewString(), "")
 
 		assert.Error(t, err)
 		assert.Nil(t, token)
@@ -77,7 +77,7 @@ func TestContextCancellation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 
 		// Create token
-		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Revoke with canceled context
@@ -93,7 +93,7 @@ func TestContextCancellation(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 
 		// Create refresh token
-		token, err := maker.CreateRefreshToken(context.Background(), uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(context.Background(), uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate with canceled context
@@ -443,7 +443,7 @@ func TestBoundaryConditions(t *testing.T) {
 			username = username[:i] + "a" + username[i+1:]
 		}
 
-		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), username, []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), username, []string{"admin"}, uuid.NewString(), "")
 		assert.NoError(t, err)
 		assert.NotNil(t, token)
 		assert.Equal(t, 1024, len(token.Username))
@@ -453,7 +453,7 @@ func TestBoundaryConditions(t *testing.T) {
 		maker := setupTestMaker(t)
 		username := string(make([]byte, 1025))
 
-		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), username, []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), username, []string{"admin"}, uuid.NewString(), "")
 		assert.Error(t, err)
 		assert.Nil(t, token)
 		assert.Contains(t, err.Error(), "username too long")
@@ -461,7 +461,7 @@ func TestBoundaryConditions(t *testing.T) {
 
 	t.Run("single role", func(t *testing.T) {
 		maker := setupTestMaker(t)
-		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"user"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"user"}, uuid.NewString(), "")
 		assert.NoError(t, err)
 		assert.NotNil(t, token)
 		assert.Len(t, token.Roles, 1)
@@ -474,7 +474,7 @@ func TestBoundaryConditions(t *testing.T) {
 			roles[i] = "role" + string(rune(i))
 		}
 
-		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", roles, uuid.NewString())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", roles, uuid.NewString(), "")
 		assert.NoError(t, err)
 		assert.NotNil(t, token)
 		assert.Len(t, token.Roles, 100)
@@ -512,7 +512,7 @@ func TestBoundaryConditions(t *testing.T) {
 		assert.Contains(t, err.Error(), "expired")
 
 		// Test with a valid token
-		validToken, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		validToken, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		claims, err = maker.VerifyAccessToken(context.Background(), validToken.Token)
@@ -558,7 +558,7 @@ func TestBoundaryConditions(t *testing.T) {
 		assert.Contains(t, err.Error(), "expired")
 
 		// Test 2: Create a valid token and verify it works
-		validToken, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		validToken, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		claims, err = maker.VerifyAccessToken(context.Background(), validToken.Token)
@@ -573,7 +573,7 @@ func TestBoundaryConditions(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, nil)
 
 		// Create token and immediately verify it's valid
-		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString())
+		token, err := maker.CreateAccessToken(context.Background(), uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Verify token is initially valid
