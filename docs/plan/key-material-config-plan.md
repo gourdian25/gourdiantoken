@@ -63,7 +63,7 @@ future initiative, not part of this plan.
 | Stage | Scope | Status |
 |---|---|---|
 | Stage 1 | Core config/validation/key-loading change | ✅ Done |
-| Stage 2 | Docs / CHANGELOG / example.go pass | Not started |
+| Stage 2 | Docs / CHANGELOG / example.go pass | ✅ Done |
 
 ## Stage 1 — Core config/validation/key-loading change
 
@@ -273,6 +273,58 @@ Implemented exactly as scoped above, no design deviations:
 
 **Verification:** `go run ./example` end-to-end against at least Memory (all
 4 backends if `make docker-up` is available); `gofmt`/`goimports` clean.
+
+### Stage 2 completion notes
+
+One scoping correction versus what the plan anticipated, everything else
+landed as described:
+
+- **`example/example.go` needed zero changes.** The plan's own wording
+  flagged this as unconfirmed ("confirm during implementation whether it
+  currently writes key files to disk or already holds bytes in memory
+  before writing") — turns out neither: the demo only exercises `Symmetric`/
+  `HS256` signing across all four backends and stateless mode (confirmed via
+  grep for `asymmetric`/`rsa`/`ecdsa`/`eddsa`/`ed25519`/`.pem`, zero hits,
+  and `SigningMethod`/`Algorithm` only ever set to `Symmetric`/`"HS256"`).
+  There was no asymmetric-signing code path to wire `PrivateKeyPEM`/
+  `PublicKeyPEM` through.
+- **The "Upgrading to v2.3.0" section didn't exist yet** — multi-tenant
+  Stage 5 (which the plan expected to create it first) is still paused
+  behind this plan, not the other way around. Created the section now, in
+  both `README.md` (new `## ⚠️ Upgrading to v2.3.0` heading, right after the
+  existing v2.2.0 one) and `CHANGELOG.md` (new `## v2.3.0` section, right
+  above `## v2.2.0`, with a `### Breaking` entry). Multi-tenant Stage 5 will
+  extend both with its own entries when it runs, rather than creating a
+  second "Upgrading"/version section for the same release.
+- `README.md`: updated the `GourdianTokenConfig` struct listing, the field
+  reference table, all three `NewGourdianTokenConfig` code examples
+  (positional-args full example, "Production (RSA with Redis)", "High
+  Security (EdDSA with MongoDB)"), and expanded the "Asymmetric Key Setup"
+  section with a short prose paragraph on Kubernetes key-sourcing options
+  (mounted Secret volume, injected env vars, External Secrets Operator,
+  Vault Agent Injector, CSI Secret Store driver, secret-manager SDKs) plus a
+  runnable-shaped example reading a mounted Secret once at startup. The
+  "Algorithm Support" section (`config.Algorithm = "RS256"` etc.) needed no
+  change — it never referenced key paths.
+- `docs.go`: fixed one stale claim in "Security Considerations" ("Private
+  key files are checked for permissive file-mode bits (0600 recommended)
+  during initialization" — no longer true, `checkFilePermissions` is gone)
+  and replaced it with a paragraph on PEM-bytes-not-a-file-path plus the
+  same Kubernetes key-sourcing options list as the README, so the two stay
+  in sync.
+- `CLAUDE.md`: fixed the two stale references found via grep
+  (`gourdiantoken.keys.go`'s file-layout bullet still mentioning
+  `checkFilePermissions`; the Token lifecycle bullet still saying "load PEM
+  keys from `PrivateKeyPath`/`PublicKeyPath`"), added a new "Key material
+  (PrivateKeyPEM/PublicKeyPEM)" subsection (mirroring the "Multi-tenancy"
+  subsection's style) between "Multi-tenancy" and "Token lifecycle", and
+  updated "In-progress work" to reflect both of this plan's stages as done
+  and point back at multi-tenant Stage 4 as the next thing to resume.
+- Full verification green: `go build ./...`, `go vet ./...`, `gofmt -l .`
+  (clean), full test suite against all 4 live backends (unaffected by this
+  stage's doc-only changes, re-run for safety — still green), and
+  `go run ./example` end-to-end against all 4 backends + stateless mode
+  (230/230 scenarios passed, 100% success rate on each).
 
 ## Critical files
 

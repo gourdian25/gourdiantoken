@@ -64,16 +64,20 @@ described below.
 | Stage 1 | Tenant claim foundation | ✅ Done |
 | Stage 2 | Interface consolidation | ✅ Done |
 | Stage 3 | Tenant-scoped bulk revocation | ✅ Done |
-| Stage 4 | Repository backend standardization | Paused — see note below |
+| Stage 4 | Repository backend standardization | Ready to resume — see note below |
 | Stage 5 | Docs / CHANGELOG / version bump / example.go | Not started |
 | Stage 6 | Full validation pass | Not started |
 
 **Note:** after Stage 3, `docs/plan/key-material-config-plan.md` (in-memory
 `PrivateKeyPEM`/`PublicKeyPEM` config, replacing `PrivateKeyPath`/
-`PublicKeyPath`) was inserted and is being executed **before** Stage 4 below,
-per explicit instruction — an unrelated-to-multi-tenancy breaking change that
-surfaced mid-flight but targets the same `v2.3.0` release. Resume Stage 4
-once that plan is fully landed.
+`PublicKeyPath`) was inserted and executed **before** Stage 4 below, per
+explicit instruction — an unrelated-to-multi-tenancy breaking change that
+surfaced mid-flight but targets the same `v2.3.0` release. Both of that
+plan's stages are now done (core change + docs/README/CHANGELOG/example.go
+pass), including a `## v2.3.0` section it created in both `README.md`
+("Upgrading to v2.3.0") and `CHANGELOG.md` — Stage 5 below should extend
+those same sections with its own entries rather than creating new ones.
+Stage 4 is unblocked; resume it next.
 
 ## Design decisions locked in for the executor
 

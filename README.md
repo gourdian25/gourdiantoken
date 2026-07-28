@@ -155,6 +155,37 @@ go get go.mongodb.org/mongo-driver
 
 3. **Why the module path didn't change to `/v3`**: Go's own tooling requires a `/v3` import path for a real `v3.0.0` tag, which would force every consumer to update their import statements. Since this library has few external consumers today, that churn wasn't worth it — this release intentionally does not follow strict semver (a breaking change shipped as a `v2.x.y` bump). If that changes and broad compatibility guarantees become necessary, a future breaking release will move to `/v3` properly.
 
+## ⚠️ Upgrading to v2.3.0
+
+**v2.3.0 contains breaking changes**, same rationale as v2.2.0 above for staying on the `/v2` module path.
+
+1. **`PrivateKeyPath`/`PublicKeyPath` (file paths) are gone, replaced by `PrivateKeyPEM`/`PublicKeyPEM` (`[]byte`).** `GourdianTokenConfig` no longer reads a key off disk itself — asymmetric signing now takes PEM-encoded key bytes directly, sourced however your own deployment already handles secrets (an env var, a Kubernetes `Secret` mounted as a volume or injected as env vars, the External Secrets Operator, Vault Agent Injector, the CSI Secret Store driver, or a direct secret-manager SDK call). This removes the assumption that every consumer distributes keys as files on disk:
+
+   ```go
+   // Before (v2.2.x)
+   config := gourdiantoken.GourdianTokenConfig{
+       SigningMethod:  gourdiantoken.Asymmetric,
+       Algorithm:      "RS256",
+       PrivateKeyPath: "/keys/private.pem",
+       PublicKeyPath:  "/keys/public.pem",
+       // ...
+   }
+
+   // After (v2.3.0+) — read the bytes however fits your deployment, once at startup
+   privateKeyPEM, _ := os.ReadFile("/var/run/secrets/gourdiantoken/private.pem")
+   publicKeyPEM, _ := os.ReadFile("/var/run/secrets/gourdiantoken/public.pem")
+
+   config := gourdiantoken.GourdianTokenConfig{
+       SigningMethod: gourdiantoken.Asymmetric,
+       Algorithm:     "RS256",
+       PrivateKeyPEM: privateKeyPEM,
+       PublicKeyPEM:  publicKeyPEM,
+       // ...
+   }
+   ```
+
+   `NewGourdianTokenConfig`'s deprecated positional constructor changed to match: its `privateKeyPath, publicKeyPath string` parameters are now `privateKeyPEM, publicKeyPEM []byte`, same argument positions (9th/10th).
+
 ---
 
 ## 🚀 Quick Start
@@ -375,8 +406,8 @@ type GourdianTokenConfig struct {
     SigningMethod            SigningMethod // Symmetric or Asymmetric
     Algorithm                string        // HS256, RS256, ES256, EdDSA, etc.
     SymmetricKey             string        // For HMAC (min 32 bytes)
-    PrivateKeyPath           string        // For RSA/ECDSA/EdDSA
-    PublicKeyPath            string        // For RSA/ECDSA/EdDSA
+    PrivateKeyPEM            []byte        // PEM bytes, for RSA/ECDSA/EdDSA
+    PublicKeyPEM             []byte        // PEM bytes, for RSA/ECDSA/EdDSA
     
     // JWT Claims
     Issuer                   string        // Token issuer (iss)
@@ -419,8 +450,8 @@ argument position each one maps to.
 | `RequiredClaims` | `[]string` | Claims that must be present on every token | `["iss","aud","nbf","mle"]` | 6 |
 | `Algorithm` | `string` | JWT signing algorithm (must match `SigningMethod`) | `"HS256"` | 7 |
 | `SymmetricKey` | `string` | HMAC secret; must be ≥ 32 bytes | caller-supplied | 8 |
-| `PrivateKeyPath` | `string` | PEM private key path (asymmetric only) | `""` | 9 |
-| `PublicKeyPath` | `string` | PEM public key path (asymmetric only) | `""` | 10 |
+| `PrivateKeyPEM` | `[]byte` | PEM-encoded private key bytes (asymmetric only) | `nil` | 9 |
+| `PublicKeyPEM` | `[]byte` | PEM-encoded public key bytes (asymmetric only) | `nil` | 10 |
 | `Issuer` | `string` | Value written to / checked against the `iss` claim | `"gourdian.com"` | 11 |
 | `AccessExpiryDuration` | `time.Duration` | Access token sliding lifetime | `30m` | 12 |
 | `AccessMaxLifetimeExpiry` | `time.Duration` | Absolute ceiling for access tokens (`mle` claim) | `24h` | 13 |
@@ -465,6 +496,10 @@ config := gourdiantoken.DefaultGourdianTokenConfig("your-secret-key")
 > use it and the positional table above is the fastest way to read them.
 
 ```go
+// privateKeyPEM/publicKeyPEM: PEM bytes from wherever your own config system
+// holds them — an env var, a mounted Kubernetes Secret read once at
+// startup, a secret-manager SDK call. gourdiantoken never reads a key file
+// itself.
 config := gourdiantoken.NewGourdianTokenConfig(
     gourdiantoken.Asymmetric,           // Signing method
     true,                                // Rotation enabled
@@ -474,8 +509,8 @@ config := gourdiantoken.NewGourdianTokenConfig(
     []string{"iss", "aud", "nbf", "mle"},// Required claims
     "RS256",                             // Algorithm
     "",                                  // Symmetric key (empty for asymmetric)
-    "/path/to/private.pem",              // Private key
-    "/path/to/public.pem",               // Public key
+    privateKeyPEM,                       // Private key PEM bytes
+    publicKeyPEM,                        // Public key PEM bytes
     "auth.example.com",                  // Issuer
     15*time.Minute,                      // Access expiry
     24*time.Hour,                        // Access max lifetime
@@ -498,11 +533,15 @@ maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
 #### Production (RSA with Redis)
 
 ```go
+// e.g. read once at startup from a mounted Kubernetes Secret volume:
+privateKeyPEM, _ := os.ReadFile("/var/run/secrets/gourdiantoken/private.pem")
+publicKeyPEM, _ := os.ReadFile("/var/run/secrets/gourdiantoken/public.pem")
+
 config := gourdiantoken.NewGourdianTokenConfig(
     gourdiantoken.Asymmetric, true, true,
     []string{"api.prod.com"}, []string{"RS256"},
     []string{"iss", "aud", "exp", "nbf", "mle"},
-    "RS256", "", "/keys/private.pem", "/keys/public.pem",
+    "RS256", "", privateKeyPEM, publicKeyPEM,
     "auth.prod.com",
     15*time.Minute, 24*time.Hour,
     7*24*time.Hour, 30*24*time.Hour,
@@ -518,11 +557,16 @@ maker, _ := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisClien
 client, _ := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
 mongoDB := client.Database("auth")
 
+// e.g. injected as env vars by a Kubernetes Secret, or fetched from a
+// secret-manager SDK (Vault, AWS Secrets Manager, GCP Secret Manager, ...):
+privateKeyPEM := []byte(os.Getenv("GOURDIANTOKEN_ED25519_PRIVATE_KEY"))
+publicKeyPEM := []byte(os.Getenv("GOURDIANTOKEN_ED25519_PUBLIC_KEY"))
+
 config := gourdiantoken.NewGourdianTokenConfig(
     gourdiantoken.Asymmetric, true, true,
     []string{"secure-api.com"}, []string{"EdDSA"},
     []string{"iss", "aud", "exp", "nbf", "mle"},
-    "EdDSA", "", "/keys/ed25519-private.pem", "/keys/ed25519-public.pem",
+    "EdDSA", "", privateKeyPEM, publicKeyPEM,
     "auth.secure.com",
     15*time.Minute, 12*time.Hour,
     24*time.Hour, 7*24*time.Hour,
@@ -1255,8 +1299,20 @@ the [API Reference](#-api-reference) for the calls each would wrap.
 
 ### Asymmetric Key Setup
 
+`GourdianTokenConfig.PrivateKeyPEM`/`PublicKeyPEM` take PEM-encoded key
+bytes directly — gourdiantoken never reads a key file itself, so it has no
+opinion on *where* those bytes come from. That's deliberate: a service
+deployed to Kubernetes typically already has its own way of getting secret
+material into the process (a `Secret` mounted as a volume, a `Secret`
+injected as env vars, the External Secrets Operator, Vault Agent Injector,
+the CSI Secret Store driver, or a direct call to a secret manager's SDK —
+AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, Vault itself), and
+gourdiantoken shouldn't force a second, competing convention on top of it.
+Read the bytes once at startup, however your deployment already does that,
+and pass them straight into the config:
+
 ```go
-func setupAsymmetric() (gourdiantoken.GourdianTokenMaker, error) {
+func setupAsymmetric(privateKeyPEM, publicKeyPEM []byte) (gourdiantoken.GourdianTokenMaker, error) {
     // NewGourdianTokenMakerNoStorage requires RotationEnabled and
     // RevocationEnabled to both be false (no repository = nowhere to track
     // revoked/rotated tokens) — pass false, false here rather than true, true.
@@ -1268,8 +1324,8 @@ func setupAsymmetric() (gourdiantoken.GourdianTokenMaker, error) {
         []string{"iss", "aud", "nbf", "mle"},
         "RS256",
         "",
-        "/secure/keys/private.pem",
-        "/secure/keys/public.pem",
+        privateKeyPEM,
+        publicKeyPEM,
         "auth.example.com",
         15*time.Minute, 24*time.Hour,
         7*24*time.Hour, 30*24*time.Hour,
@@ -1279,6 +1335,17 @@ func setupAsymmetric() (gourdiantoken.GourdianTokenMaker, error) {
     ctx := context.Background()
     return gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
 }
+
+// e.g. a Secret mounted as a volume, read once at process startup:
+privateKeyPEM, err := os.ReadFile("/var/run/secrets/gourdiantoken/private.pem")
+if err != nil {
+    log.Fatal(err)
+}
+publicKeyPEM, err := os.ReadFile("/var/run/secrets/gourdiantoken/public.pem")
+if err != nil {
+    log.Fatal(err)
+}
+maker, err := setupAsymmetric(privateKeyPEM, publicKeyPEM)
 ```
 
 ---

@@ -2,6 +2,29 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## v2.3.0
+
+**Breaking changes** — see
+[README.md's "Upgrading to v2.3.0"](./README.md#️-upgrading-to-v230)
+for the full migration guide.
+
+### Breaking
+
+- **`PrivateKeyPath`/`PublicKeyPath` (file paths) replaced by
+  `PrivateKeyPEM`/`PublicKeyPEM` (`[]byte`).** `GourdianTokenConfig` no
+  longer reads a key file off disk itself — `parseKeyPair` now parses the
+  PEM bytes handed to it directly. Motivated by deployment environments
+  (Kubernetes in particular) where the key material already arrives as
+  bytes in memory via the consumer's own config-loading path (an env var, a
+  mounted `Secret` volume, the External Secrets Operator, Vault Agent
+  Injector, the CSI Secret Store driver, or a direct secret-manager SDK
+  call) rather than as a well-known file path gourdiantoken would need to
+  read itself. `checkFilePermissions` (the 0600-permission check that only
+  made sense for a file on disk) is removed along with it.
+  `NewGourdianTokenConfig`'s deprecated positional constructor changed to
+  match: `privateKeyPath, publicKeyPath string` → `privateKeyPEM,
+  publicKeyPEM []byte`, same argument positions.
+
 ## v2.2.0
 
 **Breaking changes, despite the minor-looking version number** — see

@@ -194,10 +194,20 @@
 //
 // Symmetric keys must be at least 32 bytes; generate them with a
 // cryptographically secure random source and never commit them to version
-// control. Private key files are checked for permissive file-mode bits
-// (0600 recommended) during initialization. AllowedAlgorithms lets callers
-// pin verification to a whitelist, preventing algorithm-confusion attacks
-// independent of what Algorithm a given token claims to use.
+// control. AllowedAlgorithms lets callers pin verification to a whitelist,
+// preventing algorithm-confusion attacks independent of what Algorithm a
+// given token claims to use.
+//
+// PrivateKeyPEM/PublicKeyPEM take PEM-encoded key bytes directly rather than
+// a file path — gourdiantoken never reads a key file itself, so it has no
+// file-permission check to perform. Callers own how those bytes reach the
+// process: for a Kubernetes deployment, typical options are a Secret mounted
+// as a volume and read once at startup, a Secret injected as environment
+// variables, the External Secrets Operator, the Vault Agent Injector or CSI
+// Secret Store driver, or a direct call to a secret manager's SDK (AWS
+// Secrets Manager, GCP Secret Manager, Azure Key Vault, Vault itself). Any of
+// these converge on the same shape gourdiantoken expects: PEM bytes already
+// in memory before NewGourdianTokenMaker is called.
 //
 // For new systems, prefer EdDSA (fastest, side-channel resistant) or ES256
 // (efficient, broadly supported) over RS*/PS*; use PS* over RS* if RSA is
