@@ -13,7 +13,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
-	"os"
 )
 
 // decodePEMBlock decodes a PEM block, returning a descriptive error if decoding fails.
@@ -331,41 +330,6 @@ func parseECDSAPublicKey(pemBytes []byte) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("not a valid ECDSA public key")
 	}
 	return ecdsaPub, nil
-}
-
-// checkFilePermissions verifies that a file has secure permissions.
-// Used to ensure private key files are not world-readable.
-//
-// Security Check:
-//   - Verifies file doesn't have permissions beyond required
-//   - Recommended: 0600 (read/write for owner only)
-//   - Fails if file is readable by group or others
-//
-// Parameters:
-//   - path: File path to check
-//   - requiredPerm: Maximum allowed permissions (e.g., 0600)
-//
-// Returns:
-//   - error: If file has excessive permissions or cannot be accessed
-//
-// Example:
-//
-//	err := checkFilePermissions("/keys/private.pem", 0600)
-//	if err != nil {
-//	    log.Fatal("Private key file has insecure permissions")
-//	}
-func checkFilePermissions(path string, requiredPerm os.FileMode) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-
-	actualPerm := info.Mode().Perm()
-	if actualPerm&^requiredPerm != 0 {
-		return fmt.Errorf("file %s has permissions %#o, expected %#o", path, actualPerm, requiredPerm)
-	}
-
-	return nil
 }
 
 // getUnixTime extracts a Unix timestamp from various claim value types.

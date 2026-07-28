@@ -4,6 +4,7 @@ package gourdiantoken
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,7 +20,10 @@ func TestNopLogger(t *testing.T) {
 	l.Error("noop")
 }
 
+// recordingLogger is safe for concurrent use: cleanupRotatedTokens/cleanupRevokedTokens run
+// as separate goroutines and may both call Error concurrently.
 type recordingLogger struct {
+	mu     sync.Mutex
 	errors []string
 }
 
@@ -27,6 +31,8 @@ func (r *recordingLogger) Debug(string, ...any) {}
 func (r *recordingLogger) Info(string, ...any)  {}
 func (r *recordingLogger) Warn(string, ...any)  {}
 func (r *recordingLogger) Error(msg string, _ ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.errors = append(r.errors, msg)
 }
 

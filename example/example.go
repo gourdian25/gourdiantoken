@@ -4,6 +4,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -17,6 +22,31 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// generateRSAKeyPairPEM generates a fresh in-memory RSA key pair, PEM-encoded as bytes —
+// the same shape GourdianTokenConfig.PrivateKeyPEM/PublicKeyPEM expect. Stands in here for
+// however a real deployment would source these bytes (an env var, a mounted Kubernetes
+// Secret read once at startup, a secret-manager SDK call): gourdiantoken never reads a key
+// file itself, so this demo doesn't either.
+func generateRSAKeyPairPEM(bits int) (privPEM, pubPEM []byte, err error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate RSA key: %w", err)
+	}
+
+	privPEM = pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
+
+	pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal RSA public key: %w", err)
+	}
+	pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+
+	return privPEM, pubPEM, nil
+}
 
 // TestResult holds the results of a test operation
 type TestResult struct {
@@ -34,6 +64,14 @@ type RepositoryConfig struct {
 	Description string
 	CreateRepo  func() (gourdiantoken.TokenRepository, error)
 	Cleanup     func() error
+
+	// SigningMethod/Algorithm/PrivateKeyPEM/PublicKeyPEM are optional overrides for
+	// asymmetric-signing demo entries; the zero value on all four means "use the default
+	// Symmetric/HS256 setup", so every pre-existing entry is unaffected.
+	SigningMethod gourdiantoken.SigningMethod
+	Algorithm     string
+	PrivateKeyPEM []byte
+	PublicKeyPEM  []byte
 }
 
 // PerformanceMetrics tracks performance data
@@ -95,7 +133,7 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 
 	// Test 1: Revoke Access Token
 	results = append(results, runTest("Revoke Access Token", func() (string, error) {
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -119,7 +157,7 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 
 	// Test 2: Revoke Refresh Token
 	results = append(results, runTest("Revoke Refresh Token", func() (string, error) {
-		token, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -142,7 +180,7 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 
 	// Test 3: Rotate Refresh Token
 	results = append(results, runTest("Rotate Refresh Token", func() (string, error) {
-		oldToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		oldToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -172,7 +210,7 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 
 	// Test 4: Double Rotation Prevention
 	results = append(results, runTest("Prevent Double Rotation", func() (string, error) {
-		oldToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		oldToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -196,7 +234,7 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 
 	// Test 5: Token Expiration Simulation
 	results = append(results, runTest("Token Expiration Check", func() (string, error) {
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -213,26 +251,17 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 	return results
 }
 
-// runVerificationTokenTests exercises the optional GourdianTokenMakerVerification
-// interface (short-lived, single-use, use-case-scoped tokens), the way a real caller
-// would type-assert for it.
+// runVerificationTokenTests exercises short-lived, single-use, use-case-scoped
+// verification tokens.
 func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.GourdianTokenMaker) []TestResult {
 	var results []TestResult
 	fmt.Printf("\n┌─ %s\n", "VERIFICATION TOKENS")
-
-	verifier, ok := tokenMaker.(gourdiantoken.GourdianTokenMakerVerification)
-	if !ok {
-		results = append(results, runTest("Verification Token Support", func() (string, error) {
-			return "GourdianTokenMakerVerification not implemented (skipped)", nil
-		}))
-		return results
-	}
 
 	userID := uuid.NewString()
 
 	// Test 1: Create and Verify
 	results = append(results, runTest("Create and Verify Verification Token", func() (string, error) {
-		token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, map[string]interface{}{"username": "alice"})
+		token, err := tokenMaker.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, map[string]interface{}{"username": "alice"})
 		if err != nil {
 			if err.Error() == "verification tokens are not enabled" {
 				return "Verification tokens not enabled (skipped)", nil
@@ -240,7 +269,7 @@ func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 			return "", err
 		}
 
-		claims, err := verifier.VerifyVerificationToken(ctx, token.Token)
+		claims, err := tokenMaker.VerifyVerificationToken(ctx, token.Token)
 		if err != nil {
 			return "", err
 		}
@@ -250,7 +279,7 @@ func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 2: Mark Used, Then Verify Fails
 	results = append(results, runTest("Mark Verification Token Used", func() (string, error) {
-		token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
+		token, err := tokenMaker.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
 		if err != nil {
 			if err.Error() == "verification tokens are not enabled" {
 				return "Verification tokens not enabled (skipped)", nil
@@ -258,7 +287,7 @@ func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 			return "", err
 		}
 
-		err = verifier.MarkVerificationTokenUsed(ctx, token.Token)
+		err = tokenMaker.MarkVerificationTokenUsed(ctx, token.Token)
 		if err != nil {
 			if strings.Contains(err.Error(), "revocation is not enabled") {
 				return "Revocation not enabled (skipped)", nil
@@ -266,7 +295,7 @@ func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 			return "", err
 		}
 
-		_, err = verifier.VerifyVerificationToken(ctx, token.Token)
+		_, err = tokenMaker.VerifyVerificationToken(ctx, token.Token)
 		if err == nil {
 			return "", fmt.Errorf("token should be rejected after being marked used but verification succeeded")
 		}
@@ -297,7 +326,7 @@ func runSecurityValidationTests(ctx context.Context, tokenMaker gourdiantoken.Go
 
 	// Test 2: Tampered Token
 	results = append(results, runTest("Reject Tampered Token", func() (string, error) {
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, "user@test.com", []string{"user"}, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, "user@test.com", []string{"user"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -322,7 +351,7 @@ func runSecurityValidationTests(ctx context.Context, tokenMaker gourdiantoken.Go
 
 	// Test 4: Wrong Token Type
 	results = append(results, runTest("Reject Wrong Token Type", func() (string, error) {
-		refreshToken, err := tokenMaker.CreateRefreshToken(ctx, userID, "user@test.com", sessionID)
+		refreshToken, err := tokenMaker.CreateRefreshToken(ctx, userID, "user@test.com", sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -338,7 +367,7 @@ func runSecurityValidationTests(ctx context.Context, tokenMaker gourdiantoken.Go
 	// Test 5: SQL Injection in Username
 	results = append(results, runTest("Handle SQL Injection in Username", func() (string, error) {
 		maliciousUsername := "admin'--"
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, maliciousUsername, []string{"user"}, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, maliciousUsername, []string{"user"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -357,7 +386,7 @@ func runSecurityValidationTests(ctx context.Context, tokenMaker gourdiantoken.Go
 	// Test 6: XSS in Username
 	results = append(results, runTest("Handle XSS in Username", func() (string, error) {
 		xssUsername := "<script>alert('xss')</script>@test.com"
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, xssUsername, []string{"user"}, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, xssUsername, []string{"user"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -385,7 +414,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 
 	// Test 1: Nil User ID
 	results = append(results, runTest("Reject Nil User ID", func() (string, error) {
-		_, err := tokenMaker.CreateAccessToken(ctx, "", "user@test.com", []string{"user"}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, "", "user@test.com", []string{"user"}, sessionID, "")
 		if err == nil {
 			return "", fmt.Errorf("should reject nil user ID")
 		}
@@ -394,7 +423,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 
 	// Test 2: Empty Roles
 	results = append(results, runTest("Reject Empty Roles", func() (string, error) {
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", []string{}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", []string{}, sessionID, "")
 		if err == nil {
 			return "", fmt.Errorf("should reject empty roles")
 		}
@@ -403,7 +432,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 
 	// Test 3: Empty String in Roles
 	results = append(results, runTest("Reject Empty String in Roles", func() (string, error) {
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", []string{"user", "", "admin"}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", []string{"user", "", "admin"}, sessionID, "")
 		if err == nil {
 			return "", fmt.Errorf("should reject empty string in roles")
 		}
@@ -413,7 +442,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	// Test 4: Extremely Long Username
 	results = append(results, runTest("Reject Extremely Long Username", func() (string, error) {
 		longUsername := strings.Repeat("a", 2000) + "@test.com"
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), longUsername, []string{"user"}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), longUsername, []string{"user"}, sessionID, "")
 		if err == nil {
 			return "", fmt.Errorf("should reject extremely long username")
 		}
@@ -423,7 +452,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	// Test 5: Maximum Valid Username Length
 	results = append(results, runTest("Accept Maximum Valid Username", func() (string, error) {
 		maxUsername := strings.Repeat("a", 1000) + "@test.com"
-		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), maxUsername, []string{"user"}, sessionID)
+		_, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), maxUsername, []string{"user"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -433,7 +462,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	// Test 6: Unicode Username
 	results = append(results, runTest("Handle Unicode Username", func() (string, error) {
 		unicodeUsername := "用户名@例え.日本"
-		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), unicodeUsername, []string{"user"}, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), unicodeUsername, []string{"user"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -452,7 +481,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 	// Test 7: Special Characters in Roles
 	results = append(results, runTest("Handle Special Characters in Roles", func() (string, error) {
 		specialRoles := []string{"admin:write", "user/read", "mod*all", "super_admin"}
-		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", specialRoles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", specialRoles, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -472,7 +501,7 @@ func runEdgeCaseTests(ctx context.Context, tokenMaker gourdiantoken.GourdianToke
 			manyRoles[i] = fmt.Sprintf("role_%d", i)
 		}
 
-		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", manyRoles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), "user@test.com", manyRoles, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -509,7 +538,7 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 				username := fmt.Sprintf("concurrent%d@test.com", id)
 				roles := []string{"user"}
 
-				_, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+				_, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 				errChan <- err
 			}(i)
 		}
@@ -538,7 +567,7 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 		tokens := make([]string, count)
 		for i := 0; i < count; i++ {
 			token, err := tokenMaker.CreateAccessToken(ctx, uuid.NewString(), fmt.Sprintf("user%d@test.com", i),
-				[]string{"user"}, uuid.NewString())
+				[]string{"user"}, uuid.NewString(), "")
 			if err != nil {
 				return "", err
 			}
@@ -594,11 +623,11 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 				switch id % 10 {
 				case 0, 1, 2, 3, 4: // Create
 					_, err := tokenMaker.CreateAccessToken(ctx, userID, fmt.Sprintf("user%d@test.com", id),
-						[]string{"user"}, sessionID)
+						[]string{"user"}, sessionID, "")
 					errChan <- err
 				case 5, 6, 7: // Verify
 					token, err := tokenMaker.CreateAccessToken(ctx, userID, fmt.Sprintf("user%d@test.com", id),
-						[]string{"user"}, sessionID)
+						[]string{"user"}, sessionID, "")
 					if err != nil {
 						errChan <- err
 						return
@@ -606,7 +635,7 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 					_, err = tokenMaker.VerifyAccessToken(ctx, token.Token)
 					errChan <- err
 				default: // Rotate
-					token, err := tokenMaker.CreateRefreshToken(ctx, userID, fmt.Sprintf("user%d@test.com", id), sessionID)
+					token, err := tokenMaker.CreateRefreshToken(ctx, userID, fmt.Sprintf("user%d@test.com", id), sessionID, "")
 					if err != nil {
 						errChan <- err
 						return
@@ -638,7 +667,7 @@ func runConcurrencyTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 
 	// Test 4: Race Condition on Token Rotation
 	results = append(results, runTest("Race Condition: Simultaneous Rotation", func() (string, error) {
-		token, err := tokenMaker.CreateRefreshToken(ctx, uuid.NewString(), "race@test.com", uuid.NewString())
+		token, err := tokenMaker.CreateRefreshToken(ctx, uuid.NewString(), "race@test.com", uuid.NewString(), "")
 		if err != nil {
 			return "", err
 		}
@@ -693,7 +722,7 @@ func runBasicOperationsTests(ctx context.Context, tokenMaker gourdiantoken.Gourd
 
 	// Test 1: Create Access Token
 	results = append(results, runTest("Create Access Token", func() (string, error) {
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -717,7 +746,7 @@ func runBasicOperationsTests(ctx context.Context, tokenMaker gourdiantoken.Gourd
 
 	// Test 2: Create Refresh Token
 	results = append(results, runTest("Create Refresh Token", func() (string, error) {
-		token, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -738,7 +767,7 @@ func runBasicOperationsTests(ctx context.Context, tokenMaker gourdiantoken.Gourd
 
 	// Test 3: Verify Valid Access Token
 	results = append(results, runTest("Verify Valid Access Token", func() (string, error) {
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -765,7 +794,7 @@ func runBasicOperationsTests(ctx context.Context, tokenMaker gourdiantoken.Gourd
 
 	// Test 4: Verify Valid Refresh Token
 	results = append(results, runTest("Verify Valid Refresh Token", func() (string, error) {
-		token, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -793,7 +822,7 @@ func runBasicOperationsTests(ctx context.Context, tokenMaker gourdiantoken.Gourd
 		testUsername := "integrity@test.com"
 		testRoles := []string{"admin", "editor", "viewer"}
 
-		token, err := tokenMaker.CreateAccessToken(ctx, testUserID, testUsername, testRoles, testSessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, testUserID, testUsername, testRoles, testSessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -853,7 +882,7 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 			username := fmt.Sprintf("perfuser%d@test.com", i)
 			roles := []string{"user", fmt.Sprintf("role%d", i%10)}
 
-			_, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+			_, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 			if err != nil {
 				return "", fmt.Errorf("failed at token %d: %w", i, err)
 			}
@@ -876,7 +905,7 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 			username := fmt.Sprintf("verifyuser%d@test.com", i)
 			roles := []string{"user"}
 
-			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 			if err != nil {
 				return "", fmt.Errorf("failed to create token %d: %w", i, err)
 			}
@@ -915,7 +944,7 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 				roles[j] = fmt.Sprintf("department_%d_role_%d", i, j)
 			}
 
-			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 			if err != nil {
 				return "", fmt.Errorf("failed at token %d: %w", i, err)
 			}
@@ -940,7 +969,7 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 			roles := []string{"user"}
 
 			// Create token
-			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 			if err != nil {
 				return "", fmt.Errorf("create failed at op %d: %w", i, err)
 			}
@@ -971,7 +1000,7 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 			roles := []string{"user"}
 
 			start := time.Now()
-			_, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+			_, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 			if err != nil {
 				return "", fmt.Errorf("failed at sample %d: %w", i, err)
 			}
@@ -1019,15 +1048,15 @@ func runPerformanceTests(ctx context.Context, tokenMaker gourdiantoken.GourdianT
 				switch id % 3 {
 				case 0:
 					// Create access token
-					_, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+					_, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 					errorChan <- err
 				case 1:
 					// Create refresh token
-					_, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+					_, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 					errorChan <- err
 				case 2:
 					// Create and verify
-					token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+					token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 					if err != nil {
 						errorChan <- err
 						return
@@ -1073,12 +1102,12 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		roles := []string{"user", "employee", "developer"}
 
 		// Create tokens
-		accessToken, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		accessToken, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		if err != nil {
 			return "", fmt.Errorf("failed to create access token: %w", err)
 		}
 
-		refreshToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		refreshToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		if err != nil {
 			return "", fmt.Errorf("failed to create refresh token: %w", err)
 		}
@@ -1107,7 +1136,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		username := "bob@company.com"
 
 		// Initial refresh token
-		oldRefreshToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		oldRefreshToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -1122,7 +1151,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		}
 
 		// Create new access token with same user info
-		newAccessToken, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID)
+		newAccessToken, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -1138,12 +1167,12 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		username := "charlie@company.com"
 
 		// Create tokens
-		accessToken, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID)
+		accessToken, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
 
-		refreshToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		refreshToken, err := tokenMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -1172,7 +1201,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 		for _, device := range devices {
 			sessionID := uuid.NewString() // Different session per device
-			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID)
+			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID, "")
 			if err != nil {
 				return "", fmt.Errorf("failed to create token for %s: %w", device, err)
 			}
@@ -1207,7 +1236,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 			userID := uuid.NewString()
 			sessionID := uuid.NewString()
 
-			token, err := tokenMaker.CreateAccessToken(ctx, userID, u.username, u.roles, sessionID)
+			token, err := tokenMaker.CreateAccessToken(ctx, userID, u.username, u.roles, sessionID, "")
 			if err != nil {
 				return "", fmt.Errorf("failed for %s: %w", u.username, err)
 			}
@@ -1245,7 +1274,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 		for i := 0; i < sessions; i++ {
 			sessionID := uuid.NewString()
-			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID)
+			token, err := tokenMaker.CreateAccessToken(ctx, userID, username, []string{"user"}, sessionID, "")
 			if err != nil {
 				return "", err
 			}
@@ -1274,7 +1303,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		userID := uuid.NewString()
 		sessionID := uuid.NewString()
 
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, "nearexpiry@test.com", []string{"user"}, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, "nearexpiry@test.com", []string{"user"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -1299,7 +1328,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		roles := []string{"user", "banker", "transaction_approver"}
 
 		// Create short-lived token for sensitive operation
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -1338,7 +1367,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		sessionID := uuid.NewString()
 
 		// Create token once
-		token, err := tokenMaker.CreateAccessToken(ctx, userID, "api@user.com", []string{"user", "api"}, sessionID)
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, "api@user.com", []string{"user", "api"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -1365,7 +1394,7 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 		// Service A creates token
 		token, err := tokenMaker.CreateAccessToken(ctx, userID, "microservice@user.com",
-			[]string{"user", "service_a", "service_b"}, sessionID)
+			[]string{"user", "service_a", "service_b"}, sessionID, "")
 		if err != nil {
 			return "", err
 		}
@@ -1392,6 +1421,102 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 		return fmt.Sprintf("Token verified across %d microservices", successCount), nil
 	}))
 
+	return results
+}
+
+// runMultiTenantDemo exercises GourdianTokenConfig.MultiTenantEnabled and
+// GourdianTokenMaker.RevokeTenant end to end: creating tenant-scoped tokens, verifying the
+// "tid" claim round-trips, and confirming a tenant-wide revocation invalidates only tokens
+// issued at-or-before the revocation epoch while a fresh token for the same tenant, issued
+// afterward, still verifies. Kept as its own standalone demo (with its own dedicated maker)
+// rather than folded into RunComprehensiveTests' fixed pipeline, since every other test
+// group there passes an empty tenantID and would fail outright against a
+// MultiTenantEnabled=true maker.
+func runMultiTenantDemo(ctx context.Context, tokenMaker gourdiantoken.GourdianTokenMaker) []TestResult {
+	var results []TestResult
+	fmt.Printf("\n┌─ %s\n", "MULTI-TENANCY (MultiTenantEnabled + RevokeTenant)")
+
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
+	tenantID := "acme-corp"
+
+	var preRevocationToken string
+
+	results = append(results, runTest("Create access token with tenantID", func() (string, error) {
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, "alice@acme-corp.com", []string{"user"}, sessionID, tenantID)
+		if err != nil {
+			return "", err
+		}
+		preRevocationToken = token.Token
+		return fmt.Sprintf("Token issued for tenant %q", tenantID), nil
+	}))
+
+	results = append(results, runTest("Reject empty tenantID when MultiTenantEnabled", func() (string, error) {
+		_, err := tokenMaker.CreateAccessToken(ctx, userID, "alice@acme-corp.com", []string{"user"}, sessionID, "")
+		if !errors.Is(err, gourdiantoken.ErrTenantIDRequired) {
+			return "", fmt.Errorf("expected ErrTenantIDRequired, got %v", err)
+		}
+		return "Empty tenantID correctly rejected", nil
+	}))
+
+	results = append(results, runTest("Verify token carries tid claim", func() (string, error) {
+		claims, err := tokenMaker.VerifyAccessToken(ctx, preRevocationToken)
+		if err != nil {
+			return "", err
+		}
+		if claims.TenantID != tenantID {
+			return "", fmt.Errorf("expected TenantID %q, got %q", tenantID, claims.TenantID)
+		}
+		return fmt.Sprintf("claims.TenantID = %q", claims.TenantID), nil
+	}))
+
+	results = append(results, runTest("Revoke entire tenant", func() (string, error) {
+		if err := tokenMaker.RevokeTenant(ctx, tenantID); err != nil {
+			return "", err
+		}
+		// The revocation epoch is accurate to about one second, not the millisecond (see
+		// JWTMaker.RevokeTenant's own doc comment) — pause so the "issued after revocation"
+		// token below unambiguously lands on the post-revocation side of the epoch.
+		time.Sleep(1100 * time.Millisecond)
+		return fmt.Sprintf("Tenant %q revoked", tenantID), nil
+	}))
+
+	results = append(results, runTest("Pre-revocation token now rejected", func() (string, error) {
+		_, err := tokenMaker.VerifyAccessToken(ctx, preRevocationToken)
+		if !errors.Is(err, gourdiantoken.ErrTenantRevoked) {
+			return "", fmt.Errorf("expected ErrTenantRevoked, got %v", err)
+		}
+		return "Pre-revocation token correctly rejected", nil
+	}))
+
+	results = append(results, runTest("Post-revocation token for same tenant still valid", func() (string, error) {
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, "alice@acme-corp.com", []string{"user"}, sessionID, tenantID)
+		if err != nil {
+			return "", err
+		}
+		claims, err := tokenMaker.VerifyAccessToken(ctx, token.Token)
+		if err != nil {
+			return "", fmt.Errorf("new token for same tenant should verify after revocation: %w", err)
+		}
+		return fmt.Sprintf("New token for tenant %q issued after revocation verifies successfully (tid=%s)", tenantID, claims.TenantID), nil
+	}))
+
+	results = append(results, runTest("RotateRefreshToken preserves tenantID", func() (string, error) {
+		refresh, err := tokenMaker.CreateRefreshToken(ctx, userID, "alice@acme-corp.com", sessionID, tenantID)
+		if err != nil {
+			return "", err
+		}
+		rotated, err := tokenMaker.RotateRefreshToken(ctx, refresh.Token)
+		if err != nil {
+			return "", err
+		}
+		if rotated.TenantID != tenantID {
+			return "", fmt.Errorf("expected rotated token to preserve TenantID %q, got %q", tenantID, rotated.TenantID)
+		}
+		return fmt.Sprintf("Rotated refresh token preserves tid=%q", rotated.TenantID), nil
+	}))
+
+	printTestSummary(results, "Multi-Tenancy Demo")
 	return results
 }
 
@@ -1623,6 +1748,14 @@ func main() {
 	redisPassword := "redis_password"
 	mongoURI := "mongodb://root:mongo_password@localhost:27018/?directConnection=true" // see plan.md's "Mongo verification gap" for why
 
+	// Generated once at startup, exactly like a real service would read PEM bytes from a
+	// mounted Kubernetes Secret, an env var, or a secret-manager SDK call before ever
+	// touching gourdiantoken — see the "Asymmetric (RS256)" entry below.
+	rsaPrivateKeyPEM, rsaPublicKeyPEM, err := generateRSAKeyPairPEM(2048)
+	if err != nil {
+		log.Fatalf("Failed to generate RSA key pair for asymmetric signing demo: %v", err)
+	}
+
 	// Define all repository configurations
 	repositories := []RepositoryConfig{
 		{
@@ -1696,6 +1829,30 @@ func main() {
 			},
 		},
 		{
+			Name:        "Custom Repository (Reference Implementation)",
+			Description: "Template TokenRepository for backends not built in (SQLite, DynamoDB, etcd, ...) — see custom_repository_example.go",
+			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
+				return NewCustomTokenRepository(), nil
+			},
+			Cleanup: func() error {
+				return nil
+			},
+		},
+		{
+			Name:        "Asymmetric (RS256) - In-Memory Repository",
+			Description: "RSA-signed tokens; PrivateKeyPEM/PublicKeyPEM loaded from in-memory bytes",
+			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
+				return gourdiantoken.NewMemoryTokenRepository(5 * time.Minute), nil
+			},
+			Cleanup: func() error {
+				return nil
+			},
+			SigningMethod: gourdiantoken.Asymmetric,
+			Algorithm:     "RS256",
+			PrivateKeyPEM: rsaPrivateKeyPEM,
+			PublicKeyPEM:  rsaPublicKeyPEM,
+		},
+		{
 			Name:        "No Repository (Stateless Mode)",
 			Description: "No revocation/rotation - Pure JWT validation only",
 			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
@@ -1720,27 +1877,44 @@ func main() {
 			continue
 		}
 
+		// Symmetric/HS256 by default; asymmetric-signing demo entries (see
+		// "Asymmetric (RS256) - In-Memory Repository" above) override via RepositoryConfig.
+		signingMethod := repoConfig.SigningMethod
+		if signingMethod == "" {
+			signingMethod = gourdiantoken.Symmetric
+		}
+		algorithm := repoConfig.Algorithm
+		if algorithm == "" {
+			algorithm = "HS256"
+		}
+
 		// Create token maker configuration
 		config := gourdiantoken.GourdianTokenConfig{
-			RevocationEnabled:                 tokenRepo != nil,
-			RotationEnabled:                   tokenRepo != nil,
-			SigningMethod:                     gourdiantoken.Symmetric,
-			Algorithm:                         "HS256",
-			SymmetricKey:                      "test-symmetric-key-32-bytes-long!!",
-			Issuer:                            "test.gourdian.com",
-			Audience:                          []string{"api.test.com", "web.test.com"},
-			AllowedAlgorithms:                 []string{"HS256", "HS384", "HS512"},
-			RequiredClaims:                    []string{"iss", "aud", "nbf", "mle"},
-			AccessExpiryDuration:              15 * time.Minute,
-			AccessMaxLifetimeExpiry:           24 * time.Hour,
-			RefreshExpiryDuration:             7 * 24 * time.Hour,
-			RefreshMaxLifetimeExpiry:          30 * 24 * time.Hour,
-			RefreshReuseInterval:              5 * time.Minute,
-			CleanupInterval:                   5 * time.Minute,
+			RevocationEnabled:        tokenRepo != nil,
+			RotationEnabled:          tokenRepo != nil,
+			SigningMethod:            signingMethod,
+			Algorithm:                algorithm,
+			Issuer:                   "test.gourdian.com",
+			Audience:                 []string{"api.test.com", "web.test.com"},
+			AllowedAlgorithms:        []string{"HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "EdDSA"},
+			RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
+			AccessExpiryDuration:     15 * time.Minute,
+			AccessMaxLifetimeExpiry:  24 * time.Hour,
+			RefreshExpiryDuration:    7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+			RefreshReuseInterval:     5 * time.Minute,
+			CleanupInterval:          5 * time.Minute,
+
 			VerificationTokensEnabled:         true,
 			VerificationAllowedUseCases:       []string{"2fa-pending", "password-reset"},
 			VerificationDefaultExpiryDuration: 5 * time.Minute,
 			VerificationMaxExpiryDuration:     1 * time.Hour,
+		}
+		if signingMethod == gourdiantoken.Symmetric {
+			config.SymmetricKey = "test-symmetric-key-32-bytes-long!!"
+		} else {
+			config.PrivateKeyPEM = repoConfig.PrivateKeyPEM
+			config.PublicKeyPEM = repoConfig.PublicKeyPEM
 		}
 
 		// Create token maker
@@ -1758,6 +1932,41 @@ func main() {
 			fmt.Printf("⚠️  Cleanup warning for %s: %v\n", repoConfig.Name, err)
 		}
 
+		fmt.Println()
+	}
+
+	// Multi-tenancy demo: MultiTenantEnabled + RevokeTenant, run once against its own
+	// dedicated in-memory maker rather than folded into the loop above (see
+	// runMultiTenantDemo's doc comment for why).
+	{
+		suiteName := "Multi-Tenant Demo (RevokeTenant)"
+		printRepositoryHeader(suiteName, "MultiTenantEnabled + tenant-wide bulk revocation via revocation epoch")
+
+		tenantConfig := gourdiantoken.GourdianTokenConfig{
+			RevocationEnabled:        true,
+			RotationEnabled:          true,
+			MultiTenantEnabled:       true,
+			SigningMethod:            gourdiantoken.Symmetric,
+			Algorithm:                "HS256",
+			SymmetricKey:             "multi-tenant-demo-key-32-bytes!!",
+			Issuer:                   "test.gourdian.com",
+			Audience:                 []string{"api.test.com"},
+			AllowedAlgorithms:        []string{"HS256", "HS384", "HS512"},
+			RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
+			AccessExpiryDuration:     15 * time.Minute,
+			AccessMaxLifetimeExpiry:  24 * time.Hour,
+			RefreshExpiryDuration:    7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+			RefreshReuseInterval:     5 * time.Minute,
+			CleanupInterval:          5 * time.Minute,
+		}
+
+		tenantMaker, err := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, tenantConfig)
+		if err != nil {
+			log.Fatalf("Failed to create multi-tenant demo maker: %v", err)
+		}
+
+		allResults[suiteName] = runMultiTenantDemo(ctx, tenantMaker)
 		fmt.Println()
 	}
 

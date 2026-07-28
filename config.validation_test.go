@@ -117,12 +117,12 @@ func TestValidateConfig_Symmetric(t *testing.T) {
 		assert.Contains(t, err.Error(), "not compatible with symmetric signing")
 	})
 
-	t.Run("key paths provided with symmetric", func(t *testing.T) {
+	t.Run("key PEM bytes provided with symmetric", func(t *testing.T) {
 		config := &GourdianTokenConfig{
 			SigningMethod:            Symmetric,
 			Algorithm:                "HS256",
 			SymmetricKey:             "test-secret-key-that-is-at-least-32-bytes-long",
-			PrivateKeyPath:           "/path/to/key",
+			PrivateKeyPEM:            []byte("some key bytes"),
 			AccessExpiryDuration:     30 * time.Minute,
 			AccessMaxLifetimeExpiry:  24 * time.Hour,
 			RefreshExpiryDuration:    7 * 24 * time.Hour,
@@ -134,14 +134,33 @@ func TestValidateConfig_Symmetric(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must be empty for symmetric signing")
 	})
+
+	t.Run("MultiTenantEnabled has no dependent sub-fields to validate", func(t *testing.T) {
+		config := &GourdianTokenConfig{
+			SigningMethod:            Symmetric,
+			Algorithm:                "HS256",
+			SymmetricKey:             "test-secret-key-that-is-at-least-32-bytes-long",
+			Issuer:                   "test.com",
+			AccessExpiryDuration:     30 * time.Minute,
+			AccessMaxLifetimeExpiry:  24 * time.Hour,
+			RefreshExpiryDuration:    7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+			RefreshReuseInterval:     5 * time.Minute,
+			CleanupInterval:          1 * time.Hour,
+			MultiTenantEnabled:       true,
+		}
+
+		err := validateConfig(config)
+		assert.NoError(t, err)
+	})
 }
 
 func TestValidateConfig_Asymmetric(t *testing.T) {
-	t.Run("missing private key path", func(t *testing.T) {
+	t.Run("missing private key PEM bytes", func(t *testing.T) {
 		config := &GourdianTokenConfig{
 			SigningMethod:            Asymmetric,
 			Algorithm:                "RS256",
-			PublicKeyPath:            "/path/to/public.pem",
+			PublicKeyPEM:             []byte("public key bytes"),
 			AccessExpiryDuration:     30 * time.Minute,
 			AccessMaxLifetimeExpiry:  24 * time.Hour,
 			RefreshExpiryDuration:    7 * 24 * time.Hour,
@@ -151,14 +170,14 @@ func TestValidateConfig_Asymmetric(t *testing.T) {
 
 		err := validateConfig(config)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "private and public key paths are required")
+		assert.Contains(t, err.Error(), "private and public key PEM bytes are required")
 	})
 
-	t.Run("missing public key path", func(t *testing.T) {
+	t.Run("missing public key PEM bytes", func(t *testing.T) {
 		config := &GourdianTokenConfig{
 			SigningMethod:            Asymmetric,
 			Algorithm:                "RS256",
-			PrivateKeyPath:           "/path/to/private.pem",
+			PrivateKeyPEM:            []byte("private key bytes"),
 			AccessExpiryDuration:     30 * time.Minute,
 			AccessMaxLifetimeExpiry:  24 * time.Hour,
 			RefreshExpiryDuration:    7 * 24 * time.Hour,
@@ -168,7 +187,7 @@ func TestValidateConfig_Asymmetric(t *testing.T) {
 
 		err := validateConfig(config)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "private and public key paths are required")
+		assert.Contains(t, err.Error(), "private and public key PEM bytes are required")
 	})
 
 	t.Run("symmetric key provided with asymmetric", func(t *testing.T) {
@@ -176,8 +195,8 @@ func TestValidateConfig_Asymmetric(t *testing.T) {
 			SigningMethod:            Asymmetric,
 			Algorithm:                "RS256",
 			SymmetricKey:             "key",
-			PrivateKeyPath:           "/path/to/private.pem",
-			PublicKeyPath:            "/path/to/public.pem",
+			PrivateKeyPEM:            []byte("private key bytes"),
+			PublicKeyPEM:             []byte("public key bytes"),
 			AccessExpiryDuration:     30 * time.Minute,
 			AccessMaxLifetimeExpiry:  24 * time.Hour,
 			RefreshExpiryDuration:    7 * 24 * time.Hour,
@@ -194,8 +213,8 @@ func TestValidateConfig_Asymmetric(t *testing.T) {
 		config := &GourdianTokenConfig{
 			SigningMethod:            Asymmetric,
 			Algorithm:                "HS256",
-			PrivateKeyPath:           "/path/to/private.pem",
-			PublicKeyPath:            "/path/to/public.pem",
+			PrivateKeyPEM:            []byte("private key bytes"),
+			PublicKeyPEM:             []byte("public key bytes"),
 			AccessExpiryDuration:     30 * time.Minute,
 			AccessMaxLifetimeExpiry:  24 * time.Hour,
 			RefreshExpiryDuration:    7 * 24 * time.Hour,
@@ -572,8 +591,8 @@ func TestNewGourdianTokenConfig(t *testing.T) {
 			[]string{"iss", "aud"},
 			"HS256",
 			"test-secret-key-that-is-at-least-32-bytes-long",
-			"",
-			"",
+			nil,
+			nil,
 			"test.com",
 			30*time.Minute,
 			24*time.Hour,

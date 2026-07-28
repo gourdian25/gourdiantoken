@@ -11,8 +11,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -94,55 +92,34 @@ func TestInitializeSigningMethod_Symmetric(t *testing.T) {
 	})
 }
 
+// generateRSAPEMPair builds an in-memory RSA key pair PEM-encoded as bytes, mirroring how a
+// real caller would hold key material sourced from an env var, a mounted Kubernetes Secret,
+// or a secret-manager SDK call rather than a file on disk.
+func generateRSAPEMPair(t *testing.T, bits int) (privPEM, pubPEM []byte) {
+	t.Helper()
+	privateKey, err := rsa.GenerateKey(rand.Reader, bits)
+	require.NoError(t, err)
+
+	privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privPEM = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
+
+	pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	require.NoError(t, err)
+	pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+
+	return privPEM, pubPEM
+}
+
 func TestInitializeSigningMethod_Asymmetric(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// Helper to generate RSA key pair
-	generateRSAKeyPair := func(t *testing.T, bits int) (string, string) {
-		privateKey, err := rsa.GenerateKey(rand.Reader, bits)
-		require.NoError(t, err)
-
-		// Write private key
-		privPath := filepath.Join(tempDir, "rsa_private.pem")
-		privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := privFile.Close(); err != nil {
-				t.Logf("Warning: failed to close private key file: %v", err)
-			}
-		}()
-
-		privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-		err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-		require.NoError(t, err)
-
-		// Write public key
-		pubPath := filepath.Join(tempDir, "rsa_public.pem")
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
-
-		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
-
-		return privPath, pubPath
-	}
-
 	t.Run("RS256 algorithm", func(t *testing.T) {
-		privPath, pubPath := generateRSAKeyPair(t, 2048)
+		privPEM, pubPEM := generateRSAPEMPair(t, 2048)
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "RS256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -155,14 +132,14 @@ func TestInitializeSigningMethod_Asymmetric(t *testing.T) {
 	})
 
 	t.Run("RS384 algorithm", func(t *testing.T) {
-		privPath, pubPath := generateRSAKeyPair(t, 2048)
+		privPEM, pubPEM := generateRSAPEMPair(t, 2048)
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "RS384"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -170,14 +147,14 @@ func TestInitializeSigningMethod_Asymmetric(t *testing.T) {
 	})
 
 	t.Run("RS512 algorithm", func(t *testing.T) {
-		privPath, pubPath := generateRSAKeyPair(t, 2048)
+		privPEM, pubPEM := generateRSAPEMPair(t, 2048)
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "RS512"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -185,14 +162,14 @@ func TestInitializeSigningMethod_Asymmetric(t *testing.T) {
 	})
 
 	t.Run("PS256 algorithm", func(t *testing.T) {
-		privPath, pubPath := generateRSAKeyPair(t, 2048)
+		privPEM, pubPEM := generateRSAPEMPair(t, 2048)
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "PS256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -200,14 +177,14 @@ func TestInitializeSigningMethod_Asymmetric(t *testing.T) {
 	})
 
 	t.Run("PS384 algorithm", func(t *testing.T) {
-		privPath, pubPath := generateRSAKeyPair(t, 2048)
+		privPEM, pubPEM := generateRSAPEMPair(t, 2048)
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "PS384"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -215,14 +192,14 @@ func TestInitializeSigningMethod_Asymmetric(t *testing.T) {
 	})
 
 	t.Run("PS512 algorithm", func(t *testing.T) {
-		privPath, pubPath := generateRSAKeyPair(t, 2048)
+		privPEM, pubPEM := generateRSAPEMPair(t, 2048)
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "PS512"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -231,21 +208,9 @@ func TestInitializeSigningMethod_Asymmetric(t *testing.T) {
 }
 
 func TestParseKeyPair_RSA(t *testing.T) {
-	tempDir := t.TempDir()
-
 	generateAndTestRSA := func(t *testing.T, bits int, keyFormat string) {
 		privateKey, err := rsa.GenerateKey(rand.Reader, bits)
 		require.NoError(t, err)
-
-		// Write private key in specified format
-		privPath := filepath.Join(tempDir, "rsa_private.pem")
-		privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := privFile.Close(); err != nil {
-				t.Logf("Warning: failed to close private key file: %v", err)
-			}
-		}()
 
 		var privBytes []byte
 		var blockType string
@@ -257,32 +222,18 @@ func TestParseKeyPair_RSA(t *testing.T) {
 			require.NoError(t, err)
 			blockType = "PRIVATE KEY"
 		}
-
-		err = pem.Encode(privFile, &pem.Block{Type: blockType, Bytes: privBytes})
-		require.NoError(t, err)
-
-		// Write public key
-		pubPath := filepath.Join(tempDir, "rsa_public.pem")
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
+		privPEM := pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: privBytes})
 
 		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
-		// Test key parsing
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "RS256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -312,99 +263,57 @@ func TestParseKeyPair_RSA(t *testing.T) {
 		generateAndTestRSA(t, 4096, "PKCS8")
 	})
 
-	t.Run("invalid private key file", func(t *testing.T) {
-		privPath := filepath.Join(tempDir, "invalid_private.pem")
-		pubPath := filepath.Join(tempDir, "rsa_public.pem")
-
-		// Write invalid PEM
-		err := os.WriteFile(privPath, []byte("invalid pem content"), 0600)
-		require.NoError(t, err)
-
-		// Create valid public key
+	t.Run("invalid private key PEM bytes", func(t *testing.T) {
 		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
-
 		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "RS256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = []byte("invalid pem content")
+		config.PublicKeyPEM = pubPEM
 
 		_, err = NewGourdianTokenMaker(context.Background(), config, nil)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse RSA private key")
 	})
 
-	t.Run("missing private key file", func(t *testing.T) {
+	t.Run("empty PEM bytes rejected by config validation", func(t *testing.T) {
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "RS256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = "/nonexistent/path/private.pem"
-		config.PublicKeyPath = "/nonexistent/path/public.pem"
+		config.PrivateKeyPEM = nil
+		config.PublicKeyPEM = nil
 
 		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to stat file")
+		assert.Contains(t, err.Error(), "private and public key PEM bytes are required for asymmetric signing method")
 	})
 }
 
 func TestParseKeyPair_ECDSA(t *testing.T) {
-	tempDir := t.TempDir()
-
 	generateAndTestECDSA := func(t *testing.T, curve elliptic.Curve, alg string) {
 		privateKey, err := ecdsa.GenerateKey(curve, rand.Reader)
 		require.NoError(t, err)
 
-		// Write private key
-		privPath := filepath.Join(tempDir, "ecdsa_private.pem")
-		privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := privFile.Close(); err != nil {
-				t.Logf("Warning: failed to close private key file: %v", err)
-			}
-		}()
-
 		privBytes, err := x509.MarshalECPrivateKey(privateKey)
 		require.NoError(t, err)
-		err = pem.Encode(privFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
-		require.NoError(t, err)
-
-		// Write public key
-		pubPath := filepath.Join(tempDir, "ecdsa_public.pem")
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
+		privPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
 
 		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
-		// Test key parsing
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = alg
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -430,40 +339,20 @@ func TestParseKeyPair_ECDSA(t *testing.T) {
 		privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		require.NoError(t, err)
 
-		privPath := filepath.Join(tempDir, "ecdsa_pkcs8_private.pem")
-		privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := privFile.Close(); err != nil {
-				t.Logf("Warning: failed to close private key file: %v", err)
-			}
-		}()
-
 		privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
 		require.NoError(t, err)
-		err = pem.Encode(privFile, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
-		require.NoError(t, err)
-
-		pubPath := filepath.Join(tempDir, "ecdsa_public.pem")
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
+		privPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
 
 		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "ES256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -471,32 +360,18 @@ func TestParseKeyPair_ECDSA(t *testing.T) {
 	})
 
 	t.Run("invalid ECDSA private key", func(t *testing.T) {
-		privPath := filepath.Join(tempDir, "invalid_ecdsa.pem")
-		pubPath := filepath.Join(tempDir, "ecdsa_public.pem")
-
-		err := os.WriteFile(privPath, []byte("-----BEGIN EC PRIVATE KEY-----\ninvalid\n-----END EC PRIVATE KEY-----"), 0600)
+		privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		require.NoError(t, err)
-
-		privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
-
 		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "ES256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = []byte("-----BEGIN EC PRIVATE KEY-----\ninvalid\n-----END EC PRIVATE KEY-----")
+		config.PublicKeyPEM = pubPEM
 
 		_, err = NewGourdianTokenMaker(context.Background(), config, nil)
 		assert.Error(t, err)
@@ -505,49 +380,24 @@ func TestParseKeyPair_ECDSA(t *testing.T) {
 }
 
 func TestParseKeyPair_EdDSA(t *testing.T) {
-	tempDir := t.TempDir()
-
 	t.Run("valid EdDSA key pair", func(t *testing.T) {
 		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 		require.NoError(t, err)
 
-		// Write private key
-		privPath := filepath.Join(tempDir, "eddsa_private.pem")
-		privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := privFile.Close(); err != nil {
-				t.Logf("Warning: failed to close private key file: %v", err)
-			}
-		}()
-
 		privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
 		require.NoError(t, err)
-		err = pem.Encode(privFile, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
-		require.NoError(t, err)
-
-		// Write public key
-		pubPath := filepath.Join(tempDir, "eddsa_public.pem")
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
+		privPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
 
 		pubBytes, err := x509.MarshalPKIXPublicKey(publicKey)
 		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
-		// Test key parsing
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "EdDSA"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		require.NoError(t, err)
@@ -558,32 +408,18 @@ func TestParseKeyPair_EdDSA(t *testing.T) {
 	})
 
 	t.Run("invalid EdDSA private key", func(t *testing.T) {
-		privPath := filepath.Join(tempDir, "invalid_eddsa.pem")
-		pubPath := filepath.Join(tempDir, "eddsa_public.pem")
-
-		err := os.WriteFile(privPath, []byte("-----BEGIN PRIVATE KEY-----\ninvalid\n-----END PRIVATE KEY-----"), 0600)
+		publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 		require.NoError(t, err)
-
-		publicKey, _, _ := ed25519.GenerateKey(rand.Reader)
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
-
 		pubBytes, err := x509.MarshalPKIXPublicKey(publicKey)
 		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "EdDSA"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = []byte("-----BEGIN PRIVATE KEY-----\ninvalid\n-----END PRIVATE KEY-----")
+		config.PublicKeyPEM = pubPEM
 
 		_, err = NewGourdianTokenMaker(context.Background(), config, nil)
 		assert.Error(t, err)
@@ -592,80 +428,42 @@ func TestParseKeyPair_EdDSA(t *testing.T) {
 }
 
 func TestParseKeyPair_Invalid(t *testing.T) {
-	tempDir := t.TempDir()
-
 	t.Run("mismatched key types", func(t *testing.T) {
 		// RSA private key
-		rsaPrivKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-		privPath := filepath.Join(tempDir, "rsa_private.pem")
-		privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		rsaPrivKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		require.NoError(t, err)
-		defer func() {
-			if err := privFile.Close(); err != nil {
-				t.Logf("Warning: failed to close private key file: %v", err)
-			}
-		}()
-
 		privBytes := x509.MarshalPKCS1PrivateKey(rsaPrivKey)
-		err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-		require.NoError(t, err)
+		privPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
 
 		// ECDSA public key
-		ecdsaPrivKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		pubPath := filepath.Join(tempDir, "ecdsa_public.pem")
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		ecdsaPrivKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
-
 		pubBytes, err := x509.MarshalPKIXPublicKey(&ecdsaPrivKey.PublicKey)
 		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
+		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "RS256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
+		config.PrivateKeyPEM = privPEM
+		config.PublicKeyPEM = pubPEM
 
 		_, err = NewGourdianTokenMaker(context.Background(), config, nil)
 		assert.Error(t, err)
 	})
 
 	t.Run("corrupted PEM block", func(t *testing.T) {
-		privPath := filepath.Join(tempDir, "corrupted.pem")
-		err := os.WriteFile(privPath, []byte("not a valid pem file"), 0600)
-		require.NoError(t, err)
+		corrupted := []byte("not a valid pem file")
 
 		config := DefaultTestConfig()
 		config.SigningMethod = Asymmetric
 		config.Algorithm = "RS256"
 		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = privPath
+		config.PrivateKeyPEM = corrupted
+		config.PublicKeyPEM = corrupted
 
-		_, err = NewGourdianTokenMaker(context.Background(), config, nil)
-		assert.Error(t, err)
-	})
-
-	t.Run("empty file", func(t *testing.T) {
-		privPath := filepath.Join(tempDir, "empty.pem")
-		err := os.WriteFile(privPath, []byte(""), 0600)
-		require.NoError(t, err)
-
-		config := DefaultTestConfig()
-		config.SigningMethod = Asymmetric
-		config.Algorithm = "RS256"
-		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = privPath
-
-		_, err = NewGourdianTokenMaker(context.Background(), config, nil)
+		_, err := NewGourdianTokenMaker(context.Background(), config, nil)
 		assert.Error(t, err)
 	})
 }
@@ -675,412 +473,66 @@ func TestParseKeyPair_Invalid(t *testing.T) {
 // =============================================================================
 
 func TestAllSupportedAlgorithms(t *testing.T) {
-	tempDir := t.TempDir()
+	rsaSetup := func() (privPEM, pubPEM []byte) {
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		require.NoError(t, err)
+		privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+		privPEM = pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
+
+		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+		require.NoError(t, err)
+		pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+		return privPEM, pubPEM
+	}
+
+	ecdsaSetup := func(curve elliptic.Curve) func() (privPEM, pubPEM []byte) {
+		return func() (privPEM, pubPEM []byte) {
+			privateKey, err := ecdsa.GenerateKey(curve, rand.Reader)
+			require.NoError(t, err)
+			privBytes, err := x509.MarshalECPrivateKey(privateKey)
+			require.NoError(t, err)
+			privPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
+
+			pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+			require.NoError(t, err)
+			pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+			return privPEM, pubPEM
+		}
+	}
+
+	eddsaSetup := func() (privPEM, pubPEM []byte) {
+		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+		require.NoError(t, err)
+		privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+		require.NoError(t, err)
+		privPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
+
+		pubBytes, err := x509.MarshalPKIXPublicKey(publicKey)
+		require.NoError(t, err)
+		pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+		return privPEM, pubPEM
+	}
 
 	algorithms := []struct {
-		name      string
-		algorithm string
-		method    SigningMethod
-		setup     func() (string, string)
+		name          string
+		algorithm     string
+		method        SigningMethod
+		symmetricKey  string
+		asymmetricGen func() (privPEM, pubPEM []byte)
 	}{
-		{
-			name:      "HS256",
-			algorithm: "HS256",
-			method:    Symmetric,
-			setup: func() (string, string) {
-				return "test-secret-key-that-is-at-least-32-bytes-long", ""
-			},
-		},
-		{
-			name:      "HS384",
-			algorithm: "HS384",
-			method:    Symmetric,
-			setup: func() (string, string) {
-				return "test-secret-key-that-is-at-least-32-bytes-long", ""
-			},
-		},
-		{
-			name:      "HS512",
-			algorithm: "HS512",
-			method:    Symmetric,
-			setup: func() (string, string) {
-				return "test-secret-key-that-is-at-least-32-bytes-long", ""
-			},
-		},
-		{
-			name:      "RS256",
-			algorithm: "RS256",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-				privPath := filepath.Join(tempDir, "rs256_private.pem")
-				pubPath := filepath.Join(tempDir, "rs256_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-				err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "RS384",
-			algorithm: "RS384",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-				privPath := filepath.Join(tempDir, "rs384_private.pem")
-				pubPath := filepath.Join(tempDir, "rs384_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-				err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "RS512",
-			algorithm: "RS512",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-				privPath := filepath.Join(tempDir, "rs512_private.pem")
-				pubPath := filepath.Join(tempDir, "rs512_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-				err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "PS256",
-			algorithm: "PS256",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-				privPath := filepath.Join(tempDir, "ps256_private.pem")
-				pubPath := filepath.Join(tempDir, "ps256_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-				err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "PS384",
-			algorithm: "PS384",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-				privPath := filepath.Join(tempDir, "ps384_private.pem")
-				pubPath := filepath.Join(tempDir, "ps384_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-				err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "PS512",
-			algorithm: "PS512",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-				privPath := filepath.Join(tempDir, "ps512_private.pem")
-				pubPath := filepath.Join(tempDir, "ps512_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-				err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "ES256",
-			algorithm: "ES256",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-				privPath := filepath.Join(tempDir, "es256_private.pem")
-				pubPath := filepath.Join(tempDir, "es256_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes, err := x509.MarshalECPrivateKey(privateKey)
-				require.NoError(t, err)
-				err = pem.Encode(privFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "ES384",
-			algorithm: "ES384",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-				privPath := filepath.Join(tempDir, "es384_private.pem")
-				pubPath := filepath.Join(tempDir, "es384_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes, err := x509.MarshalECPrivateKey(privateKey)
-				require.NoError(t, err)
-				err = pem.Encode(privFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "ES512",
-			algorithm: "ES512",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				privateKey, _ := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-				privPath := filepath.Join(tempDir, "es512_private.pem")
-				pubPath := filepath.Join(tempDir, "es512_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes, err := x509.MarshalECPrivateKey(privateKey)
-				require.NoError(t, err)
-				err = pem.Encode(privFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
-		{
-			name:      "EdDSA",
-			algorithm: "EdDSA",
-			method:    Asymmetric,
-			setup: func() (string, string) {
-				publicKey, privateKey, _ := ed25519.GenerateKey(rand.Reader)
-				privPath := filepath.Join(tempDir, "eddsa_private.pem")
-				pubPath := filepath.Join(tempDir, "eddsa_public.pem")
-
-				privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := privFile.Close(); err != nil {
-						t.Logf("Warning: failed to close private key file: %v", err)
-					}
-				}()
-
-				privBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
-				require.NoError(t, err)
-				err = pem.Encode(privFile, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
-				require.NoError(t, err)
-
-				pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-				require.NoError(t, err)
-				defer func() {
-					if err := pubFile.Close(); err != nil {
-						t.Logf("Warning: failed to close public key file: %v", err)
-					}
-				}()
-
-				pubBytes, err := x509.MarshalPKIXPublicKey(publicKey)
-				require.NoError(t, err)
-				err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-				require.NoError(t, err)
-
-				return privPath, pubPath
-			},
-		},
+		{name: "HS256", algorithm: "HS256", method: Symmetric, symmetricKey: "test-secret-key-that-is-at-least-32-bytes-long"},
+		{name: "HS384", algorithm: "HS384", method: Symmetric, symmetricKey: "test-secret-key-that-is-at-least-32-bytes-long"},
+		{name: "HS512", algorithm: "HS512", method: Symmetric, symmetricKey: "test-secret-key-that-is-at-least-32-bytes-long"},
+		{name: "RS256", algorithm: "RS256", method: Asymmetric, asymmetricGen: rsaSetup},
+		{name: "RS384", algorithm: "RS384", method: Asymmetric, asymmetricGen: rsaSetup},
+		{name: "RS512", algorithm: "RS512", method: Asymmetric, asymmetricGen: rsaSetup},
+		{name: "PS256", algorithm: "PS256", method: Asymmetric, asymmetricGen: rsaSetup},
+		{name: "PS384", algorithm: "PS384", method: Asymmetric, asymmetricGen: rsaSetup},
+		{name: "PS512", algorithm: "PS512", method: Asymmetric, asymmetricGen: rsaSetup},
+		{name: "ES256", algorithm: "ES256", method: Asymmetric, asymmetricGen: ecdsaSetup(elliptic.P256())},
+		{name: "ES384", algorithm: "ES384", method: Asymmetric, asymmetricGen: ecdsaSetup(elliptic.P384())},
+		{name: "ES512", algorithm: "ES512", method: Asymmetric, asymmetricGen: ecdsaSetup(elliptic.P521())},
+		{name: "EdDSA", algorithm: "EdDSA", method: Asymmetric, asymmetricGen: eddsaSetup},
 	}
 
 	for _, alg := range algorithms {
@@ -1090,15 +542,14 @@ func TestAllSupportedAlgorithms(t *testing.T) {
 			config.SigningMethod = alg.method
 
 			if alg.method == Symmetric {
-				symmetricKey, _ := alg.setup()
-				config.SymmetricKey = symmetricKey
-				config.PrivateKeyPath = ""
-				config.PublicKeyPath = ""
+				config.SymmetricKey = alg.symmetricKey
+				config.PrivateKeyPEM = nil
+				config.PublicKeyPEM = nil
 			} else {
-				privPath, pubPath := alg.setup()
+				privPEM, pubPEM := alg.asymmetricGen()
 				config.SymmetricKey = ""
-				config.PrivateKeyPath = privPath
-				config.PublicKeyPath = pubPath
+				config.PrivateKeyPEM = privPEM
+				config.PublicKeyPEM = pubPEM
 			}
 
 			// Create maker
@@ -1112,7 +563,7 @@ func TestAllSupportedAlgorithms(t *testing.T) {
 			username := "testuser"
 			roles := []string{"admin"}
 
-			accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID)
+			accessToken, err := maker.CreateAccessToken(context.Background(), userID, username, roles, sessionID, "")
 			require.NoError(t, err, "failed to create access token for %s", alg.name)
 			require.NotNil(t, accessToken)
 			assert.NotEmpty(t, accessToken.Token)
@@ -1125,7 +576,7 @@ func TestAllSupportedAlgorithms(t *testing.T) {
 			assert.Equal(t, roles, claims.Roles)
 
 			// Create and verify refresh token
-			refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+			refreshToken, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 			require.NoError(t, err, "failed to create refresh token for %s", alg.name)
 			require.NotNil(t, refreshToken)
 			assert.NotEmpty(t, refreshToken.Token)
@@ -1210,94 +661,6 @@ func TestWeakAlgorithmRejection(t *testing.T) {
 // Additional Security Tests
 // =============================================================================
 
-func TestKeyPermissions(t *testing.T) {
-	tempDir := t.TempDir()
-
-	t.Run("rejects private key with insecure permissions", func(t *testing.T) {
-		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-
-		privPath := filepath.Join(tempDir, "insecure_private.pem")
-		privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644) // Too permissive
-		require.NoError(t, err)
-		defer func() {
-			if err := privFile.Close(); err != nil {
-				t.Logf("Warning: failed to close private key file: %v", err)
-			}
-		}()
-
-		privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-		err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-		require.NoError(t, err)
-
-		pubPath := filepath.Join(tempDir, "public.pem")
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
-
-		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
-
-		config := DefaultTestConfig()
-		config.SigningMethod = Asymmetric
-		config.Algorithm = "RS256"
-		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
-
-		_, err = NewGourdianTokenMaker(context.Background(), config, nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "insecure private key file permissions")
-	})
-
-	t.Run("accepts private key with secure permissions", func(t *testing.T) {
-		privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-
-		privPath := filepath.Join(tempDir, "secure_private.pem")
-		privFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600) // Secure
-		require.NoError(t, err)
-		defer func() {
-			if err := privFile.Close(); err != nil {
-				t.Logf("Warning: failed to close private key file: %v", err)
-			}
-		}()
-
-		privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-		err = pem.Encode(privFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privBytes})
-		require.NoError(t, err)
-
-		pubPath := filepath.Join(tempDir, "secure_public.pem")
-		pubFile, err := os.OpenFile(pubPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		require.NoError(t, err)
-		defer func() {
-			if err := pubFile.Close(); err != nil {
-				t.Logf("Warning: failed to close public key file: %v", err)
-			}
-		}()
-
-		pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-		require.NoError(t, err)
-		err = pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-		require.NoError(t, err)
-
-		config := DefaultTestConfig()
-		config.SigningMethod = Asymmetric
-		config.Algorithm = "RS256"
-		config.SymmetricKey = ""
-		config.PrivateKeyPath = privPath
-		config.PublicKeyPath = pubPath
-
-		maker, err := NewGourdianTokenMaker(context.Background(), config, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, maker)
-	})
-}
-
 func TestSymmetricKeyValidation(t *testing.T) {
 	t.Run("rejects short symmetric key", func(t *testing.T) {
 		config := DefaultTestConfig()
@@ -1346,7 +709,7 @@ func TestCrossAlgorithmVerification(t *testing.T) {
 		maker256, _ := NewGourdianTokenMaker(ctx, config256, nil)
 
 		userID := uuid.NewString()
-		token, err := maker256.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString())
+		token, err := maker256.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Try to verify with HS512
@@ -1366,7 +729,7 @@ func TestCrossAlgorithmVerification(t *testing.T) {
 		maker1, _ := NewGourdianTokenMaker(ctx, config1, nil)
 
 		userID := uuid.NewString()
-		token, err := maker1.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString())
+		token, err := maker1.CreateAccessToken(ctx, userID, "user", []string{"role"}, uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Try to verify with second key

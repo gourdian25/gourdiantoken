@@ -157,6 +157,7 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 
 			_ = db.Collection(mongoRevokedCollectionName).Drop(ctx)
 			_ = db.Collection(mongoRotatedCollectionName).Drop(ctx)
+			_ = db.Collection(mongoTenantRevocationsCollectionName).Drop(ctx)
 
 			repo, err := NewMongoTokenRepository(db, false)
 			require.NoError(t, err)
@@ -165,6 +166,7 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 				ctx := context.Background()
 				_, _ = db.Collection(mongoRevokedCollectionName).DeleteMany(ctx, bson.M{})
 				_, _ = db.Collection(mongoRotatedCollectionName).DeleteMany(ctx, bson.M{})
+				_, _ = db.Collection(mongoTenantRevocationsCollectionName).DeleteMany(ctx, bson.M{})
 
 				if err := client.Disconnect(ctx); err != nil {
 					t.Logf("cleanup MongoDB Disconnect error: %v", err)
@@ -187,6 +189,7 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 
 			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_revoked_tokens RESTART IDENTITY CASCADE")
 			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_rotated_tokens RESTART IDENTITY CASCADE")
+			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_tenant_revocations")
 
 			repo, err := NewPostgresTokenRepository(ctx, pool)
 			require.NoError(t, err)
@@ -195,6 +198,7 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 				ctx := context.Background()
 				_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_revoked_tokens RESTART IDENTITY CASCADE")
 				_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_rotated_tokens RESTART IDENTITY CASCADE")
+				_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_tenant_revocations")
 
 				if pgRepo, ok := repo.(*PostgresTokenRepository); ok {
 					if err := pgRepo.Close(); err != nil {

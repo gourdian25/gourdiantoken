@@ -23,7 +23,7 @@ func TestCreateAccessToken_Valid(t *testing.T) {
 	roles := []string{"admin", "user"}
 
 	t.Run("creates valid access token", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 
 		require.NoError(t, err)
 		require.NotNil(t, response)
@@ -38,7 +38,7 @@ func TestCreateAccessToken_Valid(t *testing.T) {
 	})
 
 	t.Run("token has correct claims", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Parse the token
@@ -64,7 +64,7 @@ func TestCreateAccessToken_Valid(t *testing.T) {
 
 	t.Run("timestamps are correct", func(t *testing.T) {
 		before := time.Now()
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		after := time.Now()
 
 		require.NoError(t, err)
@@ -76,10 +76,10 @@ func TestCreateAccessToken_Valid(t *testing.T) {
 	})
 
 	t.Run("multiple tokens have unique IDs", func(t *testing.T) {
-		token1, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token1, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
-		token2, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		token2, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Parse and compare token IDs
@@ -107,7 +107,7 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 	roles := []string{"admin"}
 
 	t.Run("nil user ID", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, "", username, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, "", username, roles, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -115,7 +115,7 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 	})
 
 	t.Run("empty roles", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, []string{}, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, []string{}, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -123,7 +123,7 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 	})
 
 	t.Run("nil roles", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, nil, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, nil, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -131,7 +131,7 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 	})
 
 	t.Run("empty string in roles", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, []string{"admin", ""}, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, username, []string{"admin", ""}, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -140,7 +140,7 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 
 	t.Run("username too long", func(t *testing.T) {
 		longUsername := string(make([]byte, 1025))
-		response, err := maker.CreateAccessToken(ctx, userID, longUsername, roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, longUsername, roles, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -151,7 +151,7 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 		canceledCtx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		response, err := maker.CreateAccessToken(canceledCtx, userID, username, roles, sessionID)
+		response, err := maker.CreateAccessToken(canceledCtx, userID, username, roles, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -159,7 +159,7 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 	})
 
 	t.Run("empty username is allowed", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, "", roles, sessionID)
+		response, err := maker.CreateAccessToken(ctx, userID, "", roles, sessionID, "")
 
 		assert.NoError(t, err)
 		assert.NotNil(t, response)
@@ -167,7 +167,7 @@ func TestCreateAccessToken_InvalidInput(t *testing.T) {
 	})
 
 	t.Run("nil session ID is allowed", func(t *testing.T) {
-		response, err := maker.CreateAccessToken(ctx, userID, username, roles, "")
+		response, err := maker.CreateAccessToken(ctx, userID, username, roles, "", "")
 
 		assert.NoError(t, err)
 		assert.NotNil(t, response)
@@ -184,7 +184,7 @@ func TestCreateRefreshToken_Valid(t *testing.T) {
 	username := "testuser"
 
 	t.Run("creates valid refresh token", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 
 		require.NoError(t, err)
 		require.NotNil(t, response)
@@ -198,7 +198,7 @@ func TestCreateRefreshToken_Valid(t *testing.T) {
 	})
 
 	t.Run("token has correct claims", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Parse the token
@@ -223,7 +223,7 @@ func TestCreateRefreshToken_Valid(t *testing.T) {
 
 	t.Run("timestamps are correct", func(t *testing.T) {
 		before := time.Now()
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		after := time.Now()
 
 		require.NoError(t, err)
@@ -234,10 +234,10 @@ func TestCreateRefreshToken_Valid(t *testing.T) {
 	})
 
 	t.Run("multiple tokens have unique IDs", func(t *testing.T) {
-		token1, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token1, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
-		token2, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token2, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		assert.NotEqual(t, token1.Token, token2.Token)
@@ -253,7 +253,7 @@ func TestCreateRefreshToken_InvalidInput(t *testing.T) {
 	username := "testuser"
 
 	t.Run("nil user ID", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, "", username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, "", username, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -262,7 +262,7 @@ func TestCreateRefreshToken_InvalidInput(t *testing.T) {
 
 	t.Run("username too long", func(t *testing.T) {
 		longUsername := string(make([]byte, 1025))
-		response, err := maker.CreateRefreshToken(ctx, userID, longUsername, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, longUsername, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -273,7 +273,7 @@ func TestCreateRefreshToken_InvalidInput(t *testing.T) {
 		canceledCtx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		response, err := maker.CreateRefreshToken(canceledCtx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(canceledCtx, userID, username, sessionID, "")
 
 		assert.Error(t, err)
 		assert.Nil(t, response)
@@ -281,7 +281,7 @@ func TestCreateRefreshToken_InvalidInput(t *testing.T) {
 	})
 
 	t.Run("empty username is allowed", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(ctx, userID, "", sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, "", sessionID, "")
 
 		assert.NoError(t, err)
 		assert.NotNil(t, response)
@@ -519,17 +519,128 @@ func TestCreateRefreshToken_ContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		assert.Error(t, err)
 		assert.Nil(t, response)
 		assert.Contains(t, err.Error(), "context canceled")
 	})
 
 	t.Run("succeeds with valid context", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		assert.NoError(t, err)
 		assert.NotNil(t, response)
 		assert.Equal(t, userID, response.Subject)
 		assert.Equal(t, username, response.Username)
+	})
+}
+
+func TestMultiTenant_TenantIDValidation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("MultiTenantEnabled=false", func(t *testing.T) {
+		maker := setupTestMaker(t)
+
+		t.Run("empty tenantID is accepted", func(t *testing.T) {
+			resp, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
+			require.NoError(t, err)
+			assert.Empty(t, resp.TenantID)
+
+			refreshResp, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
+			require.NoError(t, err)
+			assert.Empty(t, refreshResp.TenantID)
+		})
+
+		t.Run("non-empty tenantID is rejected", func(t *testing.T) {
+			_, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "acme")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrTenantIDNotAllowed)
+
+			_, err = maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "acme")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrTenantIDNotAllowed)
+		})
+	})
+
+	t.Run("MultiTenantEnabled=true", func(t *testing.T) {
+		config := DefaultTestConfig()
+		config.MultiTenantEnabled = true
+		maker := setupTestMakerWithConfig(t, config, nil)
+
+		t.Run("empty tenantID is rejected", func(t *testing.T) {
+			_, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), "")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrTenantIDRequired)
+
+			_, err = maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrTenantIDRequired)
+		})
+
+		t.Run("non-empty tenantID round-trips through create and verify", func(t *testing.T) {
+			tenantID := "acme-corp"
+
+			accessResp, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), tenantID)
+			require.NoError(t, err)
+			assert.Equal(t, tenantID, accessResp.TenantID)
+
+			accessClaims, err := maker.VerifyAccessToken(ctx, accessResp.Token)
+			require.NoError(t, err)
+			assert.Equal(t, tenantID, accessClaims.TenantID)
+
+			refreshResp, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), tenantID)
+			require.NoError(t, err)
+			assert.Equal(t, tenantID, refreshResp.TenantID)
+
+			refreshClaims, err := maker.VerifyRefreshToken(ctx, refreshResp.Token)
+			require.NoError(t, err)
+			assert.Equal(t, tenantID, refreshClaims.TenantID)
+		})
+
+		t.Run("token missing tid claim fails verification", func(t *testing.T) {
+			// Hand-build a token with no "tid" claim, bypassing CreateAccessToken's own
+			// validateTenantID guard, to simulate a token issued before MultiTenantEnabled
+			// was turned on. VerifyAccessToken must still reject it once the config requires
+			// tenants - the create-side check alone isn't enough.
+			now := time.Now()
+			claims := AccessTokenClaims{
+				ID:                uuid.NewString(),
+				Subject:           uuid.NewString(),
+				SessionID:         uuid.NewString(),
+				Username:          "user",
+				Issuer:            maker.config.Issuer,
+				Audience:          maker.config.Audience,
+				Roles:             []string{"admin"},
+				IssuedAt:          now,
+				ExpiresAt:         now.Add(30 * time.Minute),
+				NotBefore:         now,
+				MaxLifetimeExpiry: now.Add(24 * time.Hour),
+				TokenType:         AccessToken,
+			}
+			mapClaims, err := toMapClaims(claims)
+			require.NoError(t, err)
+			jwtToken := jwt.NewWithClaims(maker.signingMethod, mapClaims)
+			signed, err := jwtToken.SignedString(maker.privateKey)
+			require.NoError(t, err)
+
+			_, err = maker.VerifyAccessToken(ctx, signed)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrTenantIDRequired)
+		})
+
+		t.Run("verification tokens never require or emit tid", func(t *testing.T) {
+			config := DefaultTestConfig()
+			config.MultiTenantEnabled = true
+			config.VerificationTokensEnabled = true
+			config.VerificationDefaultExpiryDuration = 5 * time.Minute
+			config.VerificationMaxExpiryDuration = 1 * time.Hour
+			verMaker := setupTestMakerWithConfig(t, config, nil)
+
+			token, err := verMaker.CreateVerificationToken(ctx, uuid.NewString(), "2fa-pending", 0, nil)
+			require.NoError(t, err)
+
+			claims, err := verMaker.VerifyVerificationToken(ctx, token.Token)
+			require.NoError(t, err)
+			assert.Empty(t, claims.Metadata["tid"])
+		})
 	})
 }

@@ -8,11 +8,10 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -53,10 +52,12 @@ func (c *countedContext) Err() error {
 // branches of parseAndValidateToken/revokeToken/RotateRefreshToken that
 // MemoryTokenRepository never fails.
 type erroringRepo struct {
-	isTokenRevokedErr       error
-	isTokenRotatedErr       error
-	markTokenRotatedAtomic  bool
-	markTokenRotatedAtomErr error
+	isTokenRevokedErr           error
+	isTokenRotatedErr           error
+	markTokenRotatedAtomic      bool
+	markTokenRotatedAtomErr     error
+	getTenantRevocationEpoch    time.Time
+	getTenantRevocationEpochErr error
 }
 
 func (r *erroringRepo) MarkTokenRevoke(ctx context.Context, tokenType TokenType, token string, ttl time.Duration) error {
@@ -90,6 +91,20 @@ func (r *erroringRepo) CleanupExpiredRevokedTokens(ctx context.Context, tokenTyp
 	return nil
 }
 func (r *erroringRepo) CleanupExpiredRotatedTokens(ctx context.Context) error { return nil }
+func (r *erroringRepo) RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error {
+	return nil
+}
+func (r *erroringRepo) GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error) {
+	if r.getTenantRevocationEpochErr != nil {
+		return time.Time{}, r.getTenantRevocationEpochErr
+	}
+	return r.getTenantRevocationEpoch, nil
+}
+func (r *erroringRepo) CleanupExpiredTenantRevocations(ctx context.Context) error { return nil }
+func (r *erroringRepo) Stats(ctx context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+func (r *erroringRepo) CleanupAll(ctx context.Context) error { return nil }
 
 func makerWithRepo(t *testing.T, repo TokenRepository) *JWTMaker {
 	t.Helper()
@@ -158,14 +173,14 @@ func TestSignClaims_SigningError(t *testing.T) {
 
 func TestCreateAccessToken_SigningErrorPropagates(t *testing.T) {
 	maker := badKeyMaker(t)
-	_, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	_, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to sign")
 }
 
 func TestCreateRefreshToken_SigningErrorPropagates(t *testing.T) {
 	maker := badKeyMaker(t)
-	_, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	_, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to sign")
 }
@@ -183,14 +198,14 @@ func TestCreateAccessToken_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := maker.CreateAccessToken(ctx, "user-1", "user", []string{"admin"}, "session-1")
+	_, err := maker.CreateAccessToken(ctx, "user-1", "user", []string{"admin"}, "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
 
 func TestCreateAccessToken_EmptyRoleString(t *testing.T) {
 	maker := setupTestMaker(t)
-	_, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin", ""}, "session-1")
+	_, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin", ""}, "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "roles cannot contain empty strings")
 }
@@ -200,7 +215,7 @@ func TestCreateRefreshToken_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := maker.CreateRefreshToken(ctx, "user-1", "user", "session-1")
+	_, err := maker.CreateRefreshToken(ctx, "user-1", "user", "session-1", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
@@ -238,7 +253,7 @@ func TestParseAndValidateToken_RevocationCheckError(t *testing.T) {
 	repo := &erroringRepo{isTokenRevokedErr: fmt.Errorf("boom")}
 	maker := makerWithRepo(t, repo)
 
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	_, err = maker.VerifyAccessToken(context.Background(), token.Token)
@@ -246,11 +261,31 @@ func TestParseAndValidateToken_RevocationCheckError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to check token revocation")
 }
 
+// TestParseAndValidateToken_TenantRevocationCheckError exercises parseAndValidateToken's
+// GetTenantRevocationEpoch error-propagation branch, gated behind MultiTenantEnabled so it
+// needs its own maker rather than makerWithRepo's default config.
+func TestParseAndValidateToken_TenantRevocationCheckError(t *testing.T) {
+	repo := &erroringRepo{getTenantRevocationEpochErr: fmt.Errorf("boom")}
+
+	config := DefaultTestConfig()
+	config.RevocationEnabled = true
+	config.MultiTenantEnabled = true
+	maker, err := NewGourdianTokenMaker(context.Background(), config, repo)
+	require.NoError(t, err)
+
+	token, err := maker.(*JWTMaker).CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "acme-corp")
+	require.NoError(t, err)
+
+	_, err = maker.(*JWTMaker).VerifyAccessToken(context.Background(), token.Token)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to check tenant revocation")
+}
+
 func TestParseAndValidateToken_RotationCheckError(t *testing.T) {
 	repo := &erroringRepo{isTokenRotatedErr: fmt.Errorf("boom")}
 	maker := makerWithRepo(t, repo)
 
-	token, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	token, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	_, err = maker.VerifyRefreshToken(context.Background(), token.Token)
@@ -317,7 +352,7 @@ func TestVerifyVerificationToken_UseCaseNoLongerAllowed(t *testing.T) {
 
 func TestParseAndValidateToken_ContextCancelledDuringParsing(t *testing.T) {
 	maker := setupTestMaker(t)
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	// 1 call succeeds (the top check); the 2nd, inside jwt.Parse's own
@@ -329,7 +364,7 @@ func TestParseAndValidateToken_ContextCancelledDuringParsing(t *testing.T) {
 
 func TestParseAndValidateToken_ContextCancelledDuringClaimsProcessing(t *testing.T) {
 	maker := setupTestMaker(t)
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	// 2 calls succeed (top check + inside keyFunc); the 3rd, right after
@@ -384,7 +419,7 @@ func TestRevokeToken_MissingExpClaim(t *testing.T) {
 
 func TestRevokeToken_ContextCancelledDuringParsing(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	err = maker.revokeToken(newCountedContext(1), AccessToken, token.Token)
@@ -394,7 +429,7 @@ func TestRevokeToken_ContextCancelledDuringParsing(t *testing.T) {
 
 func TestRevokeToken_ContextCancelledBeforeRevocation(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1")
+	token, err := maker.CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "")
 	require.NoError(t, err)
 
 	err = maker.revokeToken(newCountedContext(2), AccessToken, token.Token)
@@ -418,7 +453,7 @@ func TestRotateRefreshToken_NotEnabled(t *testing.T) {
 // reports it lost the race.
 func TestRotateRefreshToken_ContextCancelledBeforeCreatingNewToken(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	// 4 ctx.Err() calls succeed before this point: RotateRefreshToken's own
@@ -432,7 +467,7 @@ func TestRotateRefreshToken_ContextCancelledBeforeCreatingNewToken(t *testing.T)
 
 func TestRotateRefreshToken_ContextCancelledBeforeRotationCheck(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	// As above, plus CreateRefreshToken's own top check and signClaims'
@@ -448,7 +483,7 @@ func TestRotateRefreshToken_MarkAtomicReturnsFalse(t *testing.T) {
 	repo := &erroringRepo{markTokenRotatedAtomic: false}
 	maker := makerWithRepo(t, repo)
 
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	_, err = maker.RotateRefreshToken(context.Background(), refresh.Token)
@@ -460,7 +495,7 @@ func TestRotateRefreshToken_RepositoryError(t *testing.T) {
 	repo := &erroringRepo{markTokenRotatedAtomErr: fmt.Errorf("boom")}
 	maker := makerWithRepo(t, repo)
 
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	_, err = maker.RotateRefreshToken(context.Background(), refresh.Token)
@@ -486,11 +521,6 @@ func TestInitializeKeys_UnsupportedSigningMethod(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported signing method")
 }
 
-// TestParseKeyPair_MissingPublicKeyFile calls parseKeyPair directly rather
-// than going through NewGourdianTokenMaker: the full constructor's
-// validateConfig runs its own os.Stat-based permission check on both key
-// paths first, which already fails fast on a missing file — never reaching
-// parseKeyPair's own os.ReadFile call at all.
 func TestNewGourdianTokenMaker_AppliesOptions(t *testing.T) {
 	var called bool
 	config := DefaultTestConfig()
@@ -518,7 +548,7 @@ func TestNewGourdianTokenMaker_InitializeSigningMethodFailureCancelsCleanup(t *t
 
 func TestRotateRefreshToken_CreateNewTokenErrorPropagates(t *testing.T) {
 	maker := setupTestMakerWithRepo(t)
-	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1")
+	refresh, err := maker.CreateRefreshToken(context.Background(), "user-1", "user", "session-1", "")
 	require.NoError(t, err)
 
 	// Break signing only after the original token already exists: the
@@ -579,31 +609,25 @@ func TestInitializeSigningMethod_UnsupportedAlgorithm(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported algorithm")
 }
 
-func TestParseKeyPair_MissingPrivateKeyFile(t *testing.T) {
-	// Reachable only via a direct call: validateConfig's own os.Stat-based
-	// permission check already rejects a missing private key file before
-	// parseKeyPair's os.ReadFile ever runs in the normal construction flow.
+func TestParseKeyPair_EmptyPrivateKeyPEM(t *testing.T) {
+	// Reachable only via a direct call: NewGourdianTokenMaker's own
+	// validateConfig already rejects empty PrivateKeyPEM/PublicKeyPEM before
+	// parseKeyPair ever runs in the normal construction flow.
 	maker := &JWTMaker{
-		config: GourdianTokenConfig{
-			PrivateKeyPath: "/nonexistent/private.pem",
-			PublicKeyPath:  "/nonexistent/public.pem",
-		},
+		config:        GourdianTokenConfig{},
 		signingMethod: jwt.SigningMethodRS256,
 	}
 	err := maker.parseKeyPair()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to read private key file")
+	assert.Contains(t, err.Error(), "failed to parse PEM block containing the RSA private key")
 }
 
 func TestParseKeyPair_UnsupportedAlgorithm(t *testing.T) {
-	tempDir := t.TempDir()
-	privPath := filepath.Join(tempDir, "priv.pem")
-	pubPath := filepath.Join(tempDir, "pub.pem")
-	require.NoError(t, os.WriteFile(privPath, []byte("placeholder"), 0600))
-	require.NoError(t, os.WriteFile(pubPath, []byte("placeholder"), 0600))
-
 	maker := &JWTMaker{
-		config:        GourdianTokenConfig{PrivateKeyPath: privPath, PublicKeyPath: pubPath},
+		config: GourdianTokenConfig{
+			PrivateKeyPEM: []byte("placeholder"),
+			PublicKeyPEM:  []byte("placeholder"),
+		},
 		signingMethod: jwt.SigningMethodHS256, // not one of the RS/PS/ES/EdDSA cases
 	}
 	err := maker.parseKeyPair()
@@ -612,19 +636,17 @@ func TestParseKeyPair_UnsupportedAlgorithm(t *testing.T) {
 }
 
 func TestParseKeyPair_ECDSAPublicKeyParseError(t *testing.T) {
-	tempDir := t.TempDir()
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	der, err := x509.MarshalECPrivateKey(privKey)
 	require.NoError(t, err)
-	privPath := filepath.Join(tempDir, "priv.pem")
-	require.NoError(t, os.WriteFile(privPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), 0600))
-
-	pubPath := filepath.Join(tempDir, "pub.pem")
-	require.NoError(t, os.WriteFile(pubPath, []byte("not a valid key"), 0600))
+	privPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
 
 	maker := &JWTMaker{
-		config:        GourdianTokenConfig{PrivateKeyPath: privPath, PublicKeyPath: pubPath},
+		config: GourdianTokenConfig{
+			PrivateKeyPEM: privPEM,
+			PublicKeyPEM:  []byte("not a valid key"),
+		},
 		signingMethod: jwt.SigningMethodES256,
 	}
 	err = maker.parseKeyPair()
@@ -633,19 +655,17 @@ func TestParseKeyPair_ECDSAPublicKeyParseError(t *testing.T) {
 }
 
 func TestParseKeyPair_EdDSAPublicKeyParseError(t *testing.T) {
-	tempDir := t.TempDir()
 	_, privKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	der, err := x509.MarshalPKCS8PrivateKey(privKey)
 	require.NoError(t, err)
-	privPath := filepath.Join(tempDir, "priv.pem")
-	require.NoError(t, os.WriteFile(privPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0600))
-
-	pubPath := filepath.Join(tempDir, "pub.pem")
-	require.NoError(t, os.WriteFile(pubPath, []byte("not a valid key"), 0600))
+	privPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 
 	maker := &JWTMaker{
-		config:        GourdianTokenConfig{PrivateKeyPath: privPath, PublicKeyPath: pubPath},
+		config: GourdianTokenConfig{
+			PrivateKeyPEM: privPEM,
+			PublicKeyPEM:  []byte("not a valid key"),
+		},
 		signingMethod: jwt.SigningMethodEdDSA,
 	}
 	err = maker.parseKeyPair()
@@ -653,48 +673,39 @@ func TestParseKeyPair_EdDSAPublicKeyParseError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse EdDSA public key")
 }
 
-func TestParseKeyPair_MissingPublicKeyFile(t *testing.T) {
-	tempDir := t.TempDir()
-	privPath := filepath.Join(tempDir, "priv.pem")
-	require.NoError(t, os.WriteFile(privPath, []byte("placeholder"), 0600))
+func TestParseKeyPair_EmptyPublicKeyPEM(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	privPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privKey)})
 
 	maker := &JWTMaker{
 		config: GourdianTokenConfig{
-			PrivateKeyPath: privPath,
-			PublicKeyPath:  filepath.Join(tempDir, "does-not-exist.pem"),
+			PrivateKeyPEM: privPEM,
 		},
 		signingMethod: jwt.SigningMethodRS256,
 	}
 
-	err := maker.parseKeyPair()
+	err = maker.parseKeyPair()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to read public key file")
+	assert.Contains(t, err.Error(), "failed to parse PEM block containing the RSA public key")
 }
 
 // TestNewGourdianTokenMaker_InitializeKeysFailureCancelsCleanup uses
-// existing, correctly-permissioned but garbage-content key files: a
-// genuinely missing/insecurely-permissioned path would be rejected earlier
-// by validateConfig's own file-permission check (see
-// TestParseKeyPair_MissingPublicKeyFile above) before ever reaching
-// initializeKeys, so reaching *this* failure path — after the cleanup
-// goroutines have already been started because RevocationEnabled/
-// RotationEnabled are true — needs files that pass the permission check
-// but fail to parse as PEM.
+// non-empty but garbage PEM bytes: genuinely empty PrivateKeyPEM/PublicKeyPEM
+// would be rejected earlier by validateConfig's own required-bytes check
+// before ever reaching initializeKeys, so reaching *this* failure path —
+// after the cleanup goroutines have already been started because
+// RevocationEnabled/RotationEnabled are true — needs bytes that pass the
+// required-bytes check but fail to parse as PEM.
 func TestNewGourdianTokenMaker_InitializeKeysFailureCancelsCleanup(t *testing.T) {
-	tempDir := t.TempDir()
-	privPath := filepath.Join(tempDir, "priv.pem")
-	pubPath := filepath.Join(tempDir, "pub.pem")
-	require.NoError(t, os.WriteFile(privPath, []byte("not a real key"), 0600))
-	require.NoError(t, os.WriteFile(pubPath, []byte("not a real key"), 0600))
-
 	config := DefaultTestConfig()
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 	config.SigningMethod = Asymmetric
 	config.Algorithm = "RS256"
 	config.SymmetricKey = ""
-	config.PrivateKeyPath = privPath
-	config.PublicKeyPath = pubPath
+	config.PrivateKeyPEM = []byte("not a real key")
+	config.PublicKeyPEM = []byte("not a real key")
 
 	repo := NewMemoryTokenRepository(time.Minute)
 	_, err := NewGourdianTokenMaker(context.Background(), config, repo)

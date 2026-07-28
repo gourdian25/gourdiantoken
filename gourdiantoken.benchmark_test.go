@@ -24,7 +24,7 @@ func BenchmarkCreateAccessToken(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID)
+		_, _ = maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID, "")
 	}
 }
 
@@ -35,7 +35,7 @@ func BenchmarkCreateRefreshToken(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = maker.CreateRefreshToken(context.Background(), userID, "testuser", sessionID)
+		_, _ = maker.CreateRefreshToken(context.Background(), userID, "testuser", sessionID, "")
 	}
 }
 
@@ -44,7 +44,7 @@ func BenchmarkVerifyAccessToken(b *testing.B) {
 	userID := uuid.NewString()
 	sessionID := uuid.NewString()
 
-	token, _ := maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID)
+	token, _ := maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID, "")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -57,7 +57,7 @@ func BenchmarkVerifyRefreshToken(b *testing.B) {
 	userID := uuid.NewString()
 	sessionID := uuid.NewString()
 
-	token, _ := maker.CreateRefreshToken(context.Background(), userID, "testuser", sessionID)
+	token, _ := maker.CreateRefreshToken(context.Background(), userID, "testuser", sessionID, "")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -70,7 +70,7 @@ func BenchmarkRotateRefreshToken(b *testing.B) {
 	userID := uuid.NewString()
 	sessionID := uuid.NewString()
 
-	token, _ := maker.CreateRefreshToken(context.Background(), userID, "testuser", sessionID)
+	token, _ := maker.CreateRefreshToken(context.Background(), userID, "testuser", sessionID, "")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -101,7 +101,7 @@ func BenchmarkSigningMethods(b *testing.B) {
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_, _ = jwtMaker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID)
+				_, _ = jwtMaker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID, "")
 			}
 		})
 	}
@@ -317,7 +317,7 @@ func BenchmarkConcurrentTokenCreation(b *testing.B) {
 							userID,
 							"testuser",
 							[]string{"user"},
-							sessionID,
+							sessionID, "",
 						)
 					}
 				}()
@@ -336,7 +336,7 @@ func BenchmarkConcurrentTokenVerification(b *testing.B) {
 	// Pre-create tokens
 	tokens := make([]string, 100)
 	for i := 0; i < 100; i++ {
-		resp, _ := maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID)
+		resp, _ := maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID, "")
 		tokens[i] = resp.Token
 	}
 
@@ -551,7 +551,7 @@ func BenchmarkThroughput_TokenCreation(b *testing.B) {
 	count := int64(0)
 
 	for i := 0; i < b.N; i++ {
-		_, _ = maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID)
+		_, _ = maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID, "")
 		atomic.AddInt64(&count, 1)
 	}
 
@@ -624,7 +624,7 @@ func BenchmarkEndToEnd_TokenLifecycle(b *testing.B) {
 			userID,
 			"testuser",
 			[]string{"user"},
-			sessionID,
+			sessionID, "",
 		)
 
 		// Verify token
@@ -644,7 +644,7 @@ func BenchmarkEndToEnd_RefreshFlow(b *testing.B) {
 		context.Background(),
 		userID,
 		"testuser",
-		sessionID,
+		sessionID, "",
 	)
 
 	b.ResetTimer()
@@ -673,7 +673,7 @@ func BenchmarkStress_HighConcurrencyTokenOperations(b *testing.B) {
 
 	// Pre-create tokens
 	for i := 0; i < numTokens; i++ {
-		resp, _ := maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID)
+		resp, _ := maker.CreateAccessToken(context.Background(), userID, "testuser", []string{"user"}, sessionID, "")
 		tokens[i] = resp.Token
 	}
 

@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -115,7 +114,7 @@ func (maker *JWTMaker) Close() error {
 //
 // Configuration Validation:
 //   - Checks signing method matches algorithm (e.g., HS256 requires Symmetric)
-//   - Validates key files exist and have secure permissions (0600 for private keys)
+//   - Validates asymmetric key PEM bytes are present and well-formed
 //   - Ensures durations are positive and logical (expiry < max lifetime)
 //   - Verifies required parameters are provided for the chosen signing method
 //
@@ -146,8 +145,8 @@ func (maker *JWTMaker) Close() error {
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/path/to/private.pem",
-//	    PublicKeyPath: "/path/to/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.example.com",
 //	    RevocationEnabled: false,
 //	    RotationEnabled: false,
@@ -305,8 +304,6 @@ func DefaultGourdianTokenMaker(
 		RotationEnabled:          false,
 		Algorithm:                "HS256",
 		SymmetricKey:             symmetricKey,
-		PrivateKeyPath:           "",
-		PublicKeyPath:            "",
 		Issuer:                   "gourdian.com",
 		Audience:                 nil,
 		AllowedAlgorithms:        []string{"HS256", "RS256", "ES256", "PS256"},
@@ -418,6 +415,7 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //	    "john.doe",
 //	    []string{"user", "admin"},
 //	    sessionID,
+//	    "",
 //	)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create token: %w", err)
@@ -435,6 +433,7 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //	    "admin@example.com",
 //	    []string{"user", "admin", "moderator"},
 //	    sessionID,
+//	    "",
 //	)
 //
 // Example (With context timeout):
@@ -442,8 +441,8 @@ func (maker *JWTMaker) signClaims(ctx context.Context, claims interface{}, token
 //	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 //	defer cancel()
 //
-//	token, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
-func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error) {
+//	token, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
+func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string, tenantID string) (*AccessTokenResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -462,6 +461,10 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 		}
 	}
 
+	if err := validateTenantID(maker.config.MultiTenantEnabled, tenantID); err != nil {
+		return nil, err
+	}
+
 	tokenID, err := newTokenID()
 	if err != nil {
 		return nil, err
@@ -473,6 +476,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 		Subject:           userID,
 		SessionID:         sessionID,
 		Username:          username,
+		TenantID:          tenantID,
 		Issuer:            maker.config.Issuer,
 		Audience:          maker.config.Audience,
 		Roles:             roles,
@@ -494,6 +498,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 		Token:             signedToken,
 		Issuer:            claims.Issuer,
 		Username:          claims.Username,
+		TenantID:          claims.TenantID,
 		Roles:             roles,
 		Audience:          claims.Audience,
 		IssuedAt:          claims.IssuedAt,
@@ -552,6 +557,7 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 //	    userID,
 //	    "john.doe",
 //	    sessionID,
+//	    "",
 //	)
 //	if err != nil {
 //	    return fmt.Errorf("failed to create refresh token: %w", err)
@@ -569,12 +575,12 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 //
 // Example (Create token pair):
 //
-//	accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+//	accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 //	if err != nil {
 //	    return err
 //	}
 //
-//	refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+//	refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 //	if err != nil {
 //	    return err
 //	}
@@ -583,12 +589,16 @@ func (maker *JWTMaker) CreateAccessToken(ctx context.Context, userID string, use
 //	    AccessToken:  accessToken.Token,
 //	    RefreshToken: refreshToken.Token,
 //	}
-func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error) {
+func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string, tenantID string) (*RefreshTokenResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
 
 	if err := validateUserAndUsername(userID, username); err != nil {
+		return nil, err
+	}
+
+	if err := validateTenantID(maker.config.MultiTenantEnabled, tenantID); err != nil {
 		return nil, err
 	}
 
@@ -603,6 +613,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, us
 		Subject:           userID,
 		SessionID:         sessionID,
 		Username:          username,
+		TenantID:          tenantID,
 		Issuer:            maker.config.Issuer,
 		Audience:          maker.config.Audience,
 		IssuedAt:          now,
@@ -623,6 +634,7 @@ func (maker *JWTMaker) CreateRefreshToken(ctx context.Context, userID string, us
 		Token:             signedToken,
 		Issuer:            claims.Issuer,
 		Username:          claims.Username,
+		TenantID:          claims.TenantID,
 		Audience:          claims.Audience,
 		IssuedAt:          claims.IssuedAt,
 		ExpiresAt:         claims.ExpiresAt,
@@ -773,6 +785,35 @@ func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString st
 
 	if err := validateTokenClaims(claims, tokenType, maker.config.RequiredClaims); err != nil {
 		return nil, err
+	}
+
+	// tid is required on access/refresh tokens (never verification tokens, which use
+	// Metadata for any tenant scoping instead — see VerificationTokenClaims) once
+	// MultiTenantEnabled is true. This is the verify-side counterpart to validateTenantID,
+	// which only guards the create side; without this check a pre-existing or
+	// maliciously-crafted token missing "tid" would otherwise verify successfully.
+	if maker.config.MultiTenantEnabled && (tokenType == AccessToken || tokenType == RefreshToken) {
+		tid, _ := claims["tid"].(string)
+		if tid == "" {
+			return nil, fmt.Errorf("%w", ErrTenantIDRequired)
+		}
+
+		// Bulk tenant revocation (see RevokeTenant): reject any token issued at-or-before
+		// its tenant's revocation epoch, even one never individually revoked or rotated.
+		// Only meaningful once a RevokeTenant call could actually have happened, so this is
+		// gated the same way the revocation/rotation checks above are.
+		if maker.config.RevocationEnabled && maker.tokenRepo != nil {
+			epoch, err := maker.tokenRepo.GetTenantRevocationEpoch(ctx, tid)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check tenant revocation: %w", err)
+			}
+			if !epoch.IsZero() {
+				iat := getUnixTime(claims["iat"])
+				if !time.Unix(iat, 0).After(epoch) {
+					return nil, fmt.Errorf("%w", ErrTenantRevoked)
+				}
+			}
+		}
 	}
 
 	return claims, nil
@@ -926,6 +967,7 @@ func (maker *JWTMaker) VerifyAccessToken(ctx context.Context, tokenString string
 //	    refreshClaims.Username,
 //	    []string{"user"}, // Load roles from database
 //	    refreshClaims.SessionID,
+//	    refreshClaims.TenantID,
 //	)
 //
 // Example (With rotation):
@@ -1277,6 +1319,7 @@ func (maker *JWTMaker) MarkVerificationTokenUsed(ctx context.Context, token stri
 //	        claims.Username,
 //	        getUserRoles(claims.Subject), // Load from DB
 //	        claims.SessionID,
+//	        claims.TenantID,
 //	    )
 //
 //	    // Return new token pair
@@ -1356,7 +1399,7 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 	// Failure Mode" note above this function, which described the lockout this reordering
 	// fixes). The trade-off: a losing concurrent request (see below) does this signing work
 	// for nothing — cheap, since it's pure cryptographic signing with no repository call.
-	newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID)
+	newToken, err := maker.CreateRefreshToken(ctx, claims.Subject, claims.Username, claims.SessionID, claims.TenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -1380,6 +1423,52 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 	}
 
 	return newToken, nil
+}
+
+// RevokeTenant bulk-revokes every access/refresh token for tenantID by recording a
+// revocation epoch (see TokenRepository.RevokeTenant), rather than enumerating and marking
+// individual tokens — the only approach that also covers access tokens, which this package
+// never persists a record of unless individually revoked, and which needs no "tokens by
+// tenant" index on any backend.
+//
+// Requires GourdianTokenConfig.MultiTenantEnabled and RevocationEnabled plus a
+// TokenRepository — the same preconditions RevokeAccessToken/RevokeRefreshToken already
+// enforce, since this is built on the same repository.
+//
+// The revocation record's TTL is max(AccessExpiryDuration, RefreshExpiryDuration): past
+// that window, every token issued before the epoch has already failed its own native "exp"
+// check regardless of the epoch record, making the record redundant beyond that point.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - tenantID: The tenant to revoke (must not be empty)
+//
+// Returns:
+//   - error: If multi-tenancy or revocation is disabled, tenantID is empty, or the
+//     repository operation fails
+func (maker *JWTMaker) RevokeTenant(ctx context.Context, tenantID string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context canceled: %w", err)
+	}
+
+	if !maker.config.MultiTenantEnabled {
+		return fmt.Errorf("%w", ErrMultiTenantDisabled)
+	}
+
+	if tenantID == "" {
+		return fmt.Errorf("%w", ErrTenantIDRequired)
+	}
+
+	if !maker.config.RevocationEnabled || maker.tokenRepo == nil {
+		return fmt.Errorf("tenant revocation is not enabled")
+	}
+
+	ttl := maker.config.AccessExpiryDuration
+	if maker.config.RefreshExpiryDuration > ttl {
+		ttl = maker.config.RefreshExpiryDuration
+	}
+
+	return maker.tokenRepo.RevokeTenant(ctx, tenantID, ttl)
 }
 
 // cleanupRotatedTokens is a background goroutine that periodically removes expired rotation markers.
@@ -1428,6 +1517,18 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 				}
 			}
 			cancel()
+
+			if maker.config.MultiTenantEnabled {
+				tenantCleanupCtx, tenantCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := maker.tokenRepo.CleanupExpiredTenantRevocations(tenantCleanupCtx); err != nil {
+					if maker.structuredLogger != nil {
+						maker.structuredLogger.Error("gourdiantoken: cleanup tenant revocations failed", "error", err)
+					} else {
+						maker.logf("Error cleaning up tenant revocations: %v\n", err)
+					}
+				}
+				tenantCancel()
+			}
 		}
 	}
 }
@@ -1480,6 +1581,18 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 					}
 				}
 				cancel()
+			}
+
+			if maker.config.MultiTenantEnabled {
+				tenantCleanupCtx, tenantCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := maker.tokenRepo.CleanupExpiredTenantRevocations(tenantCleanupCtx); err != nil {
+					if maker.structuredLogger != nil {
+						maker.structuredLogger.Error("gourdiantoken: cleanup tenant revocations failed", "error", err)
+					} else {
+						maker.logf("Error cleaning up tenant revocations: %v\n", err)
+					}
+				}
+				tenantCancel()
 			}
 		}
 	}
@@ -1559,15 +1672,15 @@ func (maker *JWTMaker) initializeSigningMethod() error {
 
 // initializeKeys loads and validates cryptographic keys based on the signing method.
 // For symmetric signing, uses the configured secret key.
-// For asymmetric signing, loads keys from PEM files.
+// For asymmetric signing, parses the configured PEM-encoded key bytes.
 //
 // Symmetric Key Handling:
 //   - Uses SymmetricKey for both signing and verification
 //   - Key is used as-is (ensure it's properly secured)
 //
 // Asymmetric Key Handling:
-//   - Loads private key from PrivateKeyPath (for signing)
-//   - Loads public key from PublicKeyPath (for verification)
+//   - Parses PrivateKeyPEM (for signing)
+//   - Parses PublicKeyPEM (for verification)
 //   - Supports multiple PEM formats (PKCS1, PKCS8, SEC1)
 //   - Validates key types match the algorithm
 //
@@ -1577,11 +1690,10 @@ func (maker *JWTMaker) initializeSigningMethod() error {
 //   - EdDSA: Ed25519 keys
 //
 // Returns:
-//   - error: If keys cannot be loaded, are invalid, or don't match the algorithm
+//   - error: If keys cannot be parsed, are invalid, or don't match the algorithm
 //
 // Notes:
 //   - Called internally during initialization
-//   - Private key files should have 0600 permissions
 //   - Public keys can be distributed for token verification
 func (maker *JWTMaker) initializeKeys() error {
 	switch maker.config.SigningMethod {
@@ -1596,7 +1708,7 @@ func (maker *JWTMaker) initializeKeys() error {
 	}
 }
 
-// parseKeyPair loads and parses asymmetric key pairs from PEM files.
+// parseKeyPair parses asymmetric key pairs from the configured PEM-encoded bytes.
 // Handles RSA, ECDSA, and EdDSA key types with multiple encoding formats.
 //
 // Supported Private Key Formats:
@@ -1613,22 +1725,16 @@ func (maker *JWTMaker) initializeKeys() error {
 //   - Validates loaded keys match the algorithm
 //
 // Returns:
-//   - error: If files cannot be read, keys cannot be parsed, or key types don't match
+//   - error: If keys cannot be parsed, or key types don't match
 //
 // Notes:
 //   - Called by initializeKeys for asymmetric signing
 //   - Automatically detects key format from PEM structure
 func (maker *JWTMaker) parseKeyPair() error {
-	privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to read private key file: %w", err)
-	}
+	privateKeyBytes := maker.config.PrivateKeyPEM
+	publicKeyBytes := maker.config.PublicKeyPEM
 
-	publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to read public key file: %w", err)
-	}
-
+	var err error
 	switch maker.signingMethod.Alg() {
 	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
 		maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)

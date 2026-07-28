@@ -53,7 +53,7 @@ func TestNewGourdianTokenMakerWithMongo_WrapsRepositoryError(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	_, err = NewGourdianTokenMakerWithMongo(context.Background(), config, client.Database("nowhere"), false)
+	_, err = NewGourdianTokenMakerWithMongo(context.Background(), config, client.Database("nowhere"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to initialize MongoDB token repository")
 }
@@ -99,9 +99,24 @@ func TestMongoRepository_OperationsAfterDisconnected(t *testing.T) {
 	err = mongoRepo.CleanupExpiredRotatedTokens(ctx)
 	require.Error(t, err)
 
+	err = mongoRepo.RevokeTenant(ctx, "acme-corp", time.Hour)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to revoke tenant")
+
+	_, err = mongoRepo.GetTenantRevocationEpoch(ctx, "acme-corp")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mongodb error")
+
+	err = mongoRepo.CleanupExpiredTenantRevocations(ctx)
+	require.Error(t, err)
+
 	_, err = mongoRepo.Stats(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to count revoked tokens")
+
+	err = mongoRepo.CleanupAll(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to cleanup access tokens")
 }
 
 // TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions is the
