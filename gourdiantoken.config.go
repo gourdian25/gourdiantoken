@@ -156,10 +156,10 @@ type GourdianTokenConfig struct {
 	CleanupInterval time.Duration
 
 	// VerificationTokensEnabled determines whether CreateVerificationToken, VerifyVerificationToken,
-	// and MarkVerificationTokenUsed (the GourdianTokenMakerVerification optional interface) are
-	// active. Defaults to false: every config that predates this field is unaffected, and
-	// validateConfig only checks the Verification* fields below when this is true.
-	// Single-use enforcement additionally requires RevocationEnabled plus a TokenRepository.
+	// and MarkVerificationTokenUsed are active. Defaults to false: every config that predates
+	// this field is unaffected, and validateConfig only checks the Verification* fields below
+	// when this is true. Single-use enforcement additionally requires RevocationEnabled plus a
+	// TokenRepository.
 	VerificationTokensEnabled bool
 
 	// VerificationAllowedUseCases is a whitelist of acceptable "use case" strings for

@@ -120,8 +120,10 @@ type TokenRepository interface {
 }
 
 // GourdianTokenMaker is the main interface for token operations.
-// Implementations handle token creation, verification, revocation, and rotation
-// with support for multiple signing algorithms and security features.
+// Implementations handle token creation, verification, revocation, rotation,
+// stopping background cleanup goroutines, and short-lived single-use
+// verification tokens, with support for multiple signing algorithms and
+// security features.
 //
 // Thread Safety:
 //
@@ -311,56 +313,30 @@ type GourdianTokenMaker interface {
 	//	}
 	//	// Return newToken to client
 	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
-}
 
-// GourdianTokenMakerCloser is an optional interface implemented by GourdianTokenMaker
-// implementations that support stopping their background cleanup goroutines. It is
-// deliberately separate from GourdianTokenMaker so that adding it does not break any
-// existing external implementer of that interface.
-//
-// Example:
-//
-//	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, tokenRepo)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer func() {
-//	    if closer, ok := maker.(gourdiantoken.GourdianTokenMakerCloser); ok {
-//	        closer.Close()
-//	    }
-//	}()
-type GourdianTokenMakerCloser interface {
 	// Close stops any background cleanup goroutines started by the maker.
 	// Safe to call multiple times.
+	//
+	// Example:
+	//
+	//	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, tokenRepo)
+	//	if err != nil {
+	//	    log.Fatal(err)
+	//	}
+	//	defer maker.Close()
 	Close() error
-}
 
-// GourdianTokenMakerVerification is an optional interface implemented by GourdianTokenMaker
-// implementations that support short-lived, single-use, use-case-scoped verification tokens
-// (e.g. a 2FA-pending-verification step between password check and full session issuance,
-// or password-reset / email-verify flows). It is deliberately separate from
-// GourdianTokenMaker, following the same precedent as GourdianTokenMakerCloser, so that
-// adding it does not break any existing external implementer of GourdianTokenMaker.
-//
-// Requires GourdianTokenConfig.VerificationTokensEnabled. Single-use enforcement (a
-// verification token can only be successfully verified once) additionally requires
-// RevocationEnabled plus a TokenRepository, since MarkVerificationTokenUsed is implemented
-// by revoking the token via the same mechanism used for access/refresh revocation.
-//
-// Example:
-//
-//	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, tokenRepo)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	if verifier, ok := maker.(gourdiantoken.GourdianTokenMakerVerification); ok {
-//	    token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
-//	}
-type GourdianTokenMakerVerification interface {
-	// CreateVerificationToken generates a new signed, short-lived verification token
-	// scoped to useCase. A ttl <= 0 falls back to
-	// GourdianTokenConfig.VerificationDefaultExpiryDuration; a ttl exceeding
-	// VerificationMaxExpiryDuration (when configured) is rejected.
+	// CreateVerificationToken generates a new signed, short-lived, single-use,
+	// use-case-scoped verification token (e.g. a 2FA-pending-verification step between
+	// password check and full session issuance, or password-reset / email-verify flows).
+	// Requires GourdianTokenConfig.VerificationTokensEnabled.
+	//
+	// A ttl <= 0 falls back to GourdianTokenConfig.VerificationDefaultExpiryDuration; a ttl
+	// exceeding VerificationMaxExpiryDuration (when configured) is rejected.
+	//
+	// Example:
+	//
+	//	token, err := maker.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
 	CreateVerificationToken(ctx context.Context, userID string, useCase string, ttl time.Duration, metadata map[string]interface{}) (*VerificationTokenResponse, error)
 
 	// VerifyVerificationToken validates a verification token and returns its claims.
@@ -368,7 +344,9 @@ type GourdianTokenMakerVerification interface {
 	VerifyVerificationToken(ctx context.Context, tokenString string) (*VerificationTokenClaims, error)
 
 	// MarkVerificationTokenUsed marks a verification token as used, so a subsequent
-	// VerifyVerificationToken call on the same token fails. Requires RevocationEnabled
-	// plus a TokenRepository; returns an error otherwise.
+	// VerifyVerificationToken call on the same token fails. Single-use enforcement (a
+	// verification token can only be successfully verified once) requires RevocationEnabled
+	// plus a TokenRepository, since this is implemented by revoking the token via the same
+	// mechanism used for access/refresh revocation; returns an error otherwise.
 	MarkVerificationTokenUsed(ctx context.Context, token string) error
 }

@@ -74,24 +74,18 @@ func TestClose_Idempotent(t *testing.T) {
 	maker, err := NewGourdianTokenMakerWithMemory(context.Background(), config)
 	require.NoError(t, err)
 
-	closer, ok := maker.(GourdianTokenMakerCloser)
-	require.True(t, ok, "*JWTMaker should implement GourdianTokenMakerCloser")
-
-	assert.NoError(t, closer.Close())
-	assert.NoError(t, closer.Close())
-	assert.NoError(t, closer.Close())
+	assert.NoError(t, maker.Close())
+	assert.NoError(t, maker.Close())
+	assert.NoError(t, maker.Close())
 }
 
 func TestClose_NoOpWhenRotationAndRevocationDisabled(t *testing.T) {
 	maker, err := NewGourdianTokenMakerNoStorage(context.Background(), DefaultTestConfig())
 	require.NoError(t, err)
 
-	closer, ok := maker.(GourdianTokenMakerCloser)
-	require.True(t, ok)
-
 	// No background goroutines were ever started; Close must still be safe.
-	assert.NoError(t, closer.Close())
-	assert.NoError(t, closer.Close())
+	assert.NoError(t, maker.Close())
+	assert.NoError(t, maker.Close())
 }
 
 // TestClose_StopsCleanupGoroutines constructs a *JWTMaker directly (bypassing

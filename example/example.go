@@ -213,26 +213,17 @@ func runTokenLifecycleTests(ctx context.Context, tokenMaker gourdiantoken.Gourdi
 	return results
 }
 
-// runVerificationTokenTests exercises the optional GourdianTokenMakerVerification
-// interface (short-lived, single-use, use-case-scoped tokens), the way a real caller
-// would type-assert for it.
+// runVerificationTokenTests exercises short-lived, single-use, use-case-scoped
+// verification tokens.
 func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.GourdianTokenMaker) []TestResult {
 	var results []TestResult
 	fmt.Printf("\n┌─ %s\n", "VERIFICATION TOKENS")
-
-	verifier, ok := tokenMaker.(gourdiantoken.GourdianTokenMakerVerification)
-	if !ok {
-		results = append(results, runTest("Verification Token Support", func() (string, error) {
-			return "GourdianTokenMakerVerification not implemented (skipped)", nil
-		}))
-		return results
-	}
 
 	userID := uuid.NewString()
 
 	// Test 1: Create and Verify
 	results = append(results, runTest("Create and Verify Verification Token", func() (string, error) {
-		token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, map[string]interface{}{"username": "alice"})
+		token, err := tokenMaker.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, map[string]interface{}{"username": "alice"})
 		if err != nil {
 			if err.Error() == "verification tokens are not enabled" {
 				return "Verification tokens not enabled (skipped)", nil
@@ -240,7 +231,7 @@ func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 			return "", err
 		}
 
-		claims, err := verifier.VerifyVerificationToken(ctx, token.Token)
+		claims, err := tokenMaker.VerifyVerificationToken(ctx, token.Token)
 		if err != nil {
 			return "", err
 		}
@@ -250,7 +241,7 @@ func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 
 	// Test 2: Mark Used, Then Verify Fails
 	results = append(results, runTest("Mark Verification Token Used", func() (string, error) {
-		token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
+		token, err := tokenMaker.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
 		if err != nil {
 			if err.Error() == "verification tokens are not enabled" {
 				return "Verification tokens not enabled (skipped)", nil
@@ -258,7 +249,7 @@ func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 			return "", err
 		}
 
-		err = verifier.MarkVerificationTokenUsed(ctx, token.Token)
+		err = tokenMaker.MarkVerificationTokenUsed(ctx, token.Token)
 		if err != nil {
 			if strings.Contains(err.Error(), "revocation is not enabled") {
 				return "Revocation not enabled (skipped)", nil
@@ -266,7 +257,7 @@ func runVerificationTokenTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 			return "", err
 		}
 
-		_, err = verifier.VerifyVerificationToken(ctx, token.Token)
+		_, err = tokenMaker.VerifyVerificationToken(ctx, token.Token)
 		if err == nil {
 			return "", fmt.Errorf("token should be rejected after being marked used but verification succeeded")
 		}

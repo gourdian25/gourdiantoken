@@ -34,10 +34,9 @@
 // password check and full session issuance, or a password-reset/email-verify
 // link). Unlike the other two types, its lifetime is a per-call parameter
 // (CreateVerificationToken's ttl argument), not fixed solely by
-// configuration. Requires GourdianTokenConfig.VerificationTokensEnabled and is
-// exposed via the optional GourdianTokenMakerVerification interface (see
-// below), not the base GourdianTokenMaker interface. Single-use enforcement
-// piggybacks on the same revocation machinery used for access/refresh tokens:
+// configuration. Requires GourdianTokenConfig.VerificationTokensEnabled.
+// Single-use enforcement piggybacks on the same revocation machinery used
+// for access/refresh tokens:
 // MarkVerificationTokenUsed revokes the token, and VerifyVerificationToken's
 // existing revocation check is what then rejects a second verification
 // attempt, wrapping ErrTokenAlreadyUsed (a plain alias of ErrTokenRevoked).
@@ -144,8 +143,8 @@
 //
 // # Thread Safety and Context Handling
 //
-// JWTMaker (the concrete GourdianTokenMaker/GourdianTokenMakerCloser
-// implementation) is immutable after construction — config, keys, and the
+// JWTMaker (the concrete GourdianTokenMaker implementation) is immutable
+// after construction — config, keys, and the
 // signing method are never mutated post-init — so every method is safe for
 // concurrent use by multiple goroutines without any additional locking on
 // the caller's part. The only mutable internal state is closeOnce
@@ -215,9 +214,8 @@
 //     or supply a repository.
 //   - A symmetric key under 32 bytes fails validateConfig; generate a proper
 //     random key rather than shortening the requirement.
-//   - Forgetting to call Close() (via the GourdianTokenMakerCloser optional
-//     interface) on process shutdown leaks the background cleanup
-//     goroutine(s) for the remaining process lifetime — harmless for
+//   - Forgetting to call Close() on process shutdown leaks the background
+//     cleanup goroutine(s) for the remaining process lifetime — harmless for
 //     short-lived test binaries but worth doing in long-running services.
 //   - MarkVerificationTokenUsed requires RevocationEnabled plus a
 //     TokenRepository even when VerificationTokensEnabled is true; without

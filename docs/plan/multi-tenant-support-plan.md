@@ -62,7 +62,7 @@ described below.
 | Stage | Scope | Status |
 |---|---|---|
 | Stage 1 | Tenant claim foundation | ✅ Done |
-| Stage 2 | Interface consolidation | Not started |
+| Stage 2 | Interface consolidation | ✅ Done |
 | Stage 3 | Tenant-scoped bulk revocation | Not started |
 | Stage 4 | Repository backend standardization | Not started |
 | Stage 5 | Docs / CHANGELOG / version bump / example.go | Not started |
@@ -314,6 +314,41 @@ avoid two rounds of churn in the same interface file.
 `make coverage-check`; grep the repo post-change for
 `GourdianTokenMakerCloser`/`GourdianTokenMakerVerification` to confirm zero
 references remain outside `CHANGELOG.md`'s historical entries.
+
+### Stage 2 completion notes
+
+- `GourdianTokenMakerCloser` and `GourdianTokenMakerVerification` deleted as
+  separate declarations; their methods (`Close`, `CreateVerificationToken`,
+  `VerifyVerificationToken`, `MarkVerificationTokenUsed`) now live directly
+  on `GourdianTokenMaker`, inserted right after `RotateRefreshToken` to match
+  the method order specified above. No back-compat alias, per the plan.
+- `gourdiantoken.close_test.go`'s two type-assertion sites
+  (`TestClose_Idempotent`, `TestClose_NoOpWhenRotationAndRevocationDisabled`)
+  replaced with direct `maker.Close()` calls.
+- `example/example.go`'s `runVerificationTokenTests` no longer type-asserts
+  for `GourdianTokenMakerVerification` (the "not implemented (skipped)"
+  fallback path is gone — it's always implemented now); calls
+  `tokenMaker.CreateVerificationToken`/`VerifyVerificationToken`/
+  `MarkVerificationTokenUsed` directly. The plan's premise that no
+  `GourdianTokenMakerCloser` assertion existed in `example/example.go` was
+  confirmed by grep — only the Verification one needed fixing there.
+- `docs.go`'s three references (package doc's token-types section, the
+  thread-safety section's "concrete implementation" phrasing, and the
+  common-mistakes list's Close() bullet) rewritten to describe the single
+  merged interface.
+- Also fixed one stale reference the plan didn't call out explicitly:
+  `gourdiantoken.config.go`'s `VerificationTokensEnabled` doc comment named
+  "the GourdianTokenMakerVerification optional interface" — updated since it
+  no longer exists as a separate type.
+- Post-change repo-wide grep for `GourdianTokenMakerCloser`/
+  `GourdianTokenMakerVerification`: zero hits in any `.go` file. Remaining
+  hits are `CLAUDE.md` (updated in this pass), `README.md` (left as-is,
+  deferred to Stage 5 per the plan), and this plan file's own prose
+  describing the change.
+- Full verification green: `go build ./...`, `go vet ./...`, `gofmt -l .`
+  clean, full suite against all 4 live backends (95.4% coverage), `make
+  race`, `make coverage-check` (95.4%), `go run ./example` end-to-end
+  (230/230 passed, verification-token scenarios included).
 
 ## Stage 3 — Tenant-scoped bulk revocation
 
