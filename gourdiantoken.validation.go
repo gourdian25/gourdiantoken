@@ -17,22 +17,20 @@ import (
 //   - Signing method compatibility (symmetric vs asymmetric)
 //   - Algorithm matches signing method
 //   - Required parameters are provided
-//   - Key/file paths are correct for signing method
+//   - Key material is present and matches the signing method
 //   - Duration values are positive and logical
-//   - File permissions are secure (0600 for private keys)
 //   - Algorithms are not weak (rejects "none")
 //   - Cleanup interval is reasonable (>= 1 minute)
 //
 // Symmetric Signing Validation:
 //   - SymmetricKey must be provided and >= 32 bytes
 //   - Algorithm must be HS256, HS384, or HS512
-//   - Private/public key paths must be empty
+//   - PrivateKeyPEM/PublicKeyPEM must be empty
 //
 // Asymmetric Signing Validation:
-//   - PrivateKeyPath and PublicKeyPath must be provided
+//   - PrivateKeyPEM and PublicKeyPEM must be provided
 //   - Algorithm must be RS*, ES*, PS*, or EdDSA
 //   - SymmetricKey must be empty
-//   - Key files must exist with secure permissions
 //
 // Duration Validation:
 //   - All durations must be positive
@@ -61,12 +59,12 @@ func validateConfig(config *GourdianTokenConfig) error {
 		if len(config.SymmetricKey) < 32 {
 			return fmt.Errorf("symmetric key must be at least 32 bytes")
 		}
-		if config.PrivateKeyPath != "" || config.PublicKeyPath != "" {
-			return fmt.Errorf("private and public key paths must be empty for symmetric signing")
+		if config.PrivateKeyPEM != nil || config.PublicKeyPEM != nil {
+			return fmt.Errorf("private and public key PEM bytes must be empty for symmetric signing")
 		}
 	case Asymmetric:
-		if config.PrivateKeyPath == "" || config.PublicKeyPath == "" {
-			return fmt.Errorf("private and public key paths are required for asymmetric signing method")
+		if len(config.PrivateKeyPEM) == 0 || len(config.PublicKeyPEM) == 0 {
+			return fmt.Errorf("private and public key PEM bytes are required for asymmetric signing method")
 		}
 		if config.SymmetricKey != "" {
 			return fmt.Errorf("symmetric key must be empty for asymmetric signing")
@@ -76,12 +74,6 @@ func validateConfig(config *GourdianTokenConfig) error {
 			!strings.HasPrefix(config.Algorithm, "PS") &&
 			config.Algorithm != "EdDSA" {
 			return fmt.Errorf("algorithm %s not compatible with asymmetric signing", config.Algorithm)
-		}
-		if err := checkFilePermissions(config.PrivateKeyPath, 0600); err != nil {
-			return fmt.Errorf("insecure private key file permissions: %w", err)
-		}
-		if err := checkFilePermissions(config.PublicKeyPath, 0600); err != nil {
-			return fmt.Errorf("insecure public key file permissions: %w", err)
 		}
 	default:
 		return fmt.Errorf("unsupported signing method: %s, supports %s and %s",
@@ -243,6 +235,9 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 		if !v.MaxLifetimeExpiry.IsZero() {
 			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
 		}
+		if v.TenantID != "" {
+			mapClaims["tid"] = v.TenantID
+		}
 		return mapClaims, nil
 	case RefreshTokenClaims:
 		mapClaims := jwt.MapClaims{
@@ -261,6 +256,9 @@ func toMapClaims(claims interface{}) (jwt.MapClaims, error) {
 		}
 		if !v.MaxLifetimeExpiry.IsZero() {
 			mapClaims["mle"] = v.MaxLifetimeExpiry.Unix()
+		}
+		if v.TenantID != "" {
+			mapClaims["tid"] = v.TenantID
 		}
 		return mapClaims, nil
 	case VerificationTokenClaims:
@@ -466,11 +464,24 @@ func mapToAccessClaims(claims jwt.MapClaims) (*AccessTokenClaims, error) {
 		return nil, fmt.Errorf("invalid token type: expected string")
 	}
 
+	// tid is not part of baseRequired (only mandatory when the maker's config has
+	// MultiTenantEnabled true, enforced upstream in parseAndValidateToken), so an absent
+	// tid claim is not an error here — only a present-but-wrong-typed one is. Mirrors how
+	// extractCommonClaims already treats the optional "iss" claim.
+	var tenantID string
+	if raw, present := claims["tid"]; present {
+		tenantID, ok = raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid tenant ID type: expected string")
+		}
+	}
+
 	accessClaims := &AccessTokenClaims{
 		ID:                common.ID,
 		Subject:           common.Subject,
 		Username:          common.Username,
 		SessionID:         common.SessionID,
+		TenantID:          tenantID,
 		Issuer:            common.Issuer,
 		Audience:          common.Audience,
 		IssuedAt:          common.IssuedAt,
@@ -523,11 +534,22 @@ func mapToRefreshClaims(claims jwt.MapClaims) (*RefreshTokenClaims, error) {
 		return nil, fmt.Errorf("invalid token type: expected 'refresh'")
 	}
 
+	// tid is optional here for the same reason as in mapToAccessClaims — see that
+	// function's comment.
+	var tenantID string
+	if raw, present := claims["tid"]; present {
+		tenantID, ok = raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid tenant ID type: expected string")
+		}
+	}
+
 	refreshClaims := &RefreshTokenClaims{
 		ID:                common.ID,
 		Subject:           common.Subject,
 		Username:          common.Username,
 		SessionID:         common.SessionID,
+		TenantID:          tenantID,
 		Issuer:            common.Issuer,
 		Audience:          common.Audience,
 		IssuedAt:          common.IssuedAt,
@@ -619,6 +641,24 @@ func validateUseCase(allowed []string, useCase string) error {
 		}
 	}
 	return fmt.Errorf("use case %q is not in the allowed list", useCase)
+}
+
+// validateTenantID enforces GourdianTokenConfig.MultiTenantEnabled against a tenantID
+// supplied to CreateAccessToken/CreateRefreshToken: required and non-empty when true,
+// forbidden (must be empty) when false. Fails loud in both directions rather than
+// silently ignoring a caller-supplied tenant ID — the one thing this whole feature exists
+// to prevent.
+func validateTenantID(multiTenantEnabled bool, tenantID string) error {
+	if multiTenantEnabled {
+		if tenantID == "" {
+			return fmt.Errorf("%w", ErrTenantIDRequired)
+		}
+		return nil
+	}
+	if tenantID != "" {
+		return fmt.Errorf("%w", ErrTenantIDNotAllowed)
+	}
+	return nil
 }
 
 // resolveVerificationTTL determines the effective expiry duration for a verification

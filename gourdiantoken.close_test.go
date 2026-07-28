@@ -60,6 +60,27 @@ func (r *cleanupCountingRepo) CleanupExpiredRotatedTokens(ctx context.Context) e
 	return fmt.Errorf("stub cleanup error")
 }
 
+func (r *cleanupCountingRepo) RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error {
+	return nil
+}
+
+func (r *cleanupCountingRepo) GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error) {
+	return time.Time{}, nil
+}
+
+func (r *cleanupCountingRepo) CleanupExpiredTenantRevocations(ctx context.Context) error {
+	r.mu.Lock()
+	r.count++
+	r.mu.Unlock()
+	return fmt.Errorf("stub cleanup error")
+}
+
+func (r *cleanupCountingRepo) Stats(ctx context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+
+func (r *cleanupCountingRepo) CleanupAll(ctx context.Context) error { return nil }
+
 func (r *cleanupCountingRepo) Count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -74,24 +95,18 @@ func TestClose_Idempotent(t *testing.T) {
 	maker, err := NewGourdianTokenMakerWithMemory(context.Background(), config)
 	require.NoError(t, err)
 
-	closer, ok := maker.(GourdianTokenMakerCloser)
-	require.True(t, ok, "*JWTMaker should implement GourdianTokenMakerCloser")
-
-	assert.NoError(t, closer.Close())
-	assert.NoError(t, closer.Close())
-	assert.NoError(t, closer.Close())
+	assert.NoError(t, maker.Close())
+	assert.NoError(t, maker.Close())
+	assert.NoError(t, maker.Close())
 }
 
 func TestClose_NoOpWhenRotationAndRevocationDisabled(t *testing.T) {
 	maker, err := NewGourdianTokenMakerNoStorage(context.Background(), DefaultTestConfig())
 	require.NoError(t, err)
 
-	closer, ok := maker.(GourdianTokenMakerCloser)
-	require.True(t, ok)
-
 	// No background goroutines were ever started; Close must still be safe.
-	assert.NoError(t, closer.Close())
-	assert.NoError(t, closer.Close())
+	assert.NoError(t, maker.Close())
+	assert.NoError(t, maker.Close())
 }
 
 // TestClose_StopsCleanupGoroutines constructs a *JWTMaker directly (bypassing
@@ -134,6 +149,66 @@ func TestClose_StopsCleanupGoroutines(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	assert.Equal(t, countAtClose, repo.Count(), "cleanup goroutines should have stopped after Close")
+}
+
+// TestClose_StopsCleanupGoroutines_MultiTenant mirrors TestClose_StopsCleanupGoroutines,
+// with MultiTenantEnabled set so the tenant-revocation cleanup branch (guarded by that
+// flag, added alongside RevokeTenant) also ticks and reports through logf.
+func TestClose_StopsCleanupGoroutines_MultiTenant(t *testing.T) {
+	repo := &cleanupCountingRepo{}
+
+	maker := &JWTMaker{
+		config: GourdianTokenConfig{
+			RevocationEnabled:  true,
+			RotationEnabled:    true,
+			MultiTenantEnabled: true,
+			CleanupInterval:    20 * time.Millisecond,
+		},
+		tokenRepo: repo,
+		logf:      func(format string, args ...any) {},
+	}
+	cleanupCtx, cancel := context.WithCancel(context.Background())
+	maker.cleanupCancel = cancel
+	go maker.cleanupRotatedTokens(cleanupCtx)
+	go maker.cleanupRevokedTokens(cleanupCtx)
+
+	require.Eventually(t, func() bool { return repo.Count() > 0 }, 2*time.Second, 10*time.Millisecond,
+		"expected cleanup goroutines to run at least once before Close")
+
+	require.NoError(t, maker.Close())
+}
+
+// TestClose_StructuredLoggerReceivesCleanupErrors mirrors TestClose_WithLoggerOption but
+// via the structured Logger path (WithStructuredLogger/structuredLogger) instead of the
+// printf-style logf hook, with MultiTenantEnabled set so the tenant-revocation cleanup
+// error report is exercised too, alongside the pre-existing rotated/revoked ones.
+func TestClose_StructuredLoggerReceivesCleanupErrors(t *testing.T) {
+	rec := &recordingLogger{}
+	repo := &cleanupCountingRepo{}
+
+	maker := &JWTMaker{
+		config: GourdianTokenConfig{
+			RevocationEnabled:  true,
+			RotationEnabled:    true,
+			MultiTenantEnabled: true,
+			CleanupInterval:    20 * time.Millisecond,
+		},
+		tokenRepo:        repo,
+		structuredLogger: rec,
+	}
+
+	cleanupCtx, cancel := context.WithCancel(context.Background())
+	maker.cleanupCancel = cancel
+	go maker.cleanupRotatedTokens(cleanupCtx)
+	go maker.cleanupRevokedTokens(cleanupCtx)
+
+	require.Eventually(t, func() bool {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		return len(rec.errors) > 0
+	}, 2*time.Second, 10*time.Millisecond, "expected structured logger to receive cleanup error reports")
+
+	require.NoError(t, maker.Close())
 }
 
 func TestClose_WithLoggerOption(t *testing.T) {

@@ -52,6 +52,7 @@ used together:
 - [Storage Backends](#-storage-backends)
 - [Token Types & Claims](#-token-types--claims)
 - [Security Features](#-security-features)
+- [Multi-Tenancy](#-multi-tenancy)
 - [Thread Safety](#-thread-safety)
 - [API Reference](#-api-reference)
 - [Advanced Usage](#-advanced-usage)
@@ -155,6 +156,91 @@ go get go.mongodb.org/mongo-driver
 
 3. **Why the module path didn't change to `/v3`**: Go's own tooling requires a `/v3` import path for a real `v3.0.0` tag, which would force every consumer to update their import statements. Since this library has few external consumers today, that churn wasn't worth it — this release intentionally does not follow strict semver (a breaking change shipped as a `v2.x.y` bump). If that changes and broad compatibility guarantees become necessary, a future breaking release will move to `/v3` properly.
 
+## ⚠️ Upgrading to v2.3.0
+
+**v2.3.0 contains breaking changes**, same rationale as v2.2.0 above for staying on the `/v2` module path.
+
+1. **`PrivateKeyPath`/`PublicKeyPath` (file paths) are gone, replaced by `PrivateKeyPEM`/`PublicKeyPEM` (`[]byte`).** `GourdianTokenConfig` no longer reads a key off disk itself — asymmetric signing now takes PEM-encoded key bytes directly, sourced however your own deployment already handles secrets (an env var, a Kubernetes `Secret` mounted as a volume or injected as env vars, the External Secrets Operator, Vault Agent Injector, the CSI Secret Store driver, or a direct secret-manager SDK call). This removes the assumption that every consumer distributes keys as files on disk:
+
+   ```go
+   // Before (v2.2.x)
+   config := gourdiantoken.GourdianTokenConfig{
+       SigningMethod:  gourdiantoken.Asymmetric,
+       Algorithm:      "RS256",
+       PrivateKeyPath: "/keys/private.pem",
+       PublicKeyPath:  "/keys/public.pem",
+       // ...
+   }
+
+   // After (v2.3.0+) — read the bytes however fits your deployment, once at startup
+   privateKeyPEM, _ := os.ReadFile("/var/run/secrets/gourdiantoken/private.pem")
+   publicKeyPEM, _ := os.ReadFile("/var/run/secrets/gourdiantoken/public.pem")
+
+   config := gourdiantoken.GourdianTokenConfig{
+       SigningMethod: gourdiantoken.Asymmetric,
+       Algorithm:     "RS256",
+       PrivateKeyPEM: privateKeyPEM,
+       PublicKeyPEM:  publicKeyPEM,
+       // ...
+   }
+   ```
+
+   `NewGourdianTokenConfig`'s deprecated positional constructor changed to match: its `privateKeyPath, publicKeyPath string` parameters are now `privateKeyPEM, publicKeyPEM []byte`, same argument positions (9th/10th).
+
+2. **`CreateAccessToken`/`CreateRefreshToken` gain a new, required trailing `tenantID string` parameter.** This is the change that breaks *every* existing call site, regardless of whether you use multi-tenancy — **pass `""` if you don't**:
+
+   ```go
+   // Before (v2.2.x)
+   token, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+   refresh, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+
+   // After (v2.3.0+) — pass "" to keep existing single-tenant behavior
+   token, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
+   refresh, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
+   ```
+
+   Set `GourdianTokenConfig.MultiTenantEnabled = true` to opt in instead, in which case `tenantID` becomes required (non-empty) rather than forbidden. See [Multi-Tenancy](#-multi-tenancy) for the full feature, including the new `RevokeTenant` bulk-revocation method and its four new sentinel errors (`ErrTenantIDRequired`, `ErrTenantIDNotAllowed`, `ErrMultiTenantDisabled`, `ErrTenantRevoked`).
+
+3. **The split `GourdianTokenMakerCloser`/`GourdianTokenMakerVerification` interfaces are gone**, merged back into a single flat `GourdianTokenMaker` (which now also gains `RevokeTenant`). If you were doing a type assertion to reach `Close`/`CreateVerificationToken`/`VerifyVerificationToken`/`MarkVerificationTokenUsed`, drop it — every constructor's return value already satisfies the merged interface:
+
+   ```go
+   // Before (v2.1.x/v2.2.x)
+   closer, ok := maker.(gourdiantoken.GourdianTokenMakerCloser)
+   verifier, ok := maker.(gourdiantoken.GourdianTokenMakerVerification)
+   token, err := verifier.CreateVerificationToken(ctx, userID, useCase, ttl, metadata)
+
+   // After (v2.3.0+) — call directly, no assertion
+   token, err := maker.CreateVerificationToken(ctx, userID, useCase, ttl, metadata)
+   ```
+
+4. **`NewGourdianTokenMakerWithMongo` drops its `transactionsEnabled bool` parameter**, now matching the `(ctx, config, handle, opts...)` shape shared by the other three backend factories. Transactions are always enabled (hardcoded `true` internally):
+
+   ```go
+   // Before (v2.2.x)
+   maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB, true)
+
+   // After (v2.3.0+)
+   maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
+   ```
+
+   If you need transactions disabled (e.g. a standalone dev MongoDB without a replica set), construct the repository yourself instead of using this factory: `repo, _ := gourdiantoken.NewMongoTokenRepository(mongoDB, false)` followed by `gourdiantoken.NewGourdianTokenMaker(ctx, config, repo)`.
+
+5. **`TokenRepository` gains `Stats`/`CleanupAll`; every backend's `Close()` is now a bare, no-argument method.** `Stats(ctx) (map[string]interface{}, error)` and `CleanupAll(ctx) error` are now part of the `TokenRepository` interface itself (previously Postgres-only extensions reached via a type assertion) and share identical key names/behavior across all four backends. `MongoTokenRepository.Close(ctx context.Context) error` lost its (always-unused) context parameter, so it now matches `Close() error` on the other three backends:
+
+   ```go
+   // Before (v2.2.x)
+   pgRepo := repo.(*gourdiantoken.PostgresTokenRepository) // only Postgres had Stats/CleanupAll
+   stats, err := pgRepo.Stats(ctx)
+   err = mongoRepo.Close(ctx)
+
+   // After (v2.3.0+)
+   stats, err := repo.Stats(ctx) // works on the TokenRepository interface directly, any backend
+   err = repo.CleanupAll(ctx)
+   err = mongoRepo.Close() // no argument
+   ```
+
+   `MarkTokenRotatedAtomic` also became consistent across all four backends in this release: Postgres and MongoDB previously treated *any* existing rotation record as a conflict, even an already-expired one (Memory/Redis always allowed re-marking an expired entry); all four now agree.
+
 ---
 
 ## 🚀 Quick Start
@@ -200,6 +286,7 @@ func main() {
         "john.doe@example.com",
         []string{"user", "admin"},
         sessionID,
+        "", // tenantID: only required when MultiTenantEnabled is true
     )
     if err != nil {
         log.Fatal(err)
@@ -277,8 +364,8 @@ func main() {
     sessionID := uuid.NewString()
 
     // 4. Create token pair
-    accessToken, _ := maker.CreateAccessToken(ctx, userID, "alice", []string{"user"}, sessionID)
-    refreshToken, _ := maker.CreateRefreshToken(ctx, userID, "alice", sessionID)
+    accessToken, _ := maker.CreateAccessToken(ctx, userID, "alice", []string{"user"}, sessionID, "")
+    refreshToken, _ := maker.CreateRefreshToken(ctx, userID, "alice", sessionID, "")
 
     // 5. Rotate refresh token (old token becomes invalid)
     newRefreshToken, err := maker.RotateRefreshToken(ctx, refreshToken.Token)
@@ -298,65 +385,53 @@ func main() {
 
 ### Core Components
 
-``` txt
-┌─────────────────────────────────────────────────────────────┐
-│                    GourdianTokenMaker                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │   Create     │  │    Verify    │  │   Revoke/    │     │
-│  │   Tokens     │  │   Tokens     │  │   Rotate     │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-        ┌───────────────┴───────────────┐
-        │                               │
-┌───────▼──────┐               ┌───────▼──────┐
-│  Cryptographic│               │   Token      │
-│   Signing     │               │  Repository  │
-│  (JWT Library)│               │  (Storage)   │
-└───────────────┘               └───────┬──────┘
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    │                   │                   │
-            ┌───────▼─────┐   ┌────────▼────────┐  ┌──────▼──────┐
-            │  In-Memory  │   │     Redis       │  │  SQL/MongoDB│
-            │  (Testing)  │   │  (Production)   │  │(Enterprise) │
-            └─────────────┘   └─────────────────┘  └─────────────┘
+```mermaid
+flowchart TD
+    Maker["GourdianTokenMaker"]
+    Create["Create<br/>Access / Refresh / Verification"]
+    Verify["Verify<br/>Access / Refresh / Verification"]
+    Revoke["Revoke / Rotate<br/>+ RevokeTenant"]
+
+    Maker --> Create
+    Maker --> Verify
+    Maker --> Revoke
+
+    Sign["Cryptographic Signing<br/>HMAC / RSA / ECDSA / EdDSA"]
+    Repo["TokenRepository (Storage)"]
+
+    Create --> Sign
+    Verify --> Sign
+    Verify --> Repo
+    Revoke --> Repo
+
+    Repo --> Memory["In-Memory<br/>(Testing)"]
+    Repo --> Redis["Redis<br/>(Production)"]
+    Repo --> Postgres["PostgreSQL<br/>(Enterprise)"]
+    Repo --> Mongo["MongoDB<br/>(Enterprise)"]
+    Repo --> Custom["Custom backend<br/>(your implementation)"]
 ```
 
 ### Token Lifecycle
 
-``` txt
-┌──────────┐
-│  Login   │
-└────┬─────┘
-     │
-     ▼
-┌──────────────────────┐
-│ CreateAccessToken    │◄──────────────┐
-│ CreateRefreshToken   │               │
-└────┬─────────────────┘               │
-     │                                 │
-     ▼                                 │
-┌──────────────────────┐         ┌────┴─────────────┐
-│   API Request with   │         │ RotateRefreshToken│
-│   Access Token       │         │ (Get New Access)  │
-└────┬─────────────────┘         └──────────────────┘
-     │                                 ▲
-     ▼                                 │
-┌──────────────────────┐               │
-│ VerifyAccessToken    │───────────────┘
-└────┬─────────────────┘      Token Expired
-     │
-     ▼
-┌──────────────────────┐
-│   Grant Access /     │
-│  Check Revocation    │
-└────┬─────────────────┘
-     │
-     ▼
-┌──────────────────────┐
-│  Logout / Revoke     │
-└──────────────────────┘
+```mermaid
+flowchart TD
+    Login["Login"] --> Create["CreateAccessToken / CreateRefreshToken"]
+    Create --> Request["API request with Access Token"]
+    Request --> Verify["VerifyAccessToken"]
+
+    Verify --> Revoked{"Revoked?"}
+    Revoked -- yes --> RejectRevoked["Reject: ErrTokenRevoked"]
+    Revoked -- no --> TenantCheck{"MultiTenantEnabled &&<br/>tenant revoked at-or-before iat?"}
+
+    TenantCheck -- yes --> RejectTenant["Reject: ErrTenantRevoked"]
+    TenantCheck -- no --> Grant["Grant access"]
+
+    Grant --> Expired{"Access token expired?"}
+    Expired -- no --> Request
+    Expired -- yes --> Rotate["RotateRefreshToken<br/>(atomic compare-and-swap)"]
+    Rotate --> Create
+
+    Grant --> Logout["Logout: RevokeAccessToken / RevokeRefreshToken"]
 ```
 
 ---
@@ -375,8 +450,8 @@ type GourdianTokenConfig struct {
     SigningMethod            SigningMethod // Symmetric or Asymmetric
     Algorithm                string        // HS256, RS256, ES256, EdDSA, etc.
     SymmetricKey             string        // For HMAC (min 32 bytes)
-    PrivateKeyPath           string        // For RSA/ECDSA/EdDSA
-    PublicKeyPath            string        // For RSA/ECDSA/EdDSA
+    PrivateKeyPEM            []byte        // PEM bytes, for RSA/ECDSA/EdDSA
+    PublicKeyPEM             []byte        // PEM bytes, for RSA/ECDSA/EdDSA
     
     // JWT Claims
     Issuer                   string        // Token issuer (iss)
@@ -399,12 +474,15 @@ type GourdianTokenConfig struct {
     VerificationAllowedUseCases       []string      // Use-case whitelist
     VerificationDefaultExpiryDuration time.Duration // Used when ttl <= 0
     VerificationMaxExpiryDuration     time.Duration // Ceiling on caller-supplied ttl
+
+    // Multi-Tenancy (optional; see "Multi-Tenancy" below)
+    MultiTenantEnabled bool // Requires/forbids tenantID on Create*/Verify*
 }
 ```
 
 ### Configuration Field Reference
 
-All ~21 fields of `GourdianTokenConfig`, what they control, their default under
+All ~22 fields of `GourdianTokenConfig`, what they control, their default under
 `DefaultGourdianTokenConfig`, and — since `NewGourdianTokenConfig`'s fixed
 positional-argument list is a common source of mistakes — exactly which
 argument position each one maps to.
@@ -419,8 +497,8 @@ argument position each one maps to.
 | `RequiredClaims` | `[]string` | Claims that must be present on every token | `["iss","aud","nbf","mle"]` | 6 |
 | `Algorithm` | `string` | JWT signing algorithm (must match `SigningMethod`) | `"HS256"` | 7 |
 | `SymmetricKey` | `string` | HMAC secret; must be ≥ 32 bytes | caller-supplied | 8 |
-| `PrivateKeyPath` | `string` | PEM private key path (asymmetric only) | `""` | 9 |
-| `PublicKeyPath` | `string` | PEM public key path (asymmetric only) | `""` | 10 |
+| `PrivateKeyPEM` | `[]byte` | PEM-encoded private key bytes (asymmetric only) | `nil` | 9 |
+| `PublicKeyPEM` | `[]byte` | PEM-encoded public key bytes (asymmetric only) | `nil` | 10 |
 | `Issuer` | `string` | Value written to / checked against the `iss` claim | `"gourdian.com"` | 11 |
 | `AccessExpiryDuration` | `time.Duration` | Access token sliding lifetime | `30m` | 12 |
 | `AccessMaxLifetimeExpiry` | `time.Duration` | Absolute ceiling for access tokens (`mle` claim) | `24h` | 13 |
@@ -432,11 +510,13 @@ argument position each one maps to.
 | `VerificationAllowedUseCases` | `[]string` | Whitelist of acceptable `useCase` strings; empty = any non-empty value | `nil` | not settable — assign the field directly |
 | `VerificationDefaultExpiryDuration` | `time.Duration` | Lifetime used when `CreateVerificationToken`'s `ttl` is `<= 0` | `0` (must set if enabling) | not settable — assign the field directly |
 | `VerificationMaxExpiryDuration` | `time.Duration` | Ceiling a caller-supplied `ttl` may not exceed; `0` = no ceiling | `0` | not settable — assign the field directly |
+| `MultiTenantEnabled` | `bool` | Requires a non-empty `tenantID` on `CreateAccessToken`/`CreateRefreshToken` (and on verify) when `true`; forbids one (must be `""`) when `false` | `false` | not settable — assign the field directly |
 
-The four `Verification*` fields postdate `NewGourdianTokenConfig` and are not
-among its parameters at all — set them via struct-field assignment after
-construction regardless of which constructor you used, e.g.
-`config.VerificationTokensEnabled = true`.
+The `Verification*` fields and `MultiTenantEnabled` all postdate
+`NewGourdianTokenConfig` and are not among its parameters at all — set them
+via struct-field assignment after construction regardless of which
+constructor you used, e.g. `config.VerificationTokensEnabled = true` or
+`config.MultiTenantEnabled = true`.
 
 ### Factory Methods
 
@@ -458,13 +538,17 @@ config := gourdiantoken.DefaultGourdianTokenConfig("your-secret-key")
 
 > **Deprecated.** `NewGourdianTokenConfig` will be removed in a future major
 > version. Its fixed 17-argument positional list predates the `Verification*`
-> fields (which it cannot set at all — see the table above) and is easy to
-> get wrong by position. Prefer `DefaultGourdianTokenConfig` plus
+> fields and `MultiTenantEnabled` (none of which it can set at all — see the
+> table above) and is easy to get wrong by position. Prefer `DefaultGourdianTokenConfig` plus
 > struct-field assignment, or a bare `gourdiantoken.GourdianTokenConfig{...}`
 > literal. It's documented here only because a lot of existing call sites
 > use it and the positional table above is the fastest way to read them.
 
 ```go
+// privateKeyPEM/publicKeyPEM: PEM bytes from wherever your own config system
+// holds them — an env var, a mounted Kubernetes Secret read once at
+// startup, a secret-manager SDK call. gourdiantoken never reads a key file
+// itself.
 config := gourdiantoken.NewGourdianTokenConfig(
     gourdiantoken.Asymmetric,           // Signing method
     true,                                // Rotation enabled
@@ -474,8 +558,8 @@ config := gourdiantoken.NewGourdianTokenConfig(
     []string{"iss", "aud", "nbf", "mle"},// Required claims
     "RS256",                             // Algorithm
     "",                                  // Symmetric key (empty for asymmetric)
-    "/path/to/private.pem",              // Private key
-    "/path/to/public.pem",               // Public key
+    privateKeyPEM,                       // Private key PEM bytes
+    publicKeyPEM,                        // Public key PEM bytes
     "auth.example.com",                  // Issuer
     15*time.Minute,                      // Access expiry
     24*time.Hour,                        // Access max lifetime
@@ -498,11 +582,15 @@ maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
 #### Production (RSA with Redis)
 
 ```go
+// e.g. read once at startup from a mounted Kubernetes Secret volume:
+privateKeyPEM, _ := os.ReadFile("/var/run/secrets/gourdiantoken/private.pem")
+publicKeyPEM, _ := os.ReadFile("/var/run/secrets/gourdiantoken/public.pem")
+
 config := gourdiantoken.NewGourdianTokenConfig(
     gourdiantoken.Asymmetric, true, true,
     []string{"api.prod.com"}, []string{"RS256"},
     []string{"iss", "aud", "exp", "nbf", "mle"},
-    "RS256", "", "/keys/private.pem", "/keys/public.pem",
+    "RS256", "", privateKeyPEM, publicKeyPEM,
     "auth.prod.com",
     15*time.Minute, 24*time.Hour,
     7*24*time.Hour, 30*24*time.Hour,
@@ -518,17 +606,22 @@ maker, _ := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisClien
 client, _ := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
 mongoDB := client.Database("auth")
 
+// e.g. injected as env vars by a Kubernetes Secret, or fetched from a
+// secret-manager SDK (Vault, AWS Secrets Manager, GCP Secret Manager, ...):
+privateKeyPEM := []byte(os.Getenv("GOURDIANTOKEN_ED25519_PRIVATE_KEY"))
+publicKeyPEM := []byte(os.Getenv("GOURDIANTOKEN_ED25519_PUBLIC_KEY"))
+
 config := gourdiantoken.NewGourdianTokenConfig(
     gourdiantoken.Asymmetric, true, true,
     []string{"secure-api.com"}, []string{"EdDSA"},
     []string{"iss", "aud", "exp", "nbf", "mle"},
-    "EdDSA", "", "/keys/ed25519-private.pem", "/keys/ed25519-public.pem",
+    "EdDSA", "", privateKeyPEM, publicKeyPEM,
     "auth.secure.com",
     15*time.Minute, 12*time.Hour,
     24*time.Hour, 7*24*time.Hour,
     10*time.Minute, 1*time.Hour,
 )
-maker, _ := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB, true) // transactionsEnabled: requires mongoDB's replica set
+maker, _ := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB) // transactions always enabled; requires mongoDB's replica set
 ```
 
 ### Functional Options: `WithLogger`
@@ -690,14 +783,17 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
 ```go
 client, _ := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 mongoDB := client.Database("auth_service")
-maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB, true)
+maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 ```
 
 **Features:**
 
 - Document-oriented storage
 - Automatic TTL indexes
-- Optional transactions, controlled by the `transactionsEnabled` argument above (requires a replica set — pass `false` against a standalone instance)
+- Transactions always enabled (requires a replica set, even single-node). For a standalone
+  dev MongoDB without one, construct the repository yourself instead of using this factory:
+  `repo, _ := gourdiantoken.NewMongoTokenRepository(mongoDB, false)` followed by
+  `gourdiantoken.NewGourdianTokenMaker(ctx, config, repo)`
 - Horizontal scaling via sharding
 
 **Best For:**
@@ -705,6 +801,65 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB,
 - Document-based architectures
 - High write throughput
 - Flexible schemas
+
+### 6. Custom Storage Backend
+
+Want SQLite, DynamoDB, etcd, BoltDB, Cassandra, or anything else not built in? gourdiantoken
+never depends on a concrete storage type — every constructor takes a `TokenRepository`, and
+`NewGourdianTokenMaker(ctx, config, tokenRepo)` accepts any implementation of it, not just
+the four built-in ones:
+
+```go
+type TokenRepository interface {
+    MarkTokenRevoke(ctx context.Context, tokenType TokenType, token string, ttl time.Duration) error
+    IsTokenRevoked(ctx context.Context, tokenType TokenType, token string) (bool, error)
+    MarkTokenRotated(ctx context.Context, token string, ttl time.Duration) error
+    MarkTokenRotatedAtomic(ctx context.Context, token string, ttl time.Duration) (bool, error)
+    IsTokenRotated(ctx context.Context, token string) (bool, error)
+    GetRotationTTL(ctx context.Context, token string) (time.Duration, error)
+    CleanupExpiredRevokedTokens(ctx context.Context, tokenType TokenType) error
+    CleanupExpiredRotatedTokens(ctx context.Context) error
+    RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error
+    GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error)
+    CleanupExpiredTenantRevocations(ctx context.Context) error
+    Stats(ctx context.Context) (map[string]interface{}, error)
+    CleanupAll(ctx context.Context) error
+}
+```
+
+A complete, runnable reference implementation —
+[`example/custom_repository_example.go`](./example/custom_repository_example.go) — is
+wired into `example/example.go`'s own test suite (as "Custom Repository (Reference
+Implementation)") and passes all 46 scenarios exactly like the four built-in backends do.
+Study it alongside whichever of the real implementations
+(`gourdiantoken.repository.{inmemory,redis,postgres,mongo}.imp.go`) is closest in shape to
+your target backend — a key-value store like DynamoDB/etcd/BoltDB has more in common with
+the Redis implementation, while a SQL database has more in common with the Postgres one.
+
+**The one method where correctness genuinely depends on your backend**: `MarkTokenRotatedAtomic`
+must provide true atomic compare-and-swap semantics — the "is this already rotated?" check
+and the "mark it rotated" write must happen as one indivisible operation, or two concurrent
+callers can both observe "not yet rotated" and both proceed, defeating rotation-based reuse
+detection entirely. An in-process mutex (as the reference implementation uses) is only
+sufficient for a single-process, in-memory store; a real shared datastore needs its own
+atomicity guarantee instead — a conditional upsert
+(`INSERT ... ON CONFLICT ... DO UPDATE ... WHERE <existing row already expired>`) for SQL,
+or an equivalent conditional write for a document/key-value store. See
+`gourdiantoken.repository.postgres.imp.go`'s `InsertRotatedTokenIfNotExists` query and
+`gourdiantoken.repository.mongo.imp.go`'s `MarkTokenRotatedAtomic` for two real examples of
+this exact pattern against different kinds of backends.
+
+Other things worth carrying over from the built-in implementations:
+
+- **Hash tokens before storing them** (SHA-256, as all four built-in backends do) — never
+  persist a raw token string, so a leaked datastore leaks nothing directly replayable.
+- Every method must be safe for concurrent use by multiple goroutines.
+- `Stats`' returned map keys are implementation-defined; don't depend on specific ones being
+  present if you want code that works across every `TokenRepository` implementation.
+- `Close() error` isn't part of `TokenRepository` — Postgres's has pool-ownership caveats
+  (the caller may share that pool elsewhere) that make it a poor fit for a uniform interface
+  method — but every built-in implementation has its own idempotent, no-argument one; follow
+  the same convention.
 
 ---
 
@@ -741,6 +896,7 @@ type AccessTokenClaims struct {
     Subject           string      `json:"sub"`
     SessionID         string      `json:"sid"`
     Username          string      `json:"usr"`
+    TenantID          string      `json:"tid"` // empty unless MultiTenantEnabled
     Issuer            string      `json:"iss"`
     Audience          []string    `json:"aud"`
     Roles             []string    `json:"rls"`
@@ -774,7 +930,9 @@ type AccessTokenClaims struct {
 }
 ```
 
-**Note**: Refresh tokens do NOT include the `rls` (roles) claim.
+**Note**: Refresh tokens do NOT include the `rls` (roles) claim. Like access tokens,
+`RefreshTokenClaims` carries a `TenantID string \`json:"tid"\`` field, empty unless
+`MultiTenantEnabled` — omitted from the JSON above since it's empty in this example.
 
 ### Verification Tokens
 
@@ -816,23 +974,22 @@ type VerificationTokenClaims struct {
 }
 ```
 
-**Note**: No `sid`/`usr`/`rls` claims — no session, username, or roles concept. Requires `VerificationTokensEnabled`; accessed via the optional `GourdianTokenMakerVerification` interface. `mle` always equals `exp` (verification tokens are never renewed). Unlike `CreateAccessToken`/`CreateRefreshToken`, `CreateVerificationToken` takes a per-call `ttl` (0 = use `VerificationDefaultExpiryDuration`).
+**Note**: No `sid`/`usr`/`rls` claims — no session, username, or roles concept — and no `tid` field either (see [Multi-Tenancy](#-multi-tenancy) for the `Metadata`-based convention verification tokens use instead). Requires `VerificationTokensEnabled`; called directly on `GourdianTokenMaker` (no type assertion needed). `mle` always equals `exp` (verification tokens are never renewed). Unlike `CreateAccessToken`/`CreateRefreshToken`, `CreateVerificationToken` takes a per-call `ttl` (0 = use `VerificationDefaultExpiryDuration`).
 
 ```go
 maker, err := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
-verifier, ok := maker.(gourdiantoken.GourdianTokenMakerVerification)
 
 // 1. Mint a 5-minute, single-use token scoped to "2fa-pending"
-token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
+token, err := maker.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
 
 // 2. Verify it (does not consume it — safe to call more than once)
-claims, err := verifier.VerifyVerificationToken(ctx, token.Token)
+claims, err := maker.VerifyVerificationToken(ctx, token.Token)
 
 // 3. Once the gated action actually completes (e.g. TOTP check passed), consume it
-err = verifier.MarkVerificationTokenUsed(ctx, token.Token)
+err = maker.MarkVerificationTokenUsed(ctx, token.Token)
 
 // 4. A second verify now fails with ErrTokenAlreadyUsed
-_, err = verifier.VerifyVerificationToken(ctx, token.Token) // errors.Is(err, gourdiantoken.ErrTokenAlreadyUsed)
+_, err = maker.VerifyVerificationToken(ctx, token.Token) // errors.Is(err, gourdiantoken.ErrTokenAlreadyUsed)
 ```
 
 ### Token Comparison
@@ -945,17 +1102,126 @@ Automatic validation of all critical claims:
 
 - ✅ "none" algorithm explicitly blocked
 - ✅ Minimum key sizes enforced (32 bytes for HMAC)
-- ✅ Private key file permissions checked (0600)
 - ✅ Algorithm must match signing method
 - ✅ Logical duration validation
 - ✅ Required claims enforced
+- ✅ Tenant isolation enforced when `MultiTenantEnabled` (empty/non-empty `tenantID` rejected outright, never silently ignored — see [Multi-Tenancy](#-multi-tenancy))
+
+---
+
+## 🏢 Multi-Tenancy
+
+`GourdianTokenConfig.MultiTenantEnabled` (opt-in, default `false`) adds a `tid` claim to
+access/refresh tokens and a bulk `RevokeTenant` operation — for SaaS-style deployments where
+one `gourdiantoken` instance issues tokens for many tenants and needs to isolate and, when
+necessary, mass-revoke one of them.
+
+### Enabling it
+
+```go
+config := gourdiantoken.DefaultGourdianTokenConfig("your-secret-key-at-least-32-bytes-long")
+config.MultiTenantEnabled = true
+config.RevocationEnabled = true // required for RevokeTenant (see below)
+config.RotationEnabled = true
+
+maker, err := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
+```
+
+Once enabled, `tenantID` becomes **required** (non-empty) on every
+`CreateAccessToken`/`CreateRefreshToken` call, and every access/refresh token must carry a
+`tid` claim to verify successfully:
+
+```go
+token, err := maker.CreateAccessToken(ctx, userID, "alice@acme-corp.com", []string{"user"}, sessionID, "acme-corp")
+// err is ErrTenantIDRequired if the last argument were "" instead
+
+claims, err := maker.VerifyAccessToken(ctx, token.Token)
+fmt.Println(claims.TenantID) // "acme-corp"
+```
+
+Conversely, with `MultiTenantEnabled` left at its default `false`, passing any non-empty
+`tenantID` is rejected with `ErrTenantIDNotAllowed` — this library never silently drops a
+caller-supplied tenant ID in either direction. `RotateRefreshToken` forwards the old token's
+`TenantID` to the new one, so rotation preserves the tenant claim automatically.
+
+**Verification tokens have no `TenantID` field.** `VerificationTokenClaims` predates
+multi-tenancy and has no session/username concept either — if you need to scope a
+verification token (e.g. a tenant-specific password-reset link) to a tenant, use the
+existing free-form `Metadata` map:
+
+```go
+token, err := maker.CreateVerificationToken(ctx, userID, "password-reset", 15*time.Minute,
+    map[string]interface{}{"tenant_id": "acme-corp"})
+```
+
+### Bulk tenant revocation
+
+`maker.RevokeTenant(ctx, tenantID)` immediately invalidates **every** access and refresh
+token for a tenant — e.g. offboarding a customer or responding to a suspected tenant-wide
+credential compromise:
+
+```go
+err := maker.RevokeTenant(ctx, "acme-corp")
+// Every access/refresh token for "acme-corp" issued at-or-before this moment is now
+// rejected by VerifyAccessToken/VerifyRefreshToken with ErrTenantRevoked.
+// A token for "acme-corp" created *after* this call still verifies normally.
+```
+
+Requires `MultiTenantEnabled`, `RevocationEnabled`, and a `TokenRepository` — the same
+preconditions as `RevokeAccessToken`/`RevokeRefreshToken` — and returns
+`ErrMultiTenantDisabled` if `MultiTenantEnabled` is `false`.
+
+**How it works:** rather than enumerating and marking every individual token for a tenant
+(which would need a new "tokens by tenant" index on every storage backend, and fundamentally
+can't reach access tokens — this library never persists a record of one unless it's
+individually revoked), `RevokeTenant` records a single **revocation epoch**: "any token
+issued for tenant X at-or-before time T is dead." Verification then rejects any
+`AccessToken`/`RefreshToken` whose `iat` is at-or-before that epoch, covering every token for
+that tenant — including ones the repository has never seen — via one indexed lookup per
+`Verify*` call. The revocation record's TTL is
+`max(AccessExpiryDuration, RefreshExpiryDuration)`: past that window every pre-epoch token
+has already failed its own native `exp` check regardless, so a longer-lived record would be
+redundant.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Maker as GourdianTokenMaker
+    participant Repo as TokenRepository
+
+    App->>Maker: RevokeTenant(ctx, "acme-corp")
+    Maker->>Repo: RevokeTenant("acme-corp", ttl)
+    Repo-->>Maker: epoch T recorded
+
+    Note over App,Repo: Later verification calls...
+
+    App->>Maker: VerifyAccessToken(oldToken)
+    Note right of App: oldToken.iat <= T
+    Maker->>Repo: GetTenantRevocationEpoch("acme-corp")
+    Repo-->>Maker: epoch T
+    Maker-->>App: ErrTenantRevoked
+
+    App->>Maker: VerifyAccessToken(newToken)
+    Note right of App: newToken.iat > T
+    Maker->>Repo: GetTenantRevocationEpoch("acme-corp")
+    Repo-->>Maker: epoch T
+    Maker-->>App: claims (valid)
+```
+
+**Precision note:** a JWT's `iat` is second-granular, but the revocation epoch itself may
+carry sub-second precision depending on backend. A token minted within the same wall-clock
+second as the `RevokeTenant` call can land on either side of the revocation boundary — treat
+bulk tenant revocation as accurate to about one second, not the millisecond.
+
+See the [`example/`](./example) directory's "Multi-Tenant Demo (RevokeTenant)" suite for a
+complete runnable walkthrough of this flow.
 
 ---
 
 ## 🔒 Thread Safety
 
-**`JWTMaker`** (the concrete `GourdianTokenMaker`/`GourdianTokenMakerCloser`
-implementation returned by every constructor) is safe for concurrent use by
+**`JWTMaker`** (the concrete `GourdianTokenMaker` implementation returned by
+every constructor) is safe for concurrent use by
 multiple goroutines without any extra locking on the caller's part. Its
 config, cryptographic keys, and signing method are set once at construction
 and never mutated afterward; the only mutable field is an internal
@@ -982,8 +1248,8 @@ methods, so no additional synchronization is needed on the caller's side.
 config once, before constructing the maker, and treat it as read-only
 afterward. The maker itself never mutates the config it was given.
 
-Every method on `GourdianTokenMaker`, `GourdianTokenMakerVerification`, and
-`TokenRepository` takes a `context.Context` and checks it for cancellation at
+Every method on `GourdianTokenMaker` and `TokenRepository` takes a
+`context.Context` and checks it for cancellation at
 multiple points, so long-running operations (e.g. a slow database call
 inside a repository implementation) can be bounded with the usual
 `context.WithTimeout`/`WithCancel`.
@@ -994,17 +1260,32 @@ inside a repository implementation) can be bounded with the usual
 
 ### GourdianTokenMaker Interface
 
+A single flat interface — covering create/verify/revoke/rotate, tenant-wide bulk revocation,
+`Close`, and the three verification-token methods — implemented by `*JWTMaker`, the type
+every constructor returns. There is no separate "optional interface plus type assertion"
+step for any of these; call them directly on the value every constructor gives you.
+
 ```go
 type GourdianTokenMaker interface {
-    CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error)
-    CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error)
+    CreateAccessToken(ctx context.Context, userID, username string, roles []string, sessionID, tenantID string) (*AccessTokenResponse, error)
+    CreateRefreshToken(ctx context.Context, userID, username, sessionID, tenantID string) (*RefreshTokenResponse, error)
     VerifyAccessToken(ctx context.Context, tokenString string) (*AccessTokenClaims, error)
     VerifyRefreshToken(ctx context.Context, tokenString string) (*RefreshTokenClaims, error)
     RevokeAccessToken(ctx context.Context, token string) error
     RevokeRefreshToken(ctx context.Context, token string) error
     RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
+    RevokeTenant(ctx context.Context, tenantID string) error
+    Close() error
+    CreateVerificationToken(ctx context.Context, userID, useCase string, ttl time.Duration, metadata map[string]interface{}) (*VerificationTokenResponse, error)
+    VerifyVerificationToken(ctx context.Context, tokenString string) (*VerificationTokenClaims, error)
+    MarkVerificationTokenUsed(ctx context.Context, token string) error
 }
 ```
+
+`tenantID` on `CreateAccessToken`/`CreateRefreshToken` is required (non-empty) when
+`GourdianTokenConfig.MultiTenantEnabled` is `true`, and forbidden (must be `""`) when it's
+`false` — see [Multi-Tenancy](#-multi-tenancy) below. Pass `""` at every call site if you
+don't use multi-tenancy.
 
 ### CreateAccessToken
 
@@ -1015,6 +1296,7 @@ token, err := maker.CreateAccessToken(
     username,        // string - Human-readable name
     roles,           // []string - Authorization roles (min 1)
     sessionID,       // string - Session identifier (may be empty)
+    tenantID,        // string - "" unless MultiTenantEnabled is true (then required)
 )
 ```
 
@@ -1025,6 +1307,7 @@ token, err := maker.CreateAccessToken(
 - `userID` must not be empty
 - `username` max 1024 characters
 - `roles` must contain at least one non-empty string
+- `tenantID` must be `""` when `MultiTenantEnabled` is `false`, non-empty when it's `true`
 - Checks context cancellation before signing
 
 ### CreateRefreshToken
@@ -1035,6 +1318,7 @@ token, err := maker.CreateRefreshToken(
     userID,          // string
     username,        // string
     sessionID,       // string
+    tenantID,        // string - same contract as CreateAccessToken's tenantID
 )
 ```
 
@@ -1117,8 +1401,7 @@ newToken, err := maker.RotateRefreshToken(ctx, oldTokenString)
 ### CreateVerificationToken
 
 ```go
-verifier := maker.(gourdiantoken.GourdianTokenMakerVerification)
-token, err := verifier.CreateVerificationToken(ctx, userID, useCase, ttl, metadata)
+token, err := maker.CreateVerificationToken(ctx, userID, useCase, ttl, metadata)
 ```
 
 **Requirements:** `VerificationTokensEnabled` must be `true`
@@ -1128,7 +1411,7 @@ token, err := verifier.CreateVerificationToken(ctx, userID, useCase, ttl, metada
 ### VerifyVerificationToken
 
 ```go
-claims, err := verifier.VerifyVerificationToken(ctx, tokenString)
+claims, err := maker.VerifyVerificationToken(ctx, tokenString)
 ```
 
 **Requirements:** `VerificationTokensEnabled` must be `true`
@@ -1138,7 +1421,7 @@ claims, err := verifier.VerifyVerificationToken(ctx, tokenString)
 ### MarkVerificationTokenUsed
 
 ```go
-err := verifier.MarkVerificationTokenUsed(ctx, tokenString)
+err := maker.MarkVerificationTokenUsed(ctx, tokenString)
 ```
 
 **Requirements:**
@@ -1255,8 +1538,20 @@ the [API Reference](#-api-reference) for the calls each would wrap.
 
 ### Asymmetric Key Setup
 
+`GourdianTokenConfig.PrivateKeyPEM`/`PublicKeyPEM` take PEM-encoded key
+bytes directly — gourdiantoken never reads a key file itself, so it has no
+opinion on *where* those bytes come from. That's deliberate: a service
+deployed to Kubernetes typically already has its own way of getting secret
+material into the process (a `Secret` mounted as a volume, a `Secret`
+injected as env vars, the External Secrets Operator, Vault Agent Injector,
+the CSI Secret Store driver, or a direct call to a secret manager's SDK —
+AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, Vault itself), and
+gourdiantoken shouldn't force a second, competing convention on top of it.
+Read the bytes once at startup, however your deployment already does that,
+and pass them straight into the config:
+
 ```go
-func setupAsymmetric() (gourdiantoken.GourdianTokenMaker, error) {
+func setupAsymmetric(privateKeyPEM, publicKeyPEM []byte) (gourdiantoken.GourdianTokenMaker, error) {
     // NewGourdianTokenMakerNoStorage requires RotationEnabled and
     // RevocationEnabled to both be false (no repository = nowhere to track
     // revoked/rotated tokens) — pass false, false here rather than true, true.
@@ -1268,8 +1563,8 @@ func setupAsymmetric() (gourdiantoken.GourdianTokenMaker, error) {
         []string{"iss", "aud", "nbf", "mle"},
         "RS256",
         "",
-        "/secure/keys/private.pem",
-        "/secure/keys/public.pem",
+        privateKeyPEM,
+        publicKeyPEM,
         "auth.example.com",
         15*time.Minute, 24*time.Hour,
         7*24*time.Hour, 30*24*time.Hour,
@@ -1279,6 +1574,17 @@ func setupAsymmetric() (gourdiantoken.GourdianTokenMaker, error) {
     ctx := context.Background()
     return gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
 }
+
+// e.g. a Secret mounted as a volume, read once at process startup:
+privateKeyPEM, err := os.ReadFile("/var/run/secrets/gourdiantoken/private.pem")
+if err != nil {
+    log.Fatal(err)
+}
+publicKeyPEM, err := os.ReadFile("/var/run/secrets/gourdiantoken/public.pem")
+if err != nil {
+    log.Fatal(err)
+}
+maker, err := setupAsymmetric(privateKeyPEM, publicKeyPEM)
 ```
 
 ---
@@ -1373,7 +1679,7 @@ to the three networked backends:
 - Use environment variables, never hardcode
 - Rotate keys every 90 days
 - Use minimum 32 bytes for HMAC
-- Set file permissions to 0600 for private keys
+- If a private key ever touches disk upstream of gourdiantoken (e.g. a mounted Kubernetes Secret volume), set that file's permissions to 0600 yourself — gourdiantoken takes `PrivateKeyPEM`/`PublicKeyPEM` as in-memory bytes and never reads or checks a file itself (see [Asymmetric Key Setup](#asymmetric-key-setup))
 
 #### ❌ DON'T
 
@@ -1451,7 +1757,7 @@ func main() {
 
 func login(w http.ResponseWriter, r *http.Request) {
     token, _ := maker.CreateAccessToken(
-        r.Context(), uuid.NewString(), "user@example.com", []string{"user"}, uuid.NewString(),
+        r.Context(), uuid.NewString(), "user@example.com", []string{"user"}, uuid.NewString(), "",
     )
     json.NewEncoder(w).Encode(token)
 }
@@ -1548,12 +1854,12 @@ type SessionManager struct {
 func (sm *SessionManager) CreateSession(ctx context.Context, userID string, username string, roles []string) (*Session, error) {
     sessionID := uuid.NewString()
     
-    accessToken, err := sm.maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+    accessToken, err := sm.maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
     if err != nil {
         return nil, err
     }
     
-    refreshToken, err := sm.maker.CreateRefreshToken(ctx, userID, username, sessionID)
+    refreshToken, err := sm.maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
     if err != nil {
         return nil, err
     }
@@ -1582,7 +1888,7 @@ func (sm *SessionManager) RefreshSession(ctx context.Context, refreshTokenString
     roles := []string{"user"} // Load from database
     
     accessToken, err := sm.maker.CreateAccessToken(
-        ctx, claims.Subject, claims.Username, roles, claims.SessionID,
+        ctx, claims.Subject, claims.Username, roles, claims.SessionID, claims.TenantID,
     )
     if err != nil {
         return nil, err
@@ -1657,7 +1963,7 @@ func TestTokenCreation(t *testing.T) {
     maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
     
     userID := uuid.NewString()
-    token, err := maker.CreateAccessToken(ctx, userID, "test", []string{"user"}, uuid.NewString())
+    token, err := maker.CreateAccessToken(ctx, userID, "test", []string{"user"}, uuid.NewString(), "")
     
     require.NoError(t, err)
     assert.NotEmpty(t, token.Token)
@@ -1670,7 +1976,7 @@ func TestTokenExpiration(t *testing.T) {
     config.AccessExpiryDuration = 1 * time.Second
     maker, _ := gourdiantoken.NewGourdianTokenMakerNoStorage(ctx, config)
     
-    token, _ := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"user"}, uuid.NewString())
+    token, _ := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"user"}, uuid.NewString(), "")
     time.Sleep(2 * time.Second)
     
     _, err := maker.VerifyAccessToken(ctx, token.Token)
@@ -1684,7 +1990,7 @@ func TestTokenRotation(t *testing.T) {
     config.RotationEnabled = true
     maker, _ := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, config)
     
-    refresh, _ := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+    refresh, _ := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
     newToken, err := maker.RotateRefreshToken(ctx, refresh.Token)
     
     require.NoError(t, err)

@@ -117,11 +117,82 @@ type TokenRepository interface {
 	// Returns:
 	//   - error: If cleanup fails or context is cancelled
 	CleanupExpiredRotatedTokens(ctx context.Context) error
+
+	// RevokeTenant records a revocation epoch for tenantID: any access/refresh token
+	// issued at-or-before this moment is considered dead, without enumerating individual
+	// tokens (see GourdianTokenMaker.RevokeTenant's doc comment for the full rationale).
+	// Calling this again for the same tenantID overwrites the previous epoch with a newer
+	// one — the revocation cutoff always moves forward, never backward.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - tenantID: The tenant to revoke (must not be empty)
+	//   - ttl: Time-to-live for the revocation record — implementations should not need
+	//     it to outlive the longest-lived pre-epoch token that could still be checked
+	//     against it (see max(AccessExpiryDuration, RefreshExpiryDuration) in
+	//     JWTMaker.RevokeTenant)
+	//
+	// Returns:
+	//   - error: If tenantID is empty, ttl is invalid, or the operation fails
+	RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error
+
+	// GetTenantRevocationEpoch returns the moment tenantID was last revoked via
+	// RevokeTenant, or the zero time.Time if the tenant has no active revocation record
+	// (never revoked, or the record has expired).
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - tenantID: The tenant to look up (must not be empty)
+	//
+	// Returns:
+	//   - time.Time: The revocation epoch, or the zero value if none/expired
+	//   - error: If tenantID is empty or the operation fails
+	GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error)
+
+	// CleanupExpiredTenantRevocations removes expired tenant revocation records from
+	// storage. Should be called periodically by background cleanup goroutines, alongside
+	// CleanupExpiredRevokedTokens/CleanupExpiredRotatedTokens.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - error: If cleanup fails or context is cancelled
+	CleanupExpiredTenantRevocations(ctx context.Context) error
+
+	// Stats returns implementation-defined counters describing the repository's current
+	// storage state (e.g. counts of revoked/rotated/tenant-revocation entries). Key names
+	// and value types are not part of the interface contract — callers that need a stable
+	// shape across backends should not depend on specific keys being present.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - map[string]interface{}: Implementation-defined statistics
+	//   - error: If retrieval fails or context is cancelled
+	Stats(ctx context.Context) (map[string]interface{}, error)
+
+	// CleanupAll runs every CleanupExpired* operation this repository supports
+	// (revoked tokens, rotated tokens, tenant revocations) in one call. Intended for
+	// callers that want a single cleanup entry point rather than invoking each
+	// CleanupExpired* method individually — the background cleanup goroutines started by
+	// JWTMaker do not use this method themselves (they call the individual CleanupExpired*
+	// methods so partial failures are reported independently).
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - error: If any underlying cleanup operation fails
+	CleanupAll(ctx context.Context) error
 }
 
 // GourdianTokenMaker is the main interface for token operations.
-// Implementations handle token creation, verification, revocation, and rotation
-// with support for multiple signing algorithms and security features.
+// Implementations handle token creation, verification, revocation, rotation,
+// stopping background cleanup goroutines, and short-lived single-use
+// verification tokens, with support for multiple signing algorithms and
+// security features.
 //
 // Thread Safety:
 //
@@ -140,6 +211,9 @@ type GourdianTokenMaker interface {
 	//   - username: Human-readable username (max 1024 characters)
 	//   - roles: Authorization roles (must contain at least one non-empty role)
 	//   - sessionID: Session identifier for tracking (may be empty for sessionless tokens)
+	//   - tenantID: Tenant identifier (carried in the "tid" claim). Must be non-empty when
+	//     GourdianTokenConfig.MultiTenantEnabled is true, and must be empty otherwise —
+	//     pass "" if you don't use multi-tenancy.
 	//
 	// Returns:
 	//   - *AccessTokenResponse: Generated token with metadata
@@ -153,8 +227,9 @@ type GourdianTokenMaker interface {
 	//	    "john.doe",
 	//	    []string{"user", "admin"},
 	//	    sessionID,
+	//	    "",
 	//	)
-	CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string) (*AccessTokenResponse, error)
+	CreateAccessToken(ctx context.Context, userID string, username string, roles []string, sessionID string, tenantID string) (*AccessTokenResponse, error)
 
 	// CreateRefreshToken generates a new signed refresh token.
 	//
@@ -163,6 +238,8 @@ type GourdianTokenMaker interface {
 	//   - userID: The user's unique identifier (must not be empty)
 	//   - username: Human-readable username (max 1024 characters)
 	//   - sessionID: Session identifier for tracking (may be empty for sessionless tokens)
+	//   - tenantID: Tenant identifier (carried in the "tid" claim). Same contract as
+	//     CreateAccessToken's tenantID parameter — pass "" if you don't use multi-tenancy.
 	//
 	// Returns:
 	//   - *RefreshTokenResponse: Generated token with metadata
@@ -175,8 +252,9 @@ type GourdianTokenMaker interface {
 	//	    userID,
 	//	    "john.doe",
 	//	    sessionID,
+	//	    "",
 	//	)
-	CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string) (*RefreshTokenResponse, error)
+	CreateRefreshToken(ctx context.Context, userID string, username string, sessionID string, tenantID string) (*RefreshTokenResponse, error)
 
 	// VerifyAccessToken validates an access token and returns its claims.
 	// Checks signature, expiration, revocation status, and required claims.
@@ -304,56 +382,55 @@ type GourdianTokenMaker interface {
 	//	}
 	//	// Return newToken to client
 	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
-}
 
-// GourdianTokenMakerCloser is an optional interface implemented by GourdianTokenMaker
-// implementations that support stopping their background cleanup goroutines. It is
-// deliberately separate from GourdianTokenMaker so that adding it does not break any
-// existing external implementer of that interface.
-//
-// Example:
-//
-//	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, tokenRepo)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer func() {
-//	    if closer, ok := maker.(gourdiantoken.GourdianTokenMakerCloser); ok {
-//	        closer.Close()
-//	    }
-//	}()
-type GourdianTokenMakerCloser interface {
+	// RevokeTenant bulk-revokes every access/refresh token for tenantID by recording a
+	// revocation epoch, rather than enumerating and marking individual tokens: any token
+	// whose "iat" is at-or-before this moment is rejected by VerifyAccessToken/
+	// VerifyRefreshToken from this point on, including ones the repository has never
+	// individually seen (this also covers access tokens, which this package never persists
+	// a record of unless separately revoked via RevokeAccessToken). Requires
+	// GourdianTokenConfig.MultiTenantEnabled, RevocationEnabled, and a TokenRepository.
+	//
+	// Use Cases:
+	//   - Tenant offboarding or suspension
+	//   - Responding to a suspected tenant-wide credential compromise
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - tenantID: The tenant to revoke (must not be empty)
+	//
+	// Returns:
+	//   - error: If multi-tenancy or revocation is disabled, tenantID is empty, or the
+	//     operation fails
+	//
+	// Example:
+	//
+	//	err := maker.RevokeTenant(ctx, "acme-corp")
+	RevokeTenant(ctx context.Context, tenantID string) error
+
 	// Close stops any background cleanup goroutines started by the maker.
 	// Safe to call multiple times.
+	//
+	// Example:
+	//
+	//	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, tokenRepo)
+	//	if err != nil {
+	//	    log.Fatal(err)
+	//	}
+	//	defer maker.Close()
 	Close() error
-}
 
-// GourdianTokenMakerVerification is an optional interface implemented by GourdianTokenMaker
-// implementations that support short-lived, single-use, use-case-scoped verification tokens
-// (e.g. a 2FA-pending-verification step between password check and full session issuance,
-// or password-reset / email-verify flows). It is deliberately separate from
-// GourdianTokenMaker, following the same precedent as GourdianTokenMakerCloser, so that
-// adding it does not break any existing external implementer of GourdianTokenMaker.
-//
-// Requires GourdianTokenConfig.VerificationTokensEnabled. Single-use enforcement (a
-// verification token can only be successfully verified once) additionally requires
-// RevocationEnabled plus a TokenRepository, since MarkVerificationTokenUsed is implemented
-// by revoking the token via the same mechanism used for access/refresh revocation.
-//
-// Example:
-//
-//	maker, err := gourdiantoken.NewGourdianTokenMaker(ctx, config, tokenRepo)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	if verifier, ok := maker.(gourdiantoken.GourdianTokenMakerVerification); ok {
-//	    token, err := verifier.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
-//	}
-type GourdianTokenMakerVerification interface {
-	// CreateVerificationToken generates a new signed, short-lived verification token
-	// scoped to useCase. A ttl <= 0 falls back to
-	// GourdianTokenConfig.VerificationDefaultExpiryDuration; a ttl exceeding
-	// VerificationMaxExpiryDuration (when configured) is rejected.
+	// CreateVerificationToken generates a new signed, short-lived, single-use,
+	// use-case-scoped verification token (e.g. a 2FA-pending-verification step between
+	// password check and full session issuance, or password-reset / email-verify flows).
+	// Requires GourdianTokenConfig.VerificationTokensEnabled.
+	//
+	// A ttl <= 0 falls back to GourdianTokenConfig.VerificationDefaultExpiryDuration; a ttl
+	// exceeding VerificationMaxExpiryDuration (when configured) is rejected.
+	//
+	// Example:
+	//
+	//	token, err := maker.CreateVerificationToken(ctx, userID, "2fa-pending", 5*time.Minute, nil)
 	CreateVerificationToken(ctx context.Context, userID string, useCase string, ttl time.Duration, metadata map[string]interface{}) (*VerificationTokenResponse, error)
 
 	// VerifyVerificationToken validates a verification token and returns its claims.
@@ -361,7 +438,9 @@ type GourdianTokenMakerVerification interface {
 	VerifyVerificationToken(ctx context.Context, tokenString string) (*VerificationTokenClaims, error)
 
 	// MarkVerificationTokenUsed marks a verification token as used, so a subsequent
-	// VerifyVerificationToken call on the same token fails. Requires RevocationEnabled
-	// plus a TokenRepository; returns an error otherwise.
+	// VerifyVerificationToken call on the same token fails. Single-use enforcement (a
+	// verification token can only be successfully verified once) requires RevocationEnabled
+	// plus a TokenRepository, since this is implemented by revoking the token via the same
+	// mechanism used for access/refresh revocation; returns an error otherwise.
 	MarkVerificationTokenUsed(ctx context.Context, token string) error
 }

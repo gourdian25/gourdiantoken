@@ -91,9 +91,45 @@ func TestRedisRepository_OperationsAfterClientClosed(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "redis scan error")
 
+	err = redisRepo.RevokeTenant(ctx, "acme-corp", time.Hour)
+	require.Error(t, err)
+
+	_, err = redisRepo.GetTenantRevocationEpoch(ctx, "acme-corp")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "redis error")
+
+	err = redisRepo.CleanupExpiredTenantRevocations(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "redis scan error")
+
 	_, err = redisRepo.Stats(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to count access tokens")
+
+	err = redisRepo.CleanupAll(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to cleanup access tokens")
+}
+
+// TestRedisGetTenantRevocationEpoch_MalformedValue exercises
+// GetTenantRevocationEpoch's strconv.ParseInt error branch, never produced by this
+// repository's own RevokeTenant (which always writes a Unix-timestamp string), so the key
+// is set directly through the raw client.
+func TestRedisGetTenantRevocationEpoch_MalformedValue(t *testing.T) {
+	factories := getTestRepositoryFactories()
+	repo, cleanup := factories["Redis"](t)
+	defer cleanup()
+
+	redisRepo := repo.(*RedisTokenRepository)
+	ctx := context.Background()
+	tenantID := "malformed-epoch-tenant"
+	key := tenantRevokedPrefix + tenantID
+
+	require.NoError(t, redisRepo.client.Set(ctx, key, "not-a-unix-timestamp", time.Hour).Err())
+
+	_, err := redisRepo.GetTenantRevocationEpoch(ctx, tenantID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid tenant revocation epoch value")
 }
 
 // TestRedisRepository_CleanupExpiredKeys_ContextCanceled exercises

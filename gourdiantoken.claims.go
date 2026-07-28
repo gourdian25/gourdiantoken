@@ -40,6 +40,12 @@ type AccessTokenClaims struct {
 	// Username is the human-readable username for logging and display purposes.
 	Username string `json:"usr"`
 
+	// TenantID identifies the tenant this token was issued for (any non-empty string).
+	// Empty unless GourdianTokenConfig.MultiTenantEnabled is true, in which case it is
+	// always non-empty (enforced at creation and verification). Absent from the JWT
+	// payload entirely when empty — see toMapClaims.
+	TenantID string `json:"tid"`
+
 	// Issuer identifies the service that created this token (e.g., "auth.example.com").
 	Issuer string `json:"iss"`
 
@@ -100,6 +106,12 @@ type RefreshTokenClaims struct {
 	// Username is the human-readable username.
 	Username string `json:"usr"`
 
+	// TenantID identifies the tenant this token was issued for (any non-empty string).
+	// Empty unless GourdianTokenConfig.MultiTenantEnabled is true, in which case it is
+	// always non-empty (enforced at creation and verification). Absent from the JWT
+	// payload entirely when empty — see toMapClaims.
+	TenantID string `json:"tid"`
+
 	// Issuer identifies the service that created this token.
 	Issuer string `json:"iss"`
 
@@ -142,6 +154,10 @@ type AccessTokenResponse struct {
 	// Username is the human-readable username.
 	Username string `json:"usr"`
 
+	// TenantID identifies the tenant this token was issued for. Empty unless
+	// GourdianTokenConfig.MultiTenantEnabled is true.
+	TenantID string `json:"tid"`
+
 	// Roles contains the authorization roles for this token.
 	Roles []string `json:"rls"`
 
@@ -182,6 +198,10 @@ type RefreshTokenResponse struct {
 
 	// Username is the human-readable username.
 	Username string `json:"usr"`
+
+	// TenantID identifies the tenant this token was issued for. Empty unless
+	// GourdianTokenConfig.MultiTenantEnabled is true.
+	TenantID string `json:"tid"`
 
 	// Audience lists the intended recipients of this token.
 	Audience []string `json:"aud"`

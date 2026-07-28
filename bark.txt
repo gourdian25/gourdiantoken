@@ -11,6 +11,7 @@
 ├── docs.go
 ├── edge.case_test.go
 ├── example/
+│   ├── custom_repository_example.go
 │   └── example.go
 ├── go.mod
 ├── go.sum
@@ -24,15 +25,20 @@
 ├── gourdiantoken.factories_test.go
 ├── gourdiantoken.interfaces.go
 ├── gourdiantoken.keys.go
+├── gourdiantoken.keys_test.go
 ├── gourdiantoken.maker.go
+├── gourdiantoken.maker_test.go
+├── gourdiantoken.repository.coverage_test.go
 ├── gourdiantoken.repository.inmemory.imp.go
 ├── gourdiantoken.repository.mongo.imp.go
 ├── gourdiantoken.repository.mongo_test.go
 ├── gourdiantoken.repository.postgres.imp.go
 ├── gourdiantoken.repository.postgres_test.go
 ├── gourdiantoken.repository.redis.imp.go
+├── gourdiantoken.repository.redis_test.go
 ├── gourdiantoken.repository_test.go
 ├── gourdiantoken.validation.go
+├── gourdiantoken.validation_test.go
 ├── integration_test.go
 ├── internal/
 │   └── postgresdb/
@@ -43,6 +49,8 @@
 │       │   └── tokens.sql
 │       ├── schema.sql
 │       └── tokens.sql.go
+├── logger.go
+├── logger_test.go
 ├── revocation.rotation_test.go
 ├── sqlc.yaml
 ├── token.bench.helper_test.go
@@ -54,4 +62,4 @@
 ├── token.verification_token_test.go
 └── version.go
 
-4 directories, 50 files
+4 directories, 58 files

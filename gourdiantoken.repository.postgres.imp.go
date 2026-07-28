@@ -253,9 +253,13 @@ func (r *PostgresTokenRepository) MarkTokenRotated(ctx context.Context, token st
 }
 
 // MarkTokenRotatedAtomic marks a token as rotated atomically, returning
-// whether it was newly rotated. Uses INSERT ... ON CONFLICT DO NOTHING so
-// only the first caller for a given token hash sees rotated=true — essential
-// for preventing double-spending in rotation flows.
+// whether it was newly rotated. Uses INSERT ... ON CONFLICT (token_hash) DO
+// UPDATE ... WHERE expires_at <= EXCLUDED.created_at, a conditional upsert:
+// only the first caller for a given, still-live token hash sees
+// rotated=true — essential for preventing double-spending in rotation
+// flows — but a conflicting row whose own rotation TTL already fully
+// elapsed is treated as stale and gets re-marked (rotated=true again)
+// rather than reported as a live conflict.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout
@@ -263,7 +267,7 @@ func (r *PostgresTokenRepository) MarkTokenRotated(ctx context.Context, token st
 //   - ttl: Time-to-live duration for the rotation record
 //
 // Returns:
-//   - bool: True if the token was newly rotated, false if already rotated
+//   - bool: True if the token was newly rotated, false if already rotated and not yet expired
 //   - error: If token is empty, TTL is invalid, or the database operation fails
 func (r *PostgresTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token string, ttl time.Duration) (bool, error) {
 	if token == "" {
@@ -376,6 +380,81 @@ func (r *PostgresTokenRepository) CleanupExpiredRotatedTokens(ctx context.Contex
 	return nil
 }
 
+// RevokeTenant records a bulk revocation epoch for tenantID.
+// Uses an atomic UPSERT: a newer RevokeTenant call for the same tenant overwrites the
+// previous revocation epoch rather than adding another row.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - tenantID: The tenant to revoke
+//   - ttl: Time-to-live duration for the revocation record
+//
+// Returns:
+//   - error: If tenantID is empty, TTL is invalid, or the database operation fails
+func (r *PostgresTokenRepository) RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error {
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID cannot be empty")
+	}
+	if ttl <= 0 {
+		return fmt.Errorf("ttl must be positive")
+	}
+
+	now := time.Now()
+	err := r.q.UpsertTenantRevocation(ctx, postgresdb.UpsertTenantRevocationParams{
+		TenantID:  tenantID,
+		RevokedAt: pgTimestamptz(now),
+		ExpiresAt: pgTimestamptz(now.Add(ttl)),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to revoke tenant: %w", err)
+	}
+	return nil
+}
+
+// GetTenantRevocationEpoch returns the moment tenantID was last revoked, or the zero
+// time.Time if the tenant has no active revocation record.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - tenantID: The tenant to look up
+//
+// Returns:
+//   - time.Time: The revocation epoch, or the zero value if none/expired
+//   - error: If tenantID is empty or the database operation fails
+func (r *PostgresTokenRepository) GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error) {
+	if tenantID == "" {
+		return time.Time{}, fmt.Errorf("tenant ID cannot be empty")
+	}
+
+	revokedAt, err := r.q.GetTenantRevocationEpoch(ctx, postgresdb.GetTenantRevocationEpochParams{
+		TenantID:  tenantID,
+		ExpiresAt: pgTimestamptz(time.Now()),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("database error: %w", err)
+	}
+	return revokedAt.Time, nil
+}
+
+// CleanupExpiredTenantRevocations removes expired tenant revocation records from the
+// database.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//
+// Returns:
+//   - error: If the database operation fails
+func (r *PostgresTokenRepository) CleanupExpiredTenantRevocations(ctx context.Context) error {
+	_, err := r.q.DeleteExpiredTenantRevocations(ctx, pgTimestamptz(time.Now()))
+	if err != nil {
+		return fmt.Errorf("failed to cleanup expired tenant revocations: %w", err)
+	}
+	return nil
+}
+
 // Stats returns statistics about the repository for monitoring and debugging.
 //
 // Parameters:
@@ -410,12 +489,18 @@ func (r *PostgresTokenRepository) Stats(ctx context.Context) (map[string]interfa
 		return nil, fmt.Errorf("failed to count rotated tokens: %w", err)
 	}
 
+	tenantRevocationCount, err := r.q.CountTenantRevocations(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count tenant revocations: %w", err)
+	}
+
 	return map[string]interface{}{
 		"total_revoked_tokens":        totalRevoked,
 		"revoked_access_tokens":       accessCount,
 		"revoked_refresh_tokens":      refreshCount,
 		"revoked_verification_tokens": verificationCount,
 		"rotated_tokens":              rotatedCount,
+		"tenant_revocations":          tenantRevocationCount,
 	}, nil
 }
 
@@ -438,6 +523,9 @@ func (r *PostgresTokenRepository) CleanupAll(ctx context.Context) error {
 	}
 	if err := r.CleanupExpiredRotatedTokens(ctx); err != nil {
 		return fmt.Errorf("failed to cleanup rotated tokens: %w", err)
+	}
+	if err := r.CleanupExpiredTenantRevocations(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup tenant revocations: %w", err)
 	}
 	return nil
 }

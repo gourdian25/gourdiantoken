@@ -87,7 +87,7 @@ func TestNewGourdianTokenMakerNoStorage_CanCreateAndVerifyTokens(t *testing.T) {
 	sessionID := generateTestUUID()
 
 	// Should be able to create tokens
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 	require.NotNil(t, accessToken)
 
@@ -110,7 +110,7 @@ func TestDefaultGourdianTokenMaker_NilRepo(t *testing.T) {
 	userID := generateTestUUID()
 	sessionID := generateTestUUID()
 
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 
 	claims, err := maker.VerifyAccessToken(ctx, accessToken.Token)
@@ -132,7 +132,7 @@ func TestDefaultGourdianTokenMaker_WithRepo(t *testing.T) {
 	userID := generateTestUUID()
 	sessionID := generateTestUUID()
 
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 
 	require.NoError(t, maker.RevokeAccessToken(ctx, accessToken.Token))
@@ -205,10 +205,10 @@ func TestNewGourdianTokenMakerWithMemory_SupportsRevocationAndRotation(t *testin
 	sessionID := generateTestUUID()
 
 	// Create tokens
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 
-	refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
+	refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID, "")
 	require.NoError(t, err)
 
 	// Revoke access token
@@ -308,7 +308,7 @@ func TestNewGourdianTokenMakerWithPostgres_SupportsRevocationAndRotation(t *test
 	sessionID := generateTestUUID()
 
 	// Create and revoke token
-	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+	accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 	require.NoError(t, err)
 
 	err = maker.RevokeAccessToken(ctx, accessToken.Token)
@@ -340,7 +340,7 @@ func TestNewGourdianTokenMakerWithMongo_AllRepositories(t *testing.T) {
 			config.RotationEnabled = true
 
 			mongoRepo := repo.(*MongoTokenRepository)
-			maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), false)
+			maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database())
 			require.NoError(t, err)
 			require.NotNil(t, maker)
 		})
@@ -352,7 +352,7 @@ func TestNewGourdianTokenMakerWithMongo_NilDatabaseFails(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil, false)
+	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mongo database instance cannot be nil")
 }
@@ -370,11 +370,15 @@ func TestNewGourdianTokenMakerWithMongo_FailsWithCancelledContext(t *testing.T) 
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	_, err := NewGourdianTokenMakerWithMongo(ctx, config, mongoRepo.revokedCollection.Database(), false)
+	_, err := NewGourdianTokenMakerWithMongo(ctx, config, mongoRepo.revokedCollection.Database())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
 
+// TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository confirms the
+// factory always constructs a transactions-enabled repository (hardcoded true internally
+// since multi-tenant Stage 4 dropped the transactionsEnabled bool parameter) rather than
+// leaving it caller-controlled.
 func TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository(t *testing.T) {
 	factories := getTestRepositoryFactories()
 	repo, cleanup := factories["MongoDB"](t)
@@ -385,7 +389,7 @@ func TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository(t *t
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), true)
+	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database())
 	require.NoError(t, err)
 
 	// The returned maker should have transactions enabled
@@ -473,7 +477,7 @@ func TestNewGourdianTokenMakerWithRedis_SupportsHighPerformanceOperations(t *tes
 	// Create and verify many tokens to test performance
 	start := time.Now()
 	for i := 0; i < 100; i++ {
-		token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+		token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 		require.NoError(t, err)
 
 		// Should be able to verify immediately
@@ -532,7 +536,7 @@ func TestAllFactories_CreatesValidTokenMakers(t *testing.T) {
 			sessionID := generateTestUUID()
 
 			// Test access token creation and verification
-			accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user", "admin"}, sessionID)
+			accessToken, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user", "admin"}, sessionID, "")
 			require.NoError(t, err)
 			require.NotNil(t, accessToken)
 
@@ -543,7 +547,7 @@ func TestAllFactories_CreatesValidTokenMakers(t *testing.T) {
 			assert.ElementsMatch(t, []string{"user", "admin"}, claims.Roles)
 
 			// Test refresh token creation and verification
-			refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID)
+			refreshToken, err := maker.CreateRefreshToken(ctx, userID, "testuser", sessionID, "")
 			require.NoError(t, err)
 
 			refreshClaims, err := maker.VerifyRefreshToken(ctx, refreshToken.Token)
@@ -597,7 +601,7 @@ func TestAllFactories_TokenExpirationWorks(t *testing.T) {
 			sessionID := generateTestUUID()
 
 			// Create token with 1 second expiry
-			token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID)
+			token, err := maker.CreateAccessToken(ctx, userID, "testuser", []string{"user"}, sessionID, "")
 			require.NoError(t, err)
 
 			// Should verify immediately
@@ -686,7 +690,7 @@ func TestAllFactories_InvalidConfigurationsFail(t *testing.T) {
 			repo, cleanup := factories["MongoDB"](t)
 			defer cleanup()
 			mongoRepo := repo.(*MongoTokenRepository)
-			_, err := NewGourdianTokenMakerWithMongo(context.Background(), invalidConfig, mongoRepo.revokedCollection.Database(), false)
+			_, err := NewGourdianTokenMakerWithMongo(context.Background(), invalidConfig, mongoRepo.revokedCollection.Database())
 			require.Error(t, err)
 		})
 

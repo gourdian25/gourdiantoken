@@ -27,7 +27,7 @@ func TestRotateRefreshToken_Success(t *testing.T) {
 
 	t.Run("basic rotation produces new valid token", func(t *testing.T) {
 		// Create initial token
-		oldToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		oldToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Rotate token
@@ -52,7 +52,7 @@ func TestRotateRefreshToken_Success(t *testing.T) {
 	})
 
 	t.Run("old token cannot be verified after rotation", func(t *testing.T) {
-		oldToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		oldToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		_, err = maker.RotateRefreshToken(ctx, oldToken.Token)
@@ -66,7 +66,7 @@ func TestRotateRefreshToken_Success(t *testing.T) {
 	})
 
 	t.Run("rotated token cannot be rotated again", func(t *testing.T) {
-		oldToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		oldToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		_, err = maker.RotateRefreshToken(ctx, oldToken.Token)
@@ -79,7 +79,7 @@ func TestRotateRefreshToken_Success(t *testing.T) {
 	})
 
 	t.Run("user context is preserved across rotation", func(t *testing.T) {
-		oldToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		oldToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		newToken, err := maker.RotateRefreshToken(ctx, oldToken.Token)
@@ -102,7 +102,7 @@ func TestRotateRefreshToken_Success(t *testing.T) {
 	t.Run("multiple sequential rotations create unique tokens", func(t *testing.T) {
 		// Create initial token
 		tokens := make([]*RefreshTokenResponse, 6)
-		tokens[0], _ = maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		tokens[0], _ = maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 
 		// Perform 5 rotations
 		for i := 1; i < 6; i++ {
@@ -145,7 +145,7 @@ func TestRotateRefreshToken_Errors(t *testing.T) {
 		disabledConfig.RotationEnabled = false
 		disabledMaker := setupTestMakerWithConfig(t, disabledConfig, nil)
 
-		token, err := disabledMaker.CreateRefreshToken(ctx, userID, "user", sessionID)
+		token, err := disabledMaker.CreateRefreshToken(ctx, userID, "user", sessionID, "")
 		require.NoError(t, err)
 
 		_, err = disabledMaker.RotateRefreshToken(ctx, token.Token)
@@ -164,7 +164,7 @@ func TestRotateRefreshToken_Errors(t *testing.T) {
 		expiredConfig.RefreshExpiryDuration = 1 * time.Millisecond
 		expiredMaker := setupTestMakerWithConfig(t, expiredConfig, repo)
 
-		token, err := expiredMaker.CreateRefreshToken(ctx, userID, "user", sessionID)
+		token, err := expiredMaker.CreateRefreshToken(ctx, userID, "user", sessionID, "")
 		require.NoError(t, err)
 
 		time.Sleep(10 * time.Millisecond) // Wait for expiration
@@ -174,7 +174,7 @@ func TestRotateRefreshToken_Errors(t *testing.T) {
 	})
 
 	t.Run("rotation fails with revoked token", func(t *testing.T) {
-		token, err := maker.CreateRefreshToken(ctx, userID, "user", sessionID)
+		token, err := maker.CreateRefreshToken(ctx, userID, "user", sessionID, "")
 		require.NoError(t, err)
 
 		// Revoke the token
@@ -196,7 +196,7 @@ func TestRotateRefreshToken_ConcurrencySafety(t *testing.T) {
 	maker := setupTestMakerWithConfig(t, config, repo)
 
 	t.Run("concurrent rotation attempts on same token", func(t *testing.T) {
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Attempt concurrent rotations
@@ -235,7 +235,7 @@ func TestRotateRefreshToken_AlreadyRotated(t *testing.T) {
 	username := "testuser"
 
 	t.Run("rejects already rotated token", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// First rotation should succeed
@@ -255,7 +255,7 @@ func TestRotateRefreshToken_AlreadyRotated(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// First rotation succeeds
@@ -273,7 +273,7 @@ func TestRotateRefreshToken_AlreadyRotated(t *testing.T) {
 		maker := setupTestMakerWithRepo(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate
@@ -305,7 +305,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 	t.Run("reuse interval prevents immediate re-rotation of same token", func(t *testing.T) {
 		ctx := context.Background()
 
-		token1, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token1, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// First rotation should succeed immediately
@@ -329,10 +329,10 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 	t.Run("reuse interval allows rotation of different tokens", func(t *testing.T) {
 		ctx := context.Background()
 
-		token1, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token1, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
-		token2, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token2, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Rotate token1
@@ -347,7 +347,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 	t.Run("reuse interval scenario with multiple rotations", func(t *testing.T) {
 		ctx := context.Background()
 
-		token1, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token1, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Use token1 to get token2
@@ -376,7 +376,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 
 		ctx := context.Background()
 
-		token1, err := zeroIntervalMaker.CreateRefreshToken(ctx, userID, username, sessionID)
+		token1, err := zeroIntervalMaker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// First rotation
@@ -401,7 +401,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate
@@ -421,7 +421,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate
@@ -444,7 +444,7 @@ func TestRotateRefreshToken_ReuseInterval(t *testing.T) {
 		maker := setupTestMakerWithConfig(t, config, repo)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Rotate
@@ -473,7 +473,7 @@ func TestRotation_Disabled(t *testing.T) {
 		ctx := context.Background()
 
 		// Create a refresh token
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Attempt rotation should fail
@@ -487,7 +487,7 @@ func TestRotation_Disabled(t *testing.T) {
 		ctx := context.Background()
 
 		// Create a valid refresh token
-		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Verify the token is valid
@@ -513,7 +513,7 @@ func TestRotation_Disabled(t *testing.T) {
 		assert.NotNil(t, maker)
 
 		// Create token should work
-		token, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		token, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		assert.NoError(t, err)
 		assert.NotNil(t, token)
 
@@ -527,7 +527,7 @@ func TestRotation_Disabled(t *testing.T) {
 		maker := setupTestMaker(t) // No repository, rotation disabled
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		newToken, err := maker.RotateRefreshToken(ctx, token.Token)
@@ -540,7 +540,7 @@ func TestRotation_Disabled(t *testing.T) {
 		maker := setupTestMaker(t)
 		ctx := context.Background()
 
-		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString())
+		token, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "user", uuid.NewString(), "")
 		require.NoError(t, err)
 
 		// Should still be able to verify
@@ -562,7 +562,7 @@ func TestRotateRefreshToken_FeatureDisabled(t *testing.T) {
 	username := "testuser"
 
 	t.Run("returns error when rotation is disabled", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		newToken, err := maker.RotateRefreshToken(context.Background(), response.Token)
@@ -589,10 +589,10 @@ func TestRotationAndRevocation_Integration(t *testing.T) {
 		ctx := context.Background()
 
 		// Create access and refresh tokens
-		accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
-		refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Revoke access token
@@ -620,7 +620,7 @@ func TestRotationAndRevocation_Integration(t *testing.T) {
 		assert.NotNil(t, newClaims)
 
 		// Create new access token using the new refresh token context
-		newAccessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		newAccessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Verify new access token works
@@ -632,7 +632,7 @@ func TestRotationAndRevocation_Integration(t *testing.T) {
 		ctx := context.Background()
 
 		// Create refresh token
-		refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID)
+		refreshToken, err := maker.CreateRefreshToken(ctx, userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		// Revoke the refresh token
@@ -680,7 +680,7 @@ func TestRotateRefreshToken_InvalidInput(t *testing.T) {
 		roles := []string{"admin"}
 
 		// Create access token
-		accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID)
+		accessToken, err := maker.CreateAccessToken(ctx, userID, username, roles, sessionID, "")
 		require.NoError(t, err)
 
 		// Try to rotate access token as refresh token
@@ -706,7 +706,7 @@ func TestRotateRefreshToken_ContextCancellation(t *testing.T) {
 	username := "testuser"
 
 	t.Run("returns error when context is canceled at beginning", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -719,7 +719,7 @@ func TestRotateRefreshToken_ContextCancellation(t *testing.T) {
 	})
 
 	t.Run("succeeds with valid context", func(t *testing.T) {
-		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID)
+		response, err := maker.CreateRefreshToken(context.Background(), userID, username, sessionID, "")
 		require.NoError(t, err)
 
 		newToken, err := maker.RotateRefreshToken(context.Background(), response.Token)
@@ -738,4 +738,30 @@ func TestRotateRefreshToken_ContextCancellation(t *testing.T) {
 		assert.NotNil(t, claims)
 		assert.Equal(t, userID, claims.Subject)
 	})
+}
+
+// TestRotateRefreshToken_PropagatesTenantID is a regression test for a tenant-propagation
+// bug: RotateRefreshToken's internal CreateRefreshToken call must forward claims.TenantID,
+// or the tenant claim is silently dropped on every refresh-token rotation.
+func TestRotateRefreshToken_PropagatesTenantID(t *testing.T) {
+	config := DefaultTestConfig()
+	config.MultiTenantEnabled = true
+	config.RotationEnabled = true
+
+	repo := NewMemoryTokenRepository(1 * time.Minute)
+	maker := setupTestMakerWithConfig(t, config, repo)
+	ctx := context.Background()
+
+	tenantID := "acme-corp"
+	original, err := maker.CreateRefreshToken(ctx, uuid.NewString(), "testuser", uuid.NewString(), tenantID)
+	require.NoError(t, err)
+	require.Equal(t, tenantID, original.TenantID)
+
+	rotated, err := maker.RotateRefreshToken(ctx, original.Token)
+	require.NoError(t, err)
+	assert.Equal(t, tenantID, rotated.TenantID, "rotation must preserve the tenant claim from the old token")
+
+	claims, err := maker.VerifyRefreshToken(ctx, rotated.Token)
+	require.NoError(t, err)
+	assert.Equal(t, tenantID, claims.TenantID)
 }

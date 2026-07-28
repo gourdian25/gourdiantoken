@@ -31,3 +31,15 @@ CREATE TABLE IF NOT EXISTS gourdiantoken_rotated_tokens (
     created_at TIMESTAMPTZ  NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gourdiantoken_rotated_expires_at ON gourdiantoken_rotated_tokens (expires_at);
+
+-- Bulk tenant revocation (see GourdianTokenMaker.RevokeTenant): one row per tenant, holding
+-- the moment it was last revoked. tenant_id is the primary key directly (not hashed, unlike
+-- token_hash above) since tenant IDs aren't secrets the way tokens are, and a tenant can
+-- only ever have one active revocation epoch at a time — a newer RevokeTenant call
+-- overwrites the row rather than adding another.
+CREATE TABLE IF NOT EXISTS gourdiantoken_tenant_revocations (
+    tenant_id  VARCHAR(255) PRIMARY KEY,
+    revoked_at TIMESTAMPTZ  NOT NULL,
+    expires_at TIMESTAMPTZ  NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gourdiantoken_tenant_revocations_expires_at ON gourdiantoken_tenant_revocations (expires_at);

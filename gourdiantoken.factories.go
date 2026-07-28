@@ -75,8 +75,8 @@ import (
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/keys/private.pem",
-//	    PublicKeyPath: "/keys/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.example.com",
 //	    Audience: []string{"api.example.com", "service.example.com"},
 //	    RevocationEnabled: false,
@@ -225,8 +225,8 @@ func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenCo
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/app/keys/private.pem",
-//	    PublicKeyPath: "/app/keys/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.production.com",
 //	    Audience: []string{"api.production.com", "admin.production.com"},
 //	    RevocationEnabled: true,
@@ -306,8 +306,8 @@ func NewGourdianTokenMakerWithPostgres(ctx context.Context, config GourdianToken
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/app/keys/private.pem",
-//	    PublicKeyPath: "/app/keys/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.mongodb.example.com",
 //	    Audience: []string{"api.mongodb.example.com"},
 //	    RevocationEnabled: true,
@@ -349,13 +349,13 @@ func NewGourdianTokenMakerWithPostgres(ctx context.Context, config GourdianToken
 //
 //	maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 //
-// Note: unlike its NewGourdianTokenMakerWithPostgres/WithRedis siblings, this factory takes
-// an extra transactionsEnabled positional parameter, breaking the otherwise-consistent
-// (ctx, config, handle) shape shared by the other backend factories. This is a known
-// inconsistency, flagged here rather than fixed — changing it would require an options
-// struct or a new factory variant, which is a breaking-signature decision out of scope
-// for this pass.
-func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenConfig, mongoDB *mongo.Database, transactionsEnabled bool, opts ...Option) (GourdianTokenMaker, error) {
+// Matches the (ctx, config, handle) shape shared by the other backend factories:
+// transactions are always enabled (hardcoded true, per this factory's own long-standing
+// "enabled by default for consistency" doc-comment claim above) rather than being a caller
+// -supplied bool. Callers who need transactions disabled (e.g. a standalone dev MongoDB
+// without a replica set) should call NewMongoTokenRepository(db, false) directly and pass
+// the result to NewGourdianTokenMaker themselves.
+func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenConfig, mongoDB *mongo.Database, opts ...Option) (GourdianTokenMaker, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled: %w", err)
 	}
@@ -364,8 +364,7 @@ func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenCon
 		return nil, fmt.Errorf("mongo database instance cannot be nil")
 	}
 
-	// Create MongoDB-based repository with configurable transaction usage
-	tokenRepo, err := NewMongoTokenRepository(mongoDB, transactionsEnabled)
+	tokenRepo, err := NewMongoTokenRepository(mongoDB, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize MongoDB token repository: %w", err)
 	}
@@ -425,8 +424,8 @@ func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenCon
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/app/keys/private.pem",
-//	    PublicKeyPath: "/app/keys/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.redis.example.com",
 //	    Audience: []string{"api.redis.example.com", "gateway.redis.example.com"},
 //	    RevocationEnabled: true,

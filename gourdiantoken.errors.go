@@ -54,4 +54,25 @@ var (
 	// MarkVerificationTokenUsed), so errors.Is(err, ErrTokenAlreadyUsed) and
 	// errors.Is(err, ErrTokenRevoked) behave identically — this is a zero-new-logic alias.
 	ErrTokenAlreadyUsed = ErrTokenRevoked
+
+	// ErrTenantIDRequired indicates CreateAccessToken/CreateRefreshToken was called with
+	// an empty tenantID while GourdianTokenConfig.MultiTenantEnabled is true, or that a
+	// token being verified is missing its "tid" claim under the same config.
+	ErrTenantIDRequired = errors.New("tenant ID is required when MultiTenantEnabled is true")
+
+	// ErrTenantIDNotAllowed indicates CreateAccessToken/CreateRefreshToken was called with
+	// a non-empty tenantID while GourdianTokenConfig.MultiTenantEnabled is false. Rejected
+	// outright rather than silently ignored, so a caller relying on tenant isolation never
+	// mistakes a misconfigured maker for one that's actually enforcing it.
+	ErrTenantIDNotAllowed = errors.New("tenant ID must be empty when MultiTenantEnabled is false")
+
+	// ErrMultiTenantDisabled indicates RevokeTenant was called while
+	// GourdianTokenConfig.MultiTenantEnabled is false.
+	ErrMultiTenantDisabled = errors.New("multi-tenant support is not enabled")
+
+	// ErrTenantRevoked indicates the token's tenant was bulk-revoked via RevokeTenant at
+	// or after the token's "iat", i.e. the token was issued for a tenant that has since
+	// been revoked (or was issued before a later revocation), and is therefore rejected
+	// regardless of its own individual revocation/expiry status.
+	ErrTenantRevoked = errors.New("tenant has been revoked")
 )
