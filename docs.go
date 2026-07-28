@@ -88,6 +88,12 @@
 // CleanupAll(ctx) error, by contrast, are part of TokenRepository and shared identically
 // across all four backends.
 //
+// These four aren't the only implementations possible: NewGourdianTokenMaker takes any
+// TokenRepository, so a backend not built in here (SQLite, DynamoDB, etcd, Cassandra, ...)
+// just needs its own implementation of the interface. See example/custom_repository_example.go
+// for a complete, runnable reference implementation, exercised by example/example.go's own
+// test suite exactly like the four built-in backends.
+//
 // # Configuration
 //
 // GourdianTokenConfig holds every signing, claims, lifetime, and

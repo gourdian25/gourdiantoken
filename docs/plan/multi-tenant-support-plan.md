@@ -66,7 +66,7 @@ described below.
 | Stage 3 | Tenant-scoped bulk revocation | ✅ Done |
 | Stage 4 | Repository backend standardization | ✅ Done |
 | Stage 5 | Docs / CHANGELOG / version bump / example.go | ✅ Done |
-| Stage 6 | Full validation pass | Not started |
+| Stage 6 | Full validation pass | ✅ Done (through `make prerelease`; tagging left to the repo owner) |
 
 **Note:** after Stage 3, `docs/plan/key-material-config-plan.md` (in-memory
 `PrivateKeyPEM`/`PublicKeyPEM` config, replacing `PrivateKeyPath`/
@@ -856,6 +856,30 @@ sections:
   7 suites (4 backends + stateless + asymmetric + multi-tenant demo) passed
   100%, 0 failures across 237 total scenarios.
 
+### Ad-hoc addition between Stage 5 and Stage 6: custom `TokenRepository` reference implementation
+
+Per explicit instruction, before starting Stage 6: added
+`example/custom_repository_example.go` (`CustomTokenRepository`), a complete,
+from-scratch reference implementation of `TokenRepository` demonstrating how
+to extend gourdiantoken to a storage backend that isn't one of the four
+built in (SQLite, DynamoDB, etcd, Cassandra, etc.). Wired into
+`example/example.go`'s own repository list as "Custom Repository (Reference
+Implementation)" and exercised by the full 46-scenario
+`RunComprehensiveTests` pipeline exactly like a real backend — passed
+46/46. Heavily commented (unlike the terse production repository files)
+since its purpose is pedagogical, with particular emphasis on
+`MarkTokenRotatedAtomic` being the one method whose correctness genuinely
+depends on the target backend (an in-process mutex only works for a
+single-process store; a real shared datastore needs its own atomicity
+guarantee, pointing to the Postgres/MongoDB implementations as real
+examples of that). A compile-time interface assertion
+(`var _ gourdiantoken.TokenRepository = (*CustomTokenRepository)(nil)`)
+makes the file self-verifying against future interface changes.
+Documented in a new README "Storage Backends" subsection ("6. Custom
+Storage Backend"), a new `docs.go` paragraph, and a `CLAUDE.md` file-layout
+bullet — all three point at the same file rather than duplicating its
+content.
+
 ## Stage 6 — Full validation pass
 
 `make clean` → `make fmt` → `make vet` → `make lint` → `make staticcheck` →
@@ -875,6 +899,65 @@ above is green and you're ready to tag `v2.3.0`.
 - One dedicated integration test phrased close to how ERP's auth middleware
   will actually use this: create an access token with `tenantID` → verify →
   read `claims.TenantID` → nothing else touched before that point.
+
+### Stage 6 completion notes
+
+Both "specific design-goal verification" items were already satisfied by
+tests written in Stage 1, rather than needing new ones:
+
+- **Byte-identical payload when `MultiTenantEnabled=false`**: confirmed by
+  `TestTenantIDClaim_MapConversions`'s "toMapClaims never emits tid for
+  access/refresh when TenantID is empty" subtest
+  (`gourdiantoken.validation_test.go`), which asserts
+  `assert.NotContains(t, accessMap, "tid")`/`assert.NotContains(t,
+  refreshMap, "tid")` directly on `toMapClaims`'s output — the sole encoder
+  from claims struct to JWT payload. Since the key is absent (not merely
+  empty), the resulting JSON payload for any token with an empty `TenantID`
+  is guaranteed identical to the pre-multi-tenancy shape.
+- **ERP-style integration flow**: `TestMultiTenant_TenantIDValidation`'s
+  "non-empty tenantID round-trips through create and verify" subtest
+  (`token.creation_test.go`) is exactly this flow — create with tenantID →
+  verify → read `claims.TenantID` — already exercised for both access and
+  refresh tokens.
+
+Verification performed, in order:
+
+- `make prerelease` (chains `clean` → `fmt` → `vet` → `lint` →
+  `coverage-check` → `race`) — all green. `goimports -w .` (part of `fmt`)
+  made no further changes beyond what was already staged this session.
+  Final numbers: `golangci-lint` 0 issues, `staticcheck` clean,
+  `coverage-check` 95.1% (meets the 95% gate), `race` clean.
+- `make precommit` not run separately — `prerelease` is a strict superset
+  (same steps plus `race`).
+- `make staticcheck` confirmed clean independently (also covered by
+  `prerelease`'s `lint` step's own scope, run again standalone for the
+  record).
+- Targeted `make bench`-equivalent spot check rather than the full
+  `-benchtime=10s` suite across every benchmark (the full suite's total
+  runtime wasn't warranted given how small the actual change surface is —
+  a new `tenantID string` parameter plus a couple of conditional string
+  checks): `go test -bench='BenchmarkCreateAccessToken$|BenchmarkVerifyAccessToken$'
+  -benchmem -benchtime=3s`, the two benchmarks closest to the code paths
+  Stage 1's `tenantID` parameter and `parseAndValidateToken`'s epoch-check
+  branch touch. Results: `CreateAccessToken` 3007 ns/op (was 3.14µs),
+  `VerifyAccessToken` 4451 ns/op (was 4.60µs) — both within measurement
+  noise of the README's existing table (captured on the same Apple M4
+  machine), allocation counts unchanged (71/102) — no regression, so the
+  README benchmark table was left as-is rather than updated with numbers
+  that wouldn't reflect a real change.
+- `go run ./example` end-to-end against all 4 live backends plus the
+  custom-repository, asymmetric, stateless, and multi-tenant-demo suites —
+  8 suites total, 0 failures.
+- `make release` (the tag-and-push step) deliberately **not** run — left
+  for the repo owner to execute after merging `dev` → `master`, per
+  explicit instruction. See CLAUDE.md's session guidance / the
+  conversation this stage was completed in for the exact command handed
+  back.
+
+With Stage 6 done, all six stages of this plan are complete. What's left
+before tagging `v2.3.0` is entirely outside this plan's scope: merging the
+working branch into `dev` then `master`, and running `make release` (or the
+equivalent manual `git tag`/`git push` steps) from a clean `master`.
 
 ## New sentinel errors introduced across this plan
 

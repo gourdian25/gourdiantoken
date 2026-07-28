@@ -814,6 +814,65 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 - High write throughput
 - Flexible schemas
 
+### 6. Custom Storage Backend
+
+Want SQLite, DynamoDB, etcd, BoltDB, Cassandra, or anything else not built in? gourdiantoken
+never depends on a concrete storage type — every constructor takes a `TokenRepository`, and
+`NewGourdianTokenMaker(ctx, config, tokenRepo)` accepts any implementation of it, not just
+the four built-in ones:
+
+```go
+type TokenRepository interface {
+    MarkTokenRevoke(ctx context.Context, tokenType TokenType, token string, ttl time.Duration) error
+    IsTokenRevoked(ctx context.Context, tokenType TokenType, token string) (bool, error)
+    MarkTokenRotated(ctx context.Context, token string, ttl time.Duration) error
+    MarkTokenRotatedAtomic(ctx context.Context, token string, ttl time.Duration) (bool, error)
+    IsTokenRotated(ctx context.Context, token string) (bool, error)
+    GetRotationTTL(ctx context.Context, token string) (time.Duration, error)
+    CleanupExpiredRevokedTokens(ctx context.Context, tokenType TokenType) error
+    CleanupExpiredRotatedTokens(ctx context.Context) error
+    RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error
+    GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error)
+    CleanupExpiredTenantRevocations(ctx context.Context) error
+    Stats(ctx context.Context) (map[string]interface{}, error)
+    CleanupAll(ctx context.Context) error
+}
+```
+
+A complete, runnable reference implementation —
+[`example/custom_repository_example.go`](./example/custom_repository_example.go) — is
+wired into `example/example.go`'s own test suite (as "Custom Repository (Reference
+Implementation)") and passes all 46 scenarios exactly like the four built-in backends do.
+Study it alongside whichever of the real implementations
+(`gourdiantoken.repository.{inmemory,redis,postgres,mongo}.imp.go`) is closest in shape to
+your target backend — a key-value store like DynamoDB/etcd/BoltDB has more in common with
+the Redis implementation, while a SQL database has more in common with the Postgres one.
+
+**The one method where correctness genuinely depends on your backend**: `MarkTokenRotatedAtomic`
+must provide true atomic compare-and-swap semantics — the "is this already rotated?" check
+and the "mark it rotated" write must happen as one indivisible operation, or two concurrent
+callers can both observe "not yet rotated" and both proceed, defeating rotation-based reuse
+detection entirely. An in-process mutex (as the reference implementation uses) is only
+sufficient for a single-process, in-memory store; a real shared datastore needs its own
+atomicity guarantee instead — a conditional upsert
+(`INSERT ... ON CONFLICT ... DO UPDATE ... WHERE <existing row already expired>`) for SQL,
+or an equivalent conditional write for a document/key-value store. See
+`gourdiantoken.repository.postgres.imp.go`'s `InsertRotatedTokenIfNotExists` query and
+`gourdiantoken.repository.mongo.imp.go`'s `MarkTokenRotatedAtomic` for two real examples of
+this exact pattern against different kinds of backends.
+
+Other things worth carrying over from the built-in implementations:
+
+- **Hash tokens before storing them** (SHA-256, as all four built-in backends do) — never
+  persist a raw token string, so a leaked datastore leaks nothing directly replayable.
+- Every method must be safe for concurrent use by multiple goroutines.
+- `Stats`' returned map keys are implementation-defined; don't depend on specific ones being
+  present if you want code that works across every `TokenRepository` implementation.
+- `Close() error` isn't part of `TokenRepository` — Postgres's has pool-ownership caveats
+  (the caller may share that pool elsewhere) that make it a poor fit for a uniform interface
+  method — but every built-in implementation has its own idempotent, no-argument one; follow
+  the same convention.
+
 ---
 
 ## 🔑 Token Types & Claims

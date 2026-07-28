@@ -1829,6 +1829,16 @@ func main() {
 			},
 		},
 		{
+			Name:        "Custom Repository (Reference Implementation)",
+			Description: "Template TokenRepository for backends not built in (SQLite, DynamoDB, etcd, ...) — see custom_repository_example.go",
+			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
+				return NewCustomTokenRepository(), nil
+			},
+			Cleanup: func() error {
+				return nil
+			},
+		},
+		{
 			Name:        "Asymmetric (RS256) - In-Memory Repository",
 			Description: "RSA-signed tokens; PrivateKeyPEM/PublicKeyPEM loaded from in-memory bytes",
 			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
