@@ -8,11 +8,10 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -518,11 +517,6 @@ func TestInitializeKeys_UnsupportedSigningMethod(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported signing method")
 }
 
-// TestParseKeyPair_MissingPublicKeyFile calls parseKeyPair directly rather
-// than going through NewGourdianTokenMaker: the full constructor's
-// validateConfig runs its own os.Stat-based permission check on both key
-// paths first, which already fails fast on a missing file — never reaching
-// parseKeyPair's own os.ReadFile call at all.
 func TestNewGourdianTokenMaker_AppliesOptions(t *testing.T) {
 	var called bool
 	config := DefaultTestConfig()
@@ -611,31 +605,25 @@ func TestInitializeSigningMethod_UnsupportedAlgorithm(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported algorithm")
 }
 
-func TestParseKeyPair_MissingPrivateKeyFile(t *testing.T) {
-	// Reachable only via a direct call: validateConfig's own os.Stat-based
-	// permission check already rejects a missing private key file before
-	// parseKeyPair's os.ReadFile ever runs in the normal construction flow.
+func TestParseKeyPair_EmptyPrivateKeyPEM(t *testing.T) {
+	// Reachable only via a direct call: NewGourdianTokenMaker's own
+	// validateConfig already rejects empty PrivateKeyPEM/PublicKeyPEM before
+	// parseKeyPair ever runs in the normal construction flow.
 	maker := &JWTMaker{
-		config: GourdianTokenConfig{
-			PrivateKeyPath: "/nonexistent/private.pem",
-			PublicKeyPath:  "/nonexistent/public.pem",
-		},
+		config:        GourdianTokenConfig{},
 		signingMethod: jwt.SigningMethodRS256,
 	}
 	err := maker.parseKeyPair()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to read private key file")
+	assert.Contains(t, err.Error(), "failed to parse PEM block containing the RSA private key")
 }
 
 func TestParseKeyPair_UnsupportedAlgorithm(t *testing.T) {
-	tempDir := t.TempDir()
-	privPath := filepath.Join(tempDir, "priv.pem")
-	pubPath := filepath.Join(tempDir, "pub.pem")
-	require.NoError(t, os.WriteFile(privPath, []byte("placeholder"), 0600))
-	require.NoError(t, os.WriteFile(pubPath, []byte("placeholder"), 0600))
-
 	maker := &JWTMaker{
-		config:        GourdianTokenConfig{PrivateKeyPath: privPath, PublicKeyPath: pubPath},
+		config: GourdianTokenConfig{
+			PrivateKeyPEM: []byte("placeholder"),
+			PublicKeyPEM:  []byte("placeholder"),
+		},
 		signingMethod: jwt.SigningMethodHS256, // not one of the RS/PS/ES/EdDSA cases
 	}
 	err := maker.parseKeyPair()
@@ -644,19 +632,17 @@ func TestParseKeyPair_UnsupportedAlgorithm(t *testing.T) {
 }
 
 func TestParseKeyPair_ECDSAPublicKeyParseError(t *testing.T) {
-	tempDir := t.TempDir()
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	der, err := x509.MarshalECPrivateKey(privKey)
 	require.NoError(t, err)
-	privPath := filepath.Join(tempDir, "priv.pem")
-	require.NoError(t, os.WriteFile(privPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), 0600))
-
-	pubPath := filepath.Join(tempDir, "pub.pem")
-	require.NoError(t, os.WriteFile(pubPath, []byte("not a valid key"), 0600))
+	privPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
 
 	maker := &JWTMaker{
-		config:        GourdianTokenConfig{PrivateKeyPath: privPath, PublicKeyPath: pubPath},
+		config: GourdianTokenConfig{
+			PrivateKeyPEM: privPEM,
+			PublicKeyPEM:  []byte("not a valid key"),
+		},
 		signingMethod: jwt.SigningMethodES256,
 	}
 	err = maker.parseKeyPair()
@@ -665,19 +651,17 @@ func TestParseKeyPair_ECDSAPublicKeyParseError(t *testing.T) {
 }
 
 func TestParseKeyPair_EdDSAPublicKeyParseError(t *testing.T) {
-	tempDir := t.TempDir()
 	_, privKey, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	der, err := x509.MarshalPKCS8PrivateKey(privKey)
 	require.NoError(t, err)
-	privPath := filepath.Join(tempDir, "priv.pem")
-	require.NoError(t, os.WriteFile(privPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0600))
-
-	pubPath := filepath.Join(tempDir, "pub.pem")
-	require.NoError(t, os.WriteFile(pubPath, []byte("not a valid key"), 0600))
+	privPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 
 	maker := &JWTMaker{
-		config:        GourdianTokenConfig{PrivateKeyPath: privPath, PublicKeyPath: pubPath},
+		config: GourdianTokenConfig{
+			PrivateKeyPEM: privPEM,
+			PublicKeyPEM:  []byte("not a valid key"),
+		},
 		signingMethod: jwt.SigningMethodEdDSA,
 	}
 	err = maker.parseKeyPair()
@@ -685,48 +669,39 @@ func TestParseKeyPair_EdDSAPublicKeyParseError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to parse EdDSA public key")
 }
 
-func TestParseKeyPair_MissingPublicKeyFile(t *testing.T) {
-	tempDir := t.TempDir()
-	privPath := filepath.Join(tempDir, "priv.pem")
-	require.NoError(t, os.WriteFile(privPath, []byte("placeholder"), 0600))
+func TestParseKeyPair_EmptyPublicKeyPEM(t *testing.T) {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	privPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privKey)})
 
 	maker := &JWTMaker{
 		config: GourdianTokenConfig{
-			PrivateKeyPath: privPath,
-			PublicKeyPath:  filepath.Join(tempDir, "does-not-exist.pem"),
+			PrivateKeyPEM: privPEM,
 		},
 		signingMethod: jwt.SigningMethodRS256,
 	}
 
-	err := maker.parseKeyPair()
+	err = maker.parseKeyPair()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to read public key file")
+	assert.Contains(t, err.Error(), "failed to parse PEM block containing the RSA public key")
 }
 
 // TestNewGourdianTokenMaker_InitializeKeysFailureCancelsCleanup uses
-// existing, correctly-permissioned but garbage-content key files: a
-// genuinely missing/insecurely-permissioned path would be rejected earlier
-// by validateConfig's own file-permission check (see
-// TestParseKeyPair_MissingPublicKeyFile above) before ever reaching
-// initializeKeys, so reaching *this* failure path — after the cleanup
-// goroutines have already been started because RevocationEnabled/
-// RotationEnabled are true — needs files that pass the permission check
-// but fail to parse as PEM.
+// non-empty but garbage PEM bytes: genuinely empty PrivateKeyPEM/PublicKeyPEM
+// would be rejected earlier by validateConfig's own required-bytes check
+// before ever reaching initializeKeys, so reaching *this* failure path —
+// after the cleanup goroutines have already been started because
+// RevocationEnabled/RotationEnabled are true — needs bytes that pass the
+// required-bytes check but fail to parse as PEM.
 func TestNewGourdianTokenMaker_InitializeKeysFailureCancelsCleanup(t *testing.T) {
-	tempDir := t.TempDir()
-	privPath := filepath.Join(tempDir, "priv.pem")
-	pubPath := filepath.Join(tempDir, "pub.pem")
-	require.NoError(t, os.WriteFile(privPath, []byte("not a real key"), 0600))
-	require.NoError(t, os.WriteFile(pubPath, []byte("not a real key"), 0600))
-
 	config := DefaultTestConfig()
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 	config.SigningMethod = Asymmetric
 	config.Algorithm = "RS256"
 	config.SymmetricKey = ""
-	config.PrivateKeyPath = privPath
-	config.PublicKeyPath = pubPath
+	config.PrivateKeyPEM = []byte("not a real key")
+	config.PublicKeyPEM = []byte("not a real key")
 
 	repo := NewMemoryTokenRepository(time.Minute)
 	_, err := NewGourdianTokenMaker(context.Background(), config, repo)

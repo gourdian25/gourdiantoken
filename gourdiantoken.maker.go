@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -115,7 +114,7 @@ func (maker *JWTMaker) Close() error {
 //
 // Configuration Validation:
 //   - Checks signing method matches algorithm (e.g., HS256 requires Symmetric)
-//   - Validates key files exist and have secure permissions (0600 for private keys)
+//   - Validates asymmetric key PEM bytes are present and well-formed
 //   - Ensures durations are positive and logical (expiry < max lifetime)
 //   - Verifies required parameters are provided for the chosen signing method
 //
@@ -146,8 +145,8 @@ func (maker *JWTMaker) Close() error {
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/path/to/private.pem",
-//	    PublicKeyPath: "/path/to/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.example.com",
 //	    RevocationEnabled: false,
 //	    RotationEnabled: false,
@@ -305,8 +304,6 @@ func DefaultGourdianTokenMaker(
 		RotationEnabled:          false,
 		Algorithm:                "HS256",
 		SymmetricKey:             symmetricKey,
-		PrivateKeyPath:           "",
-		PublicKeyPath:            "",
 		Issuer:                   "gourdian.com",
 		Audience:                 nil,
 		AllowedAlgorithms:        []string{"HS256", "RS256", "ES256", "PS256"},
@@ -1675,15 +1672,15 @@ func (maker *JWTMaker) initializeSigningMethod() error {
 
 // initializeKeys loads and validates cryptographic keys based on the signing method.
 // For symmetric signing, uses the configured secret key.
-// For asymmetric signing, loads keys from PEM files.
+// For asymmetric signing, parses the configured PEM-encoded key bytes.
 //
 // Symmetric Key Handling:
 //   - Uses SymmetricKey for both signing and verification
 //   - Key is used as-is (ensure it's properly secured)
 //
 // Asymmetric Key Handling:
-//   - Loads private key from PrivateKeyPath (for signing)
-//   - Loads public key from PublicKeyPath (for verification)
+//   - Parses PrivateKeyPEM (for signing)
+//   - Parses PublicKeyPEM (for verification)
 //   - Supports multiple PEM formats (PKCS1, PKCS8, SEC1)
 //   - Validates key types match the algorithm
 //
@@ -1693,11 +1690,10 @@ func (maker *JWTMaker) initializeSigningMethod() error {
 //   - EdDSA: Ed25519 keys
 //
 // Returns:
-//   - error: If keys cannot be loaded, are invalid, or don't match the algorithm
+//   - error: If keys cannot be parsed, are invalid, or don't match the algorithm
 //
 // Notes:
 //   - Called internally during initialization
-//   - Private key files should have 0600 permissions
 //   - Public keys can be distributed for token verification
 func (maker *JWTMaker) initializeKeys() error {
 	switch maker.config.SigningMethod {
@@ -1712,7 +1708,7 @@ func (maker *JWTMaker) initializeKeys() error {
 	}
 }
 
-// parseKeyPair loads and parses asymmetric key pairs from PEM files.
+// parseKeyPair parses asymmetric key pairs from the configured PEM-encoded bytes.
 // Handles RSA, ECDSA, and EdDSA key types with multiple encoding formats.
 //
 // Supported Private Key Formats:
@@ -1729,22 +1725,16 @@ func (maker *JWTMaker) initializeKeys() error {
 //   - Validates loaded keys match the algorithm
 //
 // Returns:
-//   - error: If files cannot be read, keys cannot be parsed, or key types don't match
+//   - error: If keys cannot be parsed, or key types don't match
 //
 // Notes:
 //   - Called by initializeKeys for asymmetric signing
 //   - Automatically detects key format from PEM structure
 func (maker *JWTMaker) parseKeyPair() error {
-	privateKeyBytes, err := os.ReadFile(maker.config.PrivateKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to read private key file: %w", err)
-	}
+	privateKeyBytes := maker.config.PrivateKeyPEM
+	publicKeyBytes := maker.config.PublicKeyPEM
 
-	publicKeyBytes, err := os.ReadFile(maker.config.PublicKeyPath)
-	if err != nil {
-		return fmt.Errorf("failed to read public key file: %w", err)
-	}
-
+	var err error
 	switch maker.signingMethod.Alg() {
 	case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512":
 		maker.privateKey, err = parseRSAPrivateKey(privateKeyBytes)

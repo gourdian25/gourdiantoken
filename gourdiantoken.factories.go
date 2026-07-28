@@ -75,8 +75,8 @@ import (
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/keys/private.pem",
-//	    PublicKeyPath: "/keys/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.example.com",
 //	    Audience: []string{"api.example.com", "service.example.com"},
 //	    RevocationEnabled: false,
@@ -225,8 +225,8 @@ func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenCo
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/app/keys/private.pem",
-//	    PublicKeyPath: "/app/keys/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.production.com",
 //	    Audience: []string{"api.production.com", "admin.production.com"},
 //	    RevocationEnabled: true,
@@ -306,8 +306,8 @@ func NewGourdianTokenMakerWithPostgres(ctx context.Context, config GourdianToken
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/app/keys/private.pem",
-//	    PublicKeyPath: "/app/keys/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.mongodb.example.com",
 //	    Audience: []string{"api.mongodb.example.com"},
 //	    RevocationEnabled: true,
@@ -425,8 +425,8 @@ func NewGourdianTokenMakerWithMongo(ctx context.Context, config GourdianTokenCon
 //	config := gourdiantoken.GourdianTokenConfig{
 //	    SigningMethod: gourdiantoken.Asymmetric,
 //	    Algorithm: "RS256",
-//	    PrivateKeyPath: "/app/keys/private.pem",
-//	    PublicKeyPath: "/app/keys/public.pem",
+//	    PrivateKeyPEM: privateKeyPEM, // e.g. read from a mounted Secret at startup
+//	    PublicKeyPEM: publicKeyPEM,
 //	    Issuer: "auth.redis.example.com",
 //	    Audience: []string{"api.redis.example.com", "gateway.redis.example.com"},
 //	    RevocationEnabled: true,

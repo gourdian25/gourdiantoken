@@ -62,7 +62,7 @@ future initiative, not part of this plan.
 
 | Stage | Scope | Status |
 |---|---|---|
-| Stage 1 | Core config/validation/key-loading change | Not started |
+| Stage 1 | Core config/validation/key-loading change | ✅ Done |
 | Stage 2 | Docs / CHANGELOG / example.go pass | Not started |
 
 ## Stage 1 — Core config/validation/key-loading change
@@ -162,6 +162,87 @@ func NewGourdianTokenConfig(
 cases in `cryptographic_test.go`, `config.validation_test.go`,
 `gourdiantoken.maker_test.go`) run in isolation first, then the full suite
 against at least the Memory backend, `make race`, `make coverage-check`.
+
+### Stage 1 completion notes
+
+Implemented exactly as scoped above, no design deviations:
+
+- `gourdiantoken.config.go`: `PrivateKeyPath`/`PublicKeyPath` replaced by
+  `PrivateKeyPEM []byte`/`PublicKeyPEM []byte`; `NewGourdianTokenConfig`'s
+  deprecated signature updated (`privateKeyPEM, publicKeyPEM []byte` in place
+  of the two path strings); `DefaultGourdianTokenConfig` simply drops the two
+  now-nonexistent field assignments (a `[]byte` zero value is already `nil`,
+  nothing to initialize).
+- `gourdiantoken.validation.go`: `validateConfig`'s Symmetric case now checks
+  `config.PrivateKeyPEM != nil || config.PublicKeyPEM != nil`; Asymmetric case
+  checks `len(config.PrivateKeyPEM) == 0 || len(config.PublicKeyPEM) == 0`;
+  both `checkFilePermissions` calls deleted.
+- `gourdiantoken.keys.go`: `checkFilePermissions` deleted entirely (confirmed
+  zero remaining call sites first); its only import (`os`) dropped.
+- `gourdiantoken.maker.go`: `parseKeyPair` now reads
+  `maker.config.PrivateKeyPEM`/`PublicKeyPEM` directly instead of
+  `os.ReadFile`; the `os` import (used nowhere else in the file) dropped.
+  Doc comments on `initializeKeys`/`parseKeyPair`/`NewGourdianTokenMaker`
+  updated to stop describing a file-path-based flow.
+- `gourdiantoken.factories.go` (4 doc-comment examples) and `docs.go` (1
+  reference) updated to show `PrivateKeyPEM`/`PublicKeyPEM` usage, each with a
+  one-line note that the bytes are expected to come from an env var, a
+  mounted Kubernetes Secret read once at startup, or a secret-manager SDK
+  call — never a library-internal file read.
+- **Test impact ended up touching one more file than the plan scoped**:
+  `gourdiantoken.keys_test.go` needed no changes (confirmed — it already
+  tested `parseXxxPrivateKey`/`parseXxxPublicKey` directly on raw `[]byte`
+  and had no `checkFilePermissions`-specific test), but
+  `gourdiantoken.maker_test.go` needed more than the "same mechanical swap"
+  the plan anticipated: several of its tests called `parseKeyPair()`/
+  `initializeKeys()` directly (bypassing `validateConfig`) specifically to
+  reach file-I/O failure branches (`TestParseKeyPair_MissingPrivateKeyFile`,
+  `TestParseKeyPair_MissingPublicKeyFile`) that no longer exist as a concept
+  once there's no file. Renamed/repurposed to
+  `TestParseKeyPair_EmptyPrivateKeyPEM`/`TestParseKeyPair_EmptyPublicKeyPEM`,
+  which instead exercise `decodePEMBlock`'s own failure path on
+  empty/missing PEM bytes (the new equivalent failure mode when calling
+  `parseKeyPair()` directly with `validateConfig`'s own required-bytes check
+  bypassed). Also dropped a stale, already-misplaced doc comment above
+  `TestNewGourdianTokenMaker_AppliesOptions` that described the old
+  file-permission-check behavior but was attached to the wrong function.
+- `cryptographic_test.go` rewritten essentially in full per the plan's own
+  prediction — every `generateRSAKeyPair`/`generateECDSAKeyPair`/
+  `generateEdDSAKeyPair`-style helper now returns PEM `[]byte` pairs via
+  `pem.EncodeToMemory` instead of writing to `t.TempDir()` and returning
+  paths, eliminating all the file-open/defer-close/error-log boilerplate.
+  `TestAllSupportedAlgorithms`'s per-algorithm `setup func() (string, string)`
+  field was restructured to `asymmetricGen func() (privPEM, pubPEM []byte)` +
+  a separate `symmetricKey string` field, since the symmetric and asymmetric
+  branches no longer share a `(string, string)` return shape once one side is
+  bytes. The `/nonexistent/path/private.pem` file-not-found case became
+  `"empty PEM bytes rejected by config validation"`, asserting the new
+  `validateConfig` required-bytes error message. **One test class was deleted
+  outright, beyond what the plan called out**: `TestKeyPermissions` (both its
+  "rejects insecure permissions" and "accepts secure permissions" subtests)
+  tested `checkFilePermissions` behavior specifically — with no file on disk,
+  "file permissions" isn't a concept this library can check anymore, so the
+  test had no post-migration equivalent to repurpose into (unlike the
+  `/nonexistent/path` case, which mapped cleanly onto an empty-bytes case).
+- `config.validation_test.go`: the "missing private/public key path" and
+  "key path(s) provided with symmetric" cases converted to their PEM-bytes
+  equivalents; the assertion text for the two "missing" cases changed from
+  `"private and public key paths are required"` to `"private and public key
+  PEM bytes are required"` to match the new `validateConfig` message.
+  `TestNewGourdianTokenConfig`'s call site updated for the new parameter
+  list (`nil, nil` in place of the two empty path strings).
+- Full verification green: `go build ./...`, `go vet ./...`, `gofmt -l .`
+  (clean), `golangci-lint run` (0 issues), `staticcheck ./...` (clean), the
+  asymmetric-signing test subset in isolation (all green, including the one
+  bug caught and fixed pre-verification —
+  `TestParseKeyPair_EmptyPublicKeyPEM` initially set `PrivateKeyPEM:
+  []byte("placeholder")`, which isn't valid PEM either, so the test failed on
+  the *private*-key parse error instead of the intended *public*-key one;
+  fixed by generating a real RSA private key for that field so the failure
+  isolates to the public key as intended), the full suite against all 4 live
+  backends (`go test -count=1 -timeout=5m ./...`, Docker services were
+  already up), `make race`, and `make coverage-check` — **95.9%**, above the
+  95.8% baseline carried over from multi-tenant Stage 3.
 
 ## Stage 2 — Docs / CHANGELOG / example.go pass
 

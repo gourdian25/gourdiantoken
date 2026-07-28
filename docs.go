@@ -52,9 +52,13 @@
 //
 // Symmetric (HMAC, via SymmetricKey): HS256, HS384, HS512.
 //
-// Asymmetric (via PrivateKeyPath/PublicKeyPath PEM files): RS256/RS384/RS512
-// (RSA PKCS#1 v1.5), PS256/PS384/PS512 (RSA-PSS, preferred over RS* for new
-// systems), ES256/ES384/ES512 (ECDSA P-256/P-384/P-521), EdDSA (Ed25519).
+// Asymmetric (via PrivateKeyPEM/PublicKeyPEM PEM-encoded key bytes):
+// RS256/RS384/RS512 (RSA PKCS#1 v1.5), PS256/PS384/PS512 (RSA-PSS, preferred
+// over RS* for new systems), ES256/ES384/ES512 (ECDSA P-256/P-384/P-521),
+// EdDSA (Ed25519). gourdiantoken never reads a key from disk itself — callers
+// load the PEM bytes however fits their deployment (an env var, a mounted
+// Kubernetes Secret read once at startup, a secret-manager SDK call, etc.)
+// and pass them in directly.
 //
 // SigningMethod (Symmetric or Asymmetric) must be consistent with Algorithm;
 // mismatches are rejected during construction, as is the JWT "none"

@@ -77,7 +77,8 @@ const (
 //
 // Security Considerations:
 //   - SymmetricKey must be at least 32 bytes for HMAC algorithms
-//   - Private key files should have 0600 permissions
+//   - PrivateKeyPEM should be sourced from a secret store (env var, mounted Secret,
+//     secret-manager SDK) rather than committed to a file in the repo
 //   - Algorithm must match the SigningMethod (e.g., HS256 for Symmetric, RS256 for Asymmetric)
 //   - Consider enabling both RotationEnabled and RevocationEnabled for production systems
 type GourdianTokenConfig struct {
@@ -101,15 +102,16 @@ type GourdianTokenConfig struct {
 	// Keep this value secret and rotate it periodically.
 	SymmetricKey string
 
-	// PrivateKeyPath is the file path to the PEM-encoded private key.
-	// Required when SigningMethod is Asymmetric.
-	// File should have restrictive permissions (0600 recommended).
-	PrivateKeyPath string
+	// PrivateKeyPEM is the PEM-encoded private key bytes.
+	// Required when SigningMethod is Asymmetric. Callers own how these bytes are
+	// obtained (an env var, a mounted Kubernetes Secret read once at startup, a
+	// secret-manager SDK call, etc.) — gourdiantoken never reads a key from disk itself.
+	PrivateKeyPEM []byte
 
-	// PublicKeyPath is the file path to the PEM-encoded public key or certificate.
+	// PublicKeyPEM is the PEM-encoded public key or certificate bytes.
 	// Required when SigningMethod is Asymmetric.
 	// Used for token verification and can be distributed to services that need to validate tokens.
-	PublicKeyPath string
+	PublicKeyPEM []byte
 
 	// Issuer identifies the token issuer (e.g., "auth.example.com").
 	// Included in the "iss" claim and validated during token verification.
@@ -199,8 +201,8 @@ type GourdianTokenConfig struct {
 //   - requiredClaims: List of mandatory claims that must be present
 //   - algorithm: JWT signing algorithm (must match signingMethod)
 //   - symmetricKey: Secret key for HMAC (required if signingMethod is Symmetric)
-//   - privateKeyPath: Path to private key file (required if signingMethod is Asymmetric)
-//   - publicKeyPath: Path to public key file (required if signingMethod is Asymmetric)
+//   - privateKeyPEM: PEM-encoded private key bytes (required if signingMethod is Asymmetric)
+//   - publicKeyPEM: PEM-encoded public key bytes (required if signingMethod is Asymmetric)
 //   - issuer: Token issuer identifier
 //   - accessExpiryDuration: Access token lifetime (e.g., 30 minutes)
 //   - accessMaxLifetimeExpiry: Maximum access token validity (e.g., 24 hours)
@@ -222,7 +224,7 @@ type GourdianTokenConfig struct {
 //	    []string{"iss", "aud", "nbf", "mle"},
 //	    "HS256",
 //	    "your-secret-key-min-32-bytes-long",
-//	    "", "",
+//	    nil, nil,
 //	    "auth.example.com",
 //	    30*time.Minute, 24*time.Hour,
 //	    7*24*time.Hour, 30*24*time.Hour,
@@ -235,7 +237,9 @@ func NewGourdianTokenConfig(
 	signingMethod SigningMethod,
 	rotationEnabled, revocationEnabled bool,
 	audience, allowedAlgorithms, requiredClaims []string,
-	algorithm, symmetricKey, privateKeyPath, publicKeyPath, issuer string,
+	algorithm, symmetricKey string,
+	privateKeyPEM, publicKeyPEM []byte,
+	issuer string,
 	accessExpiryDuration, accessMaxLifetimeExpiry, refreshExpiryDuration, refreshMaxLifetimeExpiry, refreshReuseInterval, cleanupInterval time.Duration,
 ) GourdianTokenConfig {
 	return GourdianTokenConfig{
@@ -247,8 +251,8 @@ func NewGourdianTokenConfig(
 		RequiredClaims:           requiredClaims,
 		Algorithm:                algorithm,
 		SymmetricKey:             symmetricKey,
-		PrivateKeyPath:           privateKeyPath,
-		PublicKeyPath:            publicKeyPath,
+		PrivateKeyPEM:            privateKeyPEM,
+		PublicKeyPEM:             publicKeyPEM,
 		Issuer:                   issuer,
 		AccessExpiryDuration:     accessExpiryDuration,
 		AccessMaxLifetimeExpiry:  accessMaxLifetimeExpiry,
@@ -301,8 +305,6 @@ func DefaultGourdianTokenConfig(symmetricKey string) GourdianTokenConfig {
 		SigningMethod:            Symmetric,
 		Algorithm:                "HS256",
 		SymmetricKey:             symmetricKey,
-		PrivateKeyPath:           "",
-		PublicKeyPath:            "",
 		Issuer:                   "gourdian.com",
 		Audience:                 nil,
 		AllowedAlgorithms:        []string{"HS256", "HS384", "HS512", "RS256", "ES256", "PS256"},
