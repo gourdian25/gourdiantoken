@@ -64,9 +64,16 @@ described below.
 | Stage 1 | Tenant claim foundation | ✅ Done |
 | Stage 2 | Interface consolidation | ✅ Done |
 | Stage 3 | Tenant-scoped bulk revocation | ✅ Done |
-| Stage 4 | Repository backend standardization | Not started |
+| Stage 4 | Repository backend standardization | Paused — see note below |
 | Stage 5 | Docs / CHANGELOG / version bump / example.go | Not started |
 | Stage 6 | Full validation pass | Not started |
+
+**Note:** after Stage 3, `docs/plan/key-material-config-plan.md` (in-memory
+`PrivateKeyPEM`/`PublicKeyPEM` config, replacing `PrivateKeyPath`/
+`PublicKeyPath`) was inserted and is being executed **before** Stage 4 below,
+per explicit instruction — an unrelated-to-multi-tenancy breaking change that
+surfaced mid-flight but targets the same `v2.3.0` release. Resume Stage 4
+once that plan is fully landed.
 
 ## Design decisions locked in for the executor
 
