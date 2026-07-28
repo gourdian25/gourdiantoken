@@ -105,6 +105,10 @@ func TestRedisRepository_OperationsAfterClientClosed(t *testing.T) {
 	_, err = redisRepo.Stats(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to count access tokens")
+
+	err = redisRepo.CleanupAll(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to cleanup access tokens")
 }
 
 // TestRedisGetTenantRevocationEpoch_MalformedValue exercises

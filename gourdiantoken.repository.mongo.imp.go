@@ -513,12 +513,19 @@ func (r *MongoTokenRepository) MarkTokenRotated(ctx context.Context, token strin
 	})
 }
 
-// MarkTokenRotatedAtomic marks a token as rotated atomically, returning whether it was newly rotated.
-// Uses InsertOne instead of ReplaceOne to detect true first-time rotation.
+// MarkTokenRotatedAtomic marks a token as rotated atomically, returning whether it was newly
+// rotated. Uses a conditional upsert (UpdateOne with upsert=true, filtered on the existing
+// document — if any — already being expired) rather than a blind InsertOne, so re-marking a
+// token whose *previous* rotation entry already expired succeeds instead of being rejected as
+// a duplicate.
 //
 // Key Difference from MarkTokenRotated:
 //   - Returns boolean indicating if rotation was actually performed
-//   - Uses InsertOne which fails on duplicate key (already rotated)
+//   - The upsert filter requires expires_at <= now, so a not-yet-expired existing document
+//     doesn't match; MongoDB's upsert then attempts an insert, which collides with the
+//     unique index on token_hash (duplicate-key error) exactly when the token is still
+//     actively rotated — an expired document, by contrast, matches the filter and gets
+//     updated in place
 //   - Essential for preventing double-spending in rotation flows
 //   - Provides true atomicity for rotation detection
 //
@@ -533,7 +540,7 @@ func (r *MongoTokenRepository) MarkTokenRotated(ctx context.Context, token strin
 //   - ttl: Time-to-live duration for rotation record
 //
 // Returns:
-//   - bool: True if token was newly rotated, false if already rotated
+//   - bool: True if token was newly rotated, false if already rotated (and not yet expired)
 //   - error: If token is empty, TTL is invalid, or database operation fails
 //
 // Example (Atomic rotation check):
@@ -549,12 +556,13 @@ func (r *MongoTokenRepository) MarkTokenRotated(ctx context.Context, token strin
 //
 // MongoDB Operation:
 //
-//	db.rotated_tokens.insertOne({
-//	  token_hash: "hash",
-//	  expires_at: ISODate(),
-//	  created_at: ISODate()
-//	})
-//	// Fails with duplicate key error if already exists
+//	db.rotated_tokens.updateOne(
+//	  { token_hash: "hash", expires_at: { $lte: ISODate() } },
+//	  { $set: { token_hash: "hash", expires_at: ISODate(), created_at: ISODate() } },
+//	  { upsert: true }
+//	)
+//	// The upsert's implicit insert fails with a duplicate-key error if a
+//	// not-yet-expired document with the same token_hash already exists.
 func (r *MongoTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token string, ttl time.Duration) (bool, error) {
 	if token == "" {
 		return false, fmt.Errorf("token cannot be empty")
@@ -565,14 +573,20 @@ func (r *MongoTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token
 	}
 
 	tokenHash := hashToken(token)
+	now := time.Now()
 	doc := tokenDocument{
 		TokenHash: tokenHash,
-		ExpiresAt: time.Now().Add(ttl),
-		CreatedAt: time.Now(),
+		ExpiresAt: now.Add(ttl),
+		CreatedAt: now,
 	}
 
 	err := r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
-		_, err := r.rotatedCollection.InsertOne(sessionCtx, doc)
+		filter := bson.M{
+			"token_hash": tokenHash,
+			"expires_at": bson.M{"$lte": now},
+		}
+		opts := options.Update().SetUpsert(true)
+		_, err := r.rotatedCollection.UpdateOne(sessionCtx, filter, bson.M{"$set": doc}, opts)
 		return err
 	})
 
@@ -995,6 +1009,36 @@ func (r *MongoTokenRepository) Stats(ctx context.Context) (map[string]interface{
 	}, nil
 }
 
+// CleanupAll runs every CleanupExpired* operation (revoked access/refresh/verification
+// tokens, rotated tokens, tenant revocations) in one call. Largely redundant with this
+// repository's own TTL indexes (MongoDB expires documents automatically in the background),
+// but useful for callers that want cleanup to happen synchronously and immediately rather
+// than waiting on MongoDB's own TTL monitor, which runs on its own ~60s cycle.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//
+// Returns:
+//   - error: If any underlying cleanup operation fails, with detailed context
+func (r *MongoTokenRepository) CleanupAll(ctx context.Context) error {
+	if err := r.CleanupExpiredRevokedTokens(ctx, AccessToken); err != nil {
+		return fmt.Errorf("failed to cleanup access tokens: %w", err)
+	}
+	if err := r.CleanupExpiredRevokedTokens(ctx, RefreshToken); err != nil {
+		return fmt.Errorf("failed to cleanup refresh tokens: %w", err)
+	}
+	if err := r.CleanupExpiredRevokedTokens(ctx, VerificationToken); err != nil {
+		return fmt.Errorf("failed to cleanup verification tokens: %w", err)
+	}
+	if err := r.CleanupExpiredRotatedTokens(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup rotated tokens: %w", err)
+	}
+	if err := r.CleanupExpiredTenantRevocations(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup tenant revocations: %w", err)
+	}
+	return nil
+}
+
 // Close performs cleanup operations for the MongoDB repository.
 // Note: MongoDB driver manages connection pooling automatically.
 //
@@ -1002,10 +1046,9 @@ func (r *MongoTokenRepository) Stats(ctx context.Context) (map[string]interface{
 //   - MongoDB connections are managed by the driver
 //   - No explicit connection closing needed for collections
 //   - Client should be closed at application level
-//   - This method exists for interface compatibility
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeout
+//   - This method exists for interface compatibility with the other three backends'
+//     concrete Close() methods (not part of the TokenRepository interface itself — see
+//     decision #7 in docs/plan/multi-tenant-support-plan.md)
 //
 // Returns:
 //   - error: Always nil (included for interface compatibility)
@@ -1018,7 +1061,7 @@ func (r *MongoTokenRepository) Stats(ctx context.Context) (map[string]interface{
 //	        log.Printf("Failed to disconnect MongoDB: %v", err)
 //	    }
 //	}()
-func (r *MongoTokenRepository) Close(ctx context.Context) error {
+func (r *MongoTokenRepository) Close() error {
 	// MongoDB doesn't require explicit connection closing for collections
 	// The client manages connections
 	return nil

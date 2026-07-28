@@ -736,12 +736,17 @@ func (m *MemoryTokenRepository) Close() error {
 }
 
 // Stats returns statistics about the repository for monitoring and debugging.
-// Provides snapshot of current memory usage and token counts.
+// Provides snapshot of current memory usage and token counts. Matches the
+// map[string]interface{} shape/key names used by the Redis/Postgres/Mongo
+// implementations, with counts normalized to int64.
 //
 // Metrics Provided:
+//   - total_revoked_tokens: Sum of all revoked access/refresh/verification tokens
 //   - revoked_access_tokens: Count of currently revoked access tokens
 //   - revoked_refresh_tokens: Count of currently revoked refresh tokens
+//   - revoked_verification_tokens: Count of currently revoked verification tokens
 //   - rotated_tokens: Count of currently rotated tokens
+//   - tenant_revocations: Count of active tenant revocation records
 //
 // Use Cases:
 //   - Monitoring memory usage patterns
@@ -749,30 +754,73 @@ func (m *MemoryTokenRepository) Close() error {
 //   - Capacity planning and performance analysis
 //   - Health checking and alerting
 //
+// Parameters:
+//   - ctx: Context for cancellation (not used in memory implementation)
+//
 // Returns:
-//   - map[string]int: Dictionary of current repository statistics
+//   - map[string]interface{}: Dictionary of current repository statistics
+//   - error: Always nil (error included for interface compatibility)
 //
 // Example (Monitoring endpoint):
 //
 //	// Expose stats via HTTP endpoint
 //	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-//	    stats := repo.Stats()
+//	    stats, _ := repo.Stats(r.Context())
 //	    json.NewEncoder(w).Encode(stats)
 //	})
 //
 // Example (Logging statistics):
 //
-//	stats := repo.Stats()
+//	stats, _ := repo.Stats(ctx)
 //	log.Printf("Token repository stats: %+v", stats)
-func (m *MemoryTokenRepository) Stats() map[string]int {
+func (m *MemoryTokenRepository) Stats(ctx context.Context) (map[string]interface{}, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return map[string]int{
-		"revoked_access_tokens":       len(m.revokedAccess),
-		"revoked_refresh_tokens":      len(m.revokedRefresh),
-		"revoked_verification_tokens": len(m.revokedVerification),
-		"rotated_tokens":              len(m.rotatedTokens),
-		"tenant_revocations":          len(m.tenantRevocations),
+	accessCount := int64(len(m.revokedAccess))
+	refreshCount := int64(len(m.revokedRefresh))
+	verificationCount := int64(len(m.revokedVerification))
+
+	return map[string]interface{}{
+		"total_revoked_tokens":        accessCount + refreshCount + verificationCount,
+		"revoked_access_tokens":       accessCount,
+		"revoked_refresh_tokens":      refreshCount,
+		"revoked_verification_tokens": verificationCount,
+		"rotated_tokens":              int64(len(m.rotatedTokens)),
+		"tenant_revocations":          int64(len(m.tenantRevocations)),
+	}, nil
+}
+
+// CleanupAll runs every CleanupExpired* operation (revoked access/refresh/verification
+// tokens, rotated tokens, tenant revocations) in one call.
+//
+// Parameters:
+//   - ctx: Context for cancellation (not used in memory implementation)
+//
+// Returns:
+//   - error: Always nil in practice. The error-wrap branches below are unreachable from
+//     here: each CleanupExpired* call is made with a fixed, valid literal argument (or none
+//     at all), and MemoryTokenRepository's own CleanupExpired* methods only ever return a
+//     non-nil error for an invalid TokenType — never produced by this call site. Kept for
+//     interface compatibility with the other three backends, where the equivalent calls can
+//     genuinely fail (a network/database error), matching this codebase's existing
+//     precedent for documenting narrow unreachable branches inline (e.g. newTokenID's
+//     crypto/rand failure path) rather than chasing them with a synthetic test.
+func (m *MemoryTokenRepository) CleanupAll(ctx context.Context) error {
+	if err := m.CleanupExpiredRevokedTokens(ctx, AccessToken); err != nil {
+		return fmt.Errorf("failed to cleanup access tokens: %w", err)
 	}
+	if err := m.CleanupExpiredRevokedTokens(ctx, RefreshToken); err != nil {
+		return fmt.Errorf("failed to cleanup refresh tokens: %w", err)
+	}
+	if err := m.CleanupExpiredRevokedTokens(ctx, VerificationToken); err != nil {
+		return fmt.Errorf("failed to cleanup verification tokens: %w", err)
+	}
+	if err := m.CleanupExpiredRotatedTokens(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup rotated tokens: %w", err)
+	}
+	if err := m.CleanupExpiredTenantRevocations(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup tenant revocations: %w", err)
+	}
+	return nil
 }

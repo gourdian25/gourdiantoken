@@ -340,7 +340,7 @@ func TestNewGourdianTokenMakerWithMongo_AllRepositories(t *testing.T) {
 			config.RotationEnabled = true
 
 			mongoRepo := repo.(*MongoTokenRepository)
-			maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), false)
+			maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database())
 			require.NoError(t, err)
 			require.NotNil(t, maker)
 		})
@@ -352,7 +352,7 @@ func TestNewGourdianTokenMakerWithMongo_NilDatabaseFails(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil, false)
+	_, err := NewGourdianTokenMakerWithMongo(context.Background(), config, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mongo database instance cannot be nil")
 }
@@ -370,11 +370,15 @@ func TestNewGourdianTokenMakerWithMongo_FailsWithCancelledContext(t *testing.T) 
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	_, err := NewGourdianTokenMakerWithMongo(ctx, config, mongoRepo.revokedCollection.Database(), false)
+	_, err := NewGourdianTokenMakerWithMongo(ctx, config, mongoRepo.revokedCollection.Database())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context canceled")
 }
 
+// TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository confirms the
+// factory always constructs a transactions-enabled repository (hardcoded true internally
+// since multi-tenant Stage 4 dropped the transactionsEnabled bool parameter) rather than
+// leaving it caller-controlled.
 func TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository(t *testing.T) {
 	factories := getTestRepositoryFactories()
 	repo, cleanup := factories["MongoDB"](t)
@@ -385,7 +389,7 @@ func TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository(t *t
 	config.RotationEnabled = true
 
 	mongoRepo := repo.(*MongoTokenRepository)
-	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database(), true)
+	maker, err := NewGourdianTokenMakerWithMongo(context.Background(), config, mongoRepo.revokedCollection.Database())
 	require.NoError(t, err)
 
 	// The returned maker should have transactions enabled
@@ -686,7 +690,7 @@ func TestAllFactories_InvalidConfigurationsFail(t *testing.T) {
 			repo, cleanup := factories["MongoDB"](t)
 			defer cleanup()
 			mongoRepo := repo.(*MongoTokenRepository)
-			_, err := NewGourdianTokenMakerWithMongo(context.Background(), invalidConfig, mongoRepo.revokedCollection.Database(), false)
+			_, err := NewGourdianTokenMakerWithMongo(context.Background(), invalidConfig, mongoRepo.revokedCollection.Database())
 			require.Error(t, err)
 		})
 

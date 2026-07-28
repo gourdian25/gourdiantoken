@@ -885,13 +885,15 @@ func TestMemoryLeaks(t *testing.T) {
 
 		// Get initial stats if available
 		if memRepo, ok := repo.(*MemoryTokenRepository); ok {
-			initialStats := memRepo.Stats()
+			initialStats, err := memRepo.Stats(ctx)
+			require.NoError(t, err)
 			t.Logf("Initial tokens: %v", initialStats)
 
 			// Wait for cleanup
 			time.Sleep(500 * time.Millisecond)
 
-			finalStats := memRepo.Stats()
+			finalStats, err := memRepo.Stats(ctx)
+			require.NoError(t, err)
 			t.Logf("Final tokens after cleanup: %v", finalStats)
 
 			// Should have fewer tokens after cleanup

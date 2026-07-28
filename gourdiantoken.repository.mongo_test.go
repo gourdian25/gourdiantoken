@@ -53,7 +53,7 @@ func TestNewGourdianTokenMakerWithMongo_WrapsRepositoryError(t *testing.T) {
 	config.RevocationEnabled = true
 	config.RotationEnabled = true
 
-	_, err = NewGourdianTokenMakerWithMongo(context.Background(), config, client.Database("nowhere"), false)
+	_, err = NewGourdianTokenMakerWithMongo(context.Background(), config, client.Database("nowhere"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to initialize MongoDB token repository")
 }
@@ -113,6 +113,10 @@ func TestMongoRepository_OperationsAfterDisconnected(t *testing.T) {
 	_, err = mongoRepo.Stats(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to count revoked tokens")
+
+	err = mongoRepo.CleanupAll(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to cleanup access tokens")
 }
 
 // TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions is the

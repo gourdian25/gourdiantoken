@@ -101,6 +101,10 @@ func (r *erroringRepo) GetTenantRevocationEpoch(ctx context.Context, tenantID st
 	return r.getTenantRevocationEpoch, nil
 }
 func (r *erroringRepo) CleanupExpiredTenantRevocations(ctx context.Context) error { return nil }
+func (r *erroringRepo) Stats(ctx context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+func (r *erroringRepo) CleanupAll(ctx context.Context) error { return nil }
 
 func makerWithRepo(t *testing.T, repo TokenRepository) *JWTMaker {
 	t.Helper()

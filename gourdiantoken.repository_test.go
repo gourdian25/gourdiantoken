@@ -1944,17 +1944,18 @@ func TestMemoryRepository_Stats(t *testing.T) {
 	}
 
 	// Get stats
-	stats := memRepo.Stats()
+	stats, err := memRepo.Stats(ctx)
+	require.NoError(t, err)
 
-	assert.Equal(t, 5, stats["revoked_access_tokens"], "should have 5 access tokens")
-	assert.Equal(t, 3, stats["revoked_refresh_tokens"], "should have 3 refresh tokens")
-	assert.Equal(t, 2, stats["rotated_tokens"], "should have 2 rotated tokens")
+	assert.EqualValues(t, 5, stats["revoked_access_tokens"], "should have 5 access tokens")
+	assert.EqualValues(t, 3, stats["revoked_refresh_tokens"], "should have 3 refresh tokens")
+	assert.EqualValues(t, 2, stats["rotated_tokens"], "should have 2 rotated tokens")
 }
 
 // TestRepositoryStats_AllBackends verifies that Stats() returns accurate counts
-// (including the verification token bucket) for each concrete repository type.
-// Stats() is not part of the TokenRepository interface, so each backend requires
-// its own type assertion, mirroring TestMemoryRepository_Stats.
+// (including the verification token bucket) for each backend. Stats/CleanupAll are part
+// of the TokenRepository interface (as of multi-tenant Stage 4), so this runs directly
+// against the interface value from the factory — no per-backend type assertion needed.
 func TestRepositoryStats_AllBackends(t *testing.T) {
 	factories := getTestRepositoryFactories()
 
@@ -1970,50 +1971,48 @@ func TestRepositoryStats_AllBackends(t *testing.T) {
 			require.NoError(t, repo.MarkTokenRotated(ctx, "stats-rotated", 1*time.Hour))
 			require.NoError(t, repo.RevokeTenant(ctx, "stats-tenant", 1*time.Hour))
 
-			switch name {
-			case "Memory":
-				memRepo, ok := repo.(*MemoryTokenRepository)
-				require.True(t, ok)
-				stats := memRepo.Stats()
-				assert.Equal(t, 1, stats["revoked_access_tokens"])
-				assert.Equal(t, 1, stats["revoked_refresh_tokens"])
-				assert.Equal(t, 1, stats["revoked_verification_tokens"])
-				assert.Equal(t, 1, stats["rotated_tokens"])
-				assert.Equal(t, 1, stats["tenant_revocations"])
-			case "Redis":
-				redisRepo, ok := repo.(*RedisTokenRepository)
-				require.True(t, ok)
-				stats, err := redisRepo.Stats(ctx)
-				require.NoError(t, err)
-				assert.EqualValues(t, 1, stats["revoked_access_tokens"])
-				assert.EqualValues(t, 1, stats["revoked_refresh_tokens"])
-				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
-				assert.EqualValues(t, 1, stats["rotated_tokens"])
-				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
-				assert.EqualValues(t, 1, stats["tenant_revocations"])
-			case "Postgres":
-				pgRepo, ok := repo.(*PostgresTokenRepository)
-				require.True(t, ok)
-				stats, err := pgRepo.Stats(ctx)
-				require.NoError(t, err)
-				assert.EqualValues(t, 1, stats["revoked_access_tokens"])
-				assert.EqualValues(t, 1, stats["revoked_refresh_tokens"])
-				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
-				assert.EqualValues(t, 1, stats["rotated_tokens"])
-				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
-				assert.EqualValues(t, 1, stats["tenant_revocations"])
-			case "MongoDB":
-				mongoRepo, ok := repo.(*MongoTokenRepository)
-				require.True(t, ok)
-				stats, err := mongoRepo.Stats(ctx)
-				require.NoError(t, err)
-				assert.EqualValues(t, 1, stats["revoked_access_tokens"])
-				assert.EqualValues(t, 1, stats["revoked_refresh_tokens"])
-				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
-				assert.EqualValues(t, 1, stats["rotated_tokens"])
-				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
-				assert.EqualValues(t, 1, stats["tenant_revocations"])
-			}
+			stats, err := repo.Stats(ctx)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, stats["revoked_access_tokens"])
+			assert.EqualValues(t, 1, stats["revoked_refresh_tokens"])
+			assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
+			assert.EqualValues(t, 1, stats["rotated_tokens"])
+			assert.EqualValues(t, 3, stats["total_revoked_tokens"])
+			assert.EqualValues(t, 1, stats["tenant_revocations"])
+		})
+	}
+}
+
+// TestCleanupAll_AllBackends verifies that CleanupAll (part of the TokenRepository
+// interface as of multi-tenant Stage 4) sweeps expired revoked/rotated/tenant-revocation
+// entries for every backend in one call.
+func TestCleanupAll_AllBackends(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			shortTTL := 50 * time.Millisecond
+			require.NoError(t, repo.MarkTokenRevoke(ctx, AccessToken, "cleanupall-access", shortTTL))
+			require.NoError(t, repo.MarkTokenRotated(ctx, "cleanupall-rotated", shortTTL))
+			require.NoError(t, repo.RevokeTenant(ctx, "cleanupall-tenant", shortTTL))
+
+			time.Sleep(200 * time.Millisecond)
+
+			require.NoError(t, repo.CleanupAll(ctx))
+
+			stats, err := repo.Stats(ctx)
+			require.NoError(t, err)
+			assert.EqualValues(t, 0, stats["revoked_access_tokens"])
+			assert.EqualValues(t, 0, stats["rotated_tokens"])
+			assert.EqualValues(t, 0, stats["tenant_revocations"])
+
+			epoch, err := repo.GetTenantRevocationEpoch(ctx, "cleanupall-tenant")
+			require.NoError(t, err)
+			assert.True(t, epoch.IsZero(), "CleanupAll should also sweep expired tenant revocations")
 		})
 	}
 }
@@ -2391,7 +2390,7 @@ func TestRepositoryClose_Idempotent(t *testing.T) {
 			case *PostgresTokenRepository:
 				closeFn = r.Close
 			case *MongoTokenRepository:
-				closeFn = func() error { return r.Close(context.Background()) }
+				closeFn = r.Close
 			default:
 				t.Fatalf("unhandled repository type %T for backend %q", repo, name)
 			}

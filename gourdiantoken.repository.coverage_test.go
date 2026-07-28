@@ -53,20 +53,20 @@ func TestMarkTokenRotatedAtomic_ValidationBranches(t *testing.T) {
 // TestMarkTokenRotatedAtomic_AllBackends only ever exercises the
 // still-valid-entry conflict path.
 //
-// Memory and Redis only: Postgres and MongoDB both implement the atomic
-// mark as an unconditional INSERT/upsert ... ON CONFLICT (token_hash) DO
-// NOTHING — inherited unchanged from the original GORM implementation —
-// which treats any existing row as a conflict regardless of whether it has
-// logically expired, so a same-token re-mark after expiry incorrectly
-// reports false there. Narrow in practice (requires the exact same token
-// string to be rotated again after its rotation record's full TTL, which
-// is RefreshMaxLifetimeExpiry — typically weeks — without cleanup having
-// run yet), but a real cross-backend inconsistency worth fixing separately
-// rather than as a side effect of a coverage pass.
+// Confirms all 4 backends now agree. Originally Memory/Redis only: Postgres and MongoDB
+// both implemented the atomic mark as an unconditional INSERT/upsert ... ON CONFLICT
+// (token_hash) DO NOTHING — inherited unchanged from the original GORM implementation —
+// which treated any existing row as a conflict regardless of whether it had logically
+// expired, so a same-token re-mark after expiry incorrectly reported false there. Fixed in
+// multi-tenant Stage 4: Postgres's InsertRotatedTokenIfNotExists query now does a
+// conditional ON CONFLICT ... DO UPDATE ... WHERE expires_at <= EXCLUDED.created_at instead
+// of DO NOTHING; MongoDB's MarkTokenRotatedAtomic now does a conditional upsert (UpdateOne
+// with upsert=true, filtered on the existing document already being expired) instead of a
+// blind InsertOne.
 func TestMarkTokenRotatedAtomic_ReMarksAfterExpiry(t *testing.T) {
 	factories := getTestRepositoryFactories()
 
-	for _, name := range []string{"Memory", "Redis"} {
+	for _, name := range []string{"Memory", "Redis", "Postgres", "MongoDB"} {
 		factory := factories[name]
 		t.Run(name, func(t *testing.T) {
 			repo, cleanup := factory(t)

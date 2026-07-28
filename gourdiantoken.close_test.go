@@ -75,6 +75,12 @@ func (r *cleanupCountingRepo) CleanupExpiredTenantRevocations(ctx context.Contex
 	return fmt.Errorf("stub cleanup error")
 }
 
+func (r *cleanupCountingRepo) Stats(ctx context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+
+func (r *cleanupCountingRepo) CleanupAll(ctx context.Context) error { return nil }
+
 func (r *cleanupCountingRepo) Count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

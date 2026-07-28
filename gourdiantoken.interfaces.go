@@ -159,6 +159,33 @@ type TokenRepository interface {
 	// Returns:
 	//   - error: If cleanup fails or context is cancelled
 	CleanupExpiredTenantRevocations(ctx context.Context) error
+
+	// Stats returns implementation-defined counters describing the repository's current
+	// storage state (e.g. counts of revoked/rotated/tenant-revocation entries). Key names
+	// and value types are not part of the interface contract — callers that need a stable
+	// shape across backends should not depend on specific keys being present.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - map[string]interface{}: Implementation-defined statistics
+	//   - error: If retrieval fails or context is cancelled
+	Stats(ctx context.Context) (map[string]interface{}, error)
+
+	// CleanupAll runs every CleanupExpired* operation this repository supports
+	// (revoked tokens, rotated tokens, tenant revocations) in one call. Intended for
+	// callers that want a single cleanup entry point rather than invoking each
+	// CleanupExpired* method individually — the background cleanup goroutines started by
+	// JWTMaker do not use this method themselves (they call the individual CleanupExpired*
+	// methods so partial failures are reported independently).
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - error: If any underlying cleanup operation fails
+	CleanupAll(ctx context.Context) error
 }
 
 // GourdianTokenMaker is the main interface for token operations.

@@ -4,6 +4,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"strings"
@@ -17,6 +21,31 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// generateRSAKeyPairPEM generates a fresh in-memory RSA key pair, PEM-encoded as bytes —
+// the same shape GourdianTokenConfig.PrivateKeyPEM/PublicKeyPEM expect. Stands in here for
+// however a real deployment would source these bytes (an env var, a mounted Kubernetes
+// Secret read once at startup, a secret-manager SDK call): gourdiantoken never reads a key
+// file itself, so this demo doesn't either.
+func generateRSAKeyPairPEM(bits int) (privPEM, pubPEM []byte, err error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate RSA key: %w", err)
+	}
+
+	privPEM = pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
+
+	pubBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to marshal RSA public key: %w", err)
+	}
+	pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+
+	return privPEM, pubPEM, nil
+}
 
 // TestResult holds the results of a test operation
 type TestResult struct {
@@ -34,6 +63,14 @@ type RepositoryConfig struct {
 	Description string
 	CreateRepo  func() (gourdiantoken.TokenRepository, error)
 	Cleanup     func() error
+
+	// SigningMethod/Algorithm/PrivateKeyPEM/PublicKeyPEM are optional overrides for
+	// asymmetric-signing demo entries; the zero value on all four means "use the default
+	// Symmetric/HS256 setup", so every pre-existing entry is unaffected.
+	SigningMethod gourdiantoken.SigningMethod
+	Algorithm     string
+	PrivateKeyPEM []byte
+	PublicKeyPEM  []byte
 }
 
 // PerformanceMetrics tracks performance data
@@ -1614,6 +1651,14 @@ func main() {
 	redisPassword := "redis_password"
 	mongoURI := "mongodb://root:mongo_password@localhost:27018/?directConnection=true" // see plan.md's "Mongo verification gap" for why
 
+	// Generated once at startup, exactly like a real service would read PEM bytes from a
+	// mounted Kubernetes Secret, an env var, or a secret-manager SDK call before ever
+	// touching gourdiantoken — see the "Asymmetric (RS256)" entry below.
+	rsaPrivateKeyPEM, rsaPublicKeyPEM, err := generateRSAKeyPairPEM(2048)
+	if err != nil {
+		log.Fatalf("Failed to generate RSA key pair for asymmetric signing demo: %v", err)
+	}
+
 	// Define all repository configurations
 	repositories := []RepositoryConfig{
 		{
@@ -1687,6 +1732,20 @@ func main() {
 			},
 		},
 		{
+			Name:        "Asymmetric (RS256) - In-Memory Repository",
+			Description: "RSA-signed tokens; PrivateKeyPEM/PublicKeyPEM loaded from in-memory bytes",
+			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
+				return gourdiantoken.NewMemoryTokenRepository(5 * time.Minute), nil
+			},
+			Cleanup: func() error {
+				return nil
+			},
+			SigningMethod: gourdiantoken.Asymmetric,
+			Algorithm:     "RS256",
+			PrivateKeyPEM: rsaPrivateKeyPEM,
+			PublicKeyPEM:  rsaPublicKeyPEM,
+		},
+		{
 			Name:        "No Repository (Stateless Mode)",
 			Description: "No revocation/rotation - Pure JWT validation only",
 			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
@@ -1711,27 +1770,44 @@ func main() {
 			continue
 		}
 
+		// Symmetric/HS256 by default; asymmetric-signing demo entries (see
+		// "Asymmetric (RS256) - In-Memory Repository" above) override via RepositoryConfig.
+		signingMethod := repoConfig.SigningMethod
+		if signingMethod == "" {
+			signingMethod = gourdiantoken.Symmetric
+		}
+		algorithm := repoConfig.Algorithm
+		if algorithm == "" {
+			algorithm = "HS256"
+		}
+
 		// Create token maker configuration
 		config := gourdiantoken.GourdianTokenConfig{
-			RevocationEnabled:                 tokenRepo != nil,
-			RotationEnabled:                   tokenRepo != nil,
-			SigningMethod:                     gourdiantoken.Symmetric,
-			Algorithm:                         "HS256",
-			SymmetricKey:                      "test-symmetric-key-32-bytes-long!!",
-			Issuer:                            "test.gourdian.com",
-			Audience:                          []string{"api.test.com", "web.test.com"},
-			AllowedAlgorithms:                 []string{"HS256", "HS384", "HS512"},
-			RequiredClaims:                    []string{"iss", "aud", "nbf", "mle"},
-			AccessExpiryDuration:              15 * time.Minute,
-			AccessMaxLifetimeExpiry:           24 * time.Hour,
-			RefreshExpiryDuration:             7 * 24 * time.Hour,
-			RefreshMaxLifetimeExpiry:          30 * 24 * time.Hour,
-			RefreshReuseInterval:              5 * time.Minute,
-			CleanupInterval:                   5 * time.Minute,
+			RevocationEnabled:        tokenRepo != nil,
+			RotationEnabled:          tokenRepo != nil,
+			SigningMethod:            signingMethod,
+			Algorithm:                algorithm,
+			Issuer:                   "test.gourdian.com",
+			Audience:                 []string{"api.test.com", "web.test.com"},
+			AllowedAlgorithms:        []string{"HS256", "HS384", "HS512", "RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "EdDSA"},
+			RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
+			AccessExpiryDuration:     15 * time.Minute,
+			AccessMaxLifetimeExpiry:  24 * time.Hour,
+			RefreshExpiryDuration:    7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+			RefreshReuseInterval:     5 * time.Minute,
+			CleanupInterval:          5 * time.Minute,
+
 			VerificationTokensEnabled:         true,
 			VerificationAllowedUseCases:       []string{"2fa-pending", "password-reset"},
 			VerificationDefaultExpiryDuration: 5 * time.Minute,
 			VerificationMaxExpiryDuration:     1 * time.Hour,
+		}
+		if signingMethod == gourdiantoken.Symmetric {
+			config.SymmetricKey = "test-symmetric-key-32-bytes-long!!"
+		} else {
+			config.PrivateKeyPEM = repoConfig.PrivateKeyPEM
+			config.PublicKeyPEM = repoConfig.PublicKeyPEM
 		}
 
 		// Create token maker

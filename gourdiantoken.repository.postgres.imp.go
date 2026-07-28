@@ -253,9 +253,13 @@ func (r *PostgresTokenRepository) MarkTokenRotated(ctx context.Context, token st
 }
 
 // MarkTokenRotatedAtomic marks a token as rotated atomically, returning
-// whether it was newly rotated. Uses INSERT ... ON CONFLICT DO NOTHING so
-// only the first caller for a given token hash sees rotated=true — essential
-// for preventing double-spending in rotation flows.
+// whether it was newly rotated. Uses INSERT ... ON CONFLICT (token_hash) DO
+// UPDATE ... WHERE expires_at <= EXCLUDED.created_at, a conditional upsert:
+// only the first caller for a given, still-live token hash sees
+// rotated=true — essential for preventing double-spending in rotation
+// flows — but a conflicting row whose own rotation TTL already fully
+// elapsed is treated as stale and gets re-marked (rotated=true again)
+// rather than reported as a live conflict.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout
@@ -263,7 +267,7 @@ func (r *PostgresTokenRepository) MarkTokenRotated(ctx context.Context, token st
 //   - ttl: Time-to-live duration for the rotation record
 //
 // Returns:
-//   - bool: True if the token was newly rotated, false if already rotated
+//   - bool: True if the token was newly rotated, false if already rotated and not yet expired
 //   - error: If token is empty, TTL is invalid, or the database operation fails
 func (r *PostgresTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token string, ttl time.Duration) (bool, error) {
 	if token == "" {

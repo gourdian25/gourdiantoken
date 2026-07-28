@@ -22,6 +22,13 @@ type Querier interface {
 	DeleteExpiredTenantRevocations(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error)
 	GetRotatedTokenExpiresAt(ctx context.Context, tokenHash string) (pgtype.Timestamptz, error)
 	GetTenantRevocationEpoch(ctx context.Context, arg GetTenantRevocationEpochParams) (pgtype.Timestamptz, error)
+	// Conditional upsert rather than a plain ON CONFLICT DO NOTHING: a conflicting row whose
+	// expires_at has already passed is stale (its previous rotation TTL fully elapsed without
+	// cleanup running yet) and should be treated as a fresh rotation, not a live conflict. The
+	// WHERE clause makes Postgres report 0 affected rows exactly when the existing row is still
+	// live (expires_at > EXCLUDED.created_at, i.e. "now"), which is the same "conflict, do
+	// nothing" outcome as before for that case — the Go-side `rowsAffected > 0` check needs no
+	// change.
 	InsertRotatedTokenIfNotExists(ctx context.Context, arg InsertRotatedTokenIfNotExistsParams) (int64, error)
 	// File: internal/postgresdb/queries/tokens.sql
 	UpsertRevokedToken(ctx context.Context, arg UpsertRevokedTokenParams) error

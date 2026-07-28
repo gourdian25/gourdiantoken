@@ -162,7 +162,9 @@ func (q *Queries) GetTenantRevocationEpoch(ctx context.Context, arg GetTenantRev
 const insertRotatedTokenIfNotExists = `-- name: InsertRotatedTokenIfNotExists :execrows
 INSERT INTO gourdiantoken_rotated_tokens (token_hash, expires_at, created_at)
 VALUES ($1, $2, $3)
-ON CONFLICT (token_hash) DO NOTHING
+ON CONFLICT (token_hash) DO UPDATE
+    SET expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at
+    WHERE gourdiantoken_rotated_tokens.expires_at <= EXCLUDED.created_at
 `
 
 type InsertRotatedTokenIfNotExistsParams struct {
@@ -171,6 +173,13 @@ type InsertRotatedTokenIfNotExistsParams struct {
 	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
+// Conditional upsert rather than a plain ON CONFLICT DO NOTHING: a conflicting row whose
+// expires_at has already passed is stale (its previous rotation TTL fully elapsed without
+// cleanup running yet) and should be treated as a fresh rotation, not a live conflict. The
+// WHERE clause makes Postgres report 0 affected rows exactly when the existing row is still
+// live (expires_at > EXCLUDED.created_at, i.e. "now"), which is the same "conflict, do
+// nothing" outcome as before for that case — the Go-side `rowsAffected > 0` check needs no
+// change.
 func (q *Queries) InsertRotatedTokenIfNotExists(ctx context.Context, arg InsertRotatedTokenIfNotExistsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertRotatedTokenIfNotExists, arg.TokenHash, arg.ExpiresAt, arg.CreatedAt)
 	if err != nil {

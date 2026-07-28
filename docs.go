@@ -119,8 +119,9 @@
 //   - NewGourdianTokenMakerWithMemory(ctx, config, opts...)
 //   - NewGourdianTokenMakerWithRedis(ctx, config, *redis.Client, opts...)
 //   - NewGourdianTokenMakerWithPostgres(ctx, config, *pgxpool.Pool, opts...)
-//   - NewGourdianTokenMakerWithMongo(ctx, config, *mongo.Database,
-//     transactionsEnabled bool, opts...)
+//   - NewGourdianTokenMakerWithMongo(ctx, config, *mongo.Database, opts...):
+//     transactions always enabled; use NewMongoTokenRepository(db, false) plus
+//     NewGourdianTokenMaker directly for a standalone dev MongoDB without one
 //
 // DefaultGourdianTokenMaker is a further shorthand over
 // NewGourdianTokenMakerWithMemory for the simplest possible setup.

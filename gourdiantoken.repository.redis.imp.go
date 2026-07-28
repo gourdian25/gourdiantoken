@@ -871,6 +871,33 @@ func (r *RedisTokenRepository) Stats(ctx context.Context) (map[string]interface{
 	}, nil
 }
 
+// CleanupAll runs every CleanupExpired* operation (revoked access/refresh/verification
+// tokens, rotated tokens, tenant revocations) in one call.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//
+// Returns:
+//   - error: If any underlying cleanup operation fails, with detailed context
+func (r *RedisTokenRepository) CleanupAll(ctx context.Context) error {
+	if err := r.CleanupExpiredRevokedTokens(ctx, AccessToken); err != nil {
+		return fmt.Errorf("failed to cleanup access tokens: %w", err)
+	}
+	if err := r.CleanupExpiredRevokedTokens(ctx, RefreshToken); err != nil {
+		return fmt.Errorf("failed to cleanup refresh tokens: %w", err)
+	}
+	if err := r.CleanupExpiredRevokedTokens(ctx, VerificationToken); err != nil {
+		return fmt.Errorf("failed to cleanup verification tokens: %w", err)
+	}
+	if err := r.CleanupExpiredRotatedTokens(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup rotated tokens: %w", err)
+	}
+	if err := r.CleanupExpiredTenantRevocations(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup tenant revocations: %w", err)
+	}
+	return nil
+}
+
 // Close performs cleanup operations and closes the Redis connection.
 // Implements graceful shutdown pattern for resource cleanup.
 //

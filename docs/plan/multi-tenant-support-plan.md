@@ -64,7 +64,7 @@ described below.
 | Stage 1 | Tenant claim foundation | ✅ Done |
 | Stage 2 | Interface consolidation | ✅ Done |
 | Stage 3 | Tenant-scoped bulk revocation | ✅ Done |
-| Stage 4 | Repository backend standardization | Ready to resume — see note below |
+| Stage 4 | Repository backend standardization | ✅ Done |
 | Stage 5 | Docs / CHANGELOG / version bump / example.go | Not started |
 | Stage 6 | Full validation pass | Not started |
 
@@ -581,6 +581,141 @@ call, not a hard requirement beyond the `CleanupAll` coupling.
 **Verification:** `make race`, `make coverage-check`, full run against all 4
 live backends; specifically re-run `TestMarkTokenRotatedAtomic_ReMarksAfterExpiry`
 and confirm it now passes for Postgres/MongoDB too, not just Memory/Redis.
+
+### Stage 4 completion notes
+
+Implemented as scoped, with one pre-existing item found already done and one
+scope narrowing on the coverage side:
+
+- **Postgres's `CleanupAll` already called `CleanupExpiredTenantRevocations`**
+  — this specific item was already satisfied, apparently picked up as a
+  natural side effect of Stage 3's own work on tenant revocation, not
+  something separately implemented here. `Stats` similarly already included
+  `tenant_revocations`. Confirmed via direct inspection before making any
+  changes, so no duplicate work landed.
+- `gourdiantoken.interfaces.go`: `TokenRepository` gained
+  `Stats(ctx) (map[string]interface{}, error)` and `CleanupAll(ctx) error`,
+  exactly as scoped; `Close` deliberately not added (decision #7).
+- `gourdiantoken.repository.inmemory.imp.go`: `Stats() map[string]int` →
+  `Stats(ctx) (map[string]interface{}, error)`, normalized to `int64` and
+  matching the other three backends' exact key names
+  (`total_revoked_tokens`/`revoked_access_tokens`/etc., not just the subset
+  the old signature had). New `CleanupAll`, with a doc comment explaining
+  why its own error-wrap branches are structurally unreachable (each
+  `CleanupExpired*` call it makes uses a fixed, valid literal argument;
+  `MemoryTokenRepository`'s own implementations only ever fail on an
+  invalid `TokenType`) — same "documented inline, not chased with a
+  synthetic test" precedent as `newTokenID`'s crypto/rand failure path.
+- `gourdiantoken.repository.redis.imp.go`: new `CleanupAll`, same shape as
+  Postgres's existing one.
+- `gourdiantoken.repository.mongo.imp.go`: `Close(ctx context.Context) error`
+  → `Close() error` (confirmed a literal no-op internally, so dropping the
+  parameter was free — no call site outside the repository's own doc
+  comments passed a context here, since tests clean up Mongo via the driver
+  client's own `Disconnect(ctx)`, not this method). New `CleanupAll`.
+  **`MarkTokenRotatedAtomic` bug fixed**: replaced the blind `InsertOne`
+  with a conditional upsert (`UpdateOne` with `upsert=true`, filtered on
+  `token_hash` equal *and* `expires_at <= now`) — an existing not-yet-expired
+  document doesn't match the filter, so the upsert's implicit insert
+  collides with the unique index on `token_hash` (caught via the existing
+  `mongo.IsDuplicateKeyError` check), while an expired document matches and
+  gets updated in place. No change to the duplicate-key-detection-at-the-
+  transaction-boundary pattern the existing concurrency regression test
+  (`TestMongoRepository_MarkTokenRotatedAtomic_ConcurrentDuplicate_WithTransactions`)
+  depends on — re-ran it directly against the new implementation, still
+  green.
+- `gourdiantoken.repository.postgres.imp.go` / `internal/postgresdb/queries/tokens.sql`:
+  **`MarkTokenRotatedAtomic` bug fixed** exactly as scoped —
+  `InsertRotatedTokenIfNotExists` changed from unconditional
+  `ON CONFLICT (token_hash) DO NOTHING` to
+  `ON CONFLICT (token_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at, created_at = EXCLUDED.created_at WHERE gourdiantoken_rotated_tokens.expires_at <= EXCLUDED.created_at`,
+  regenerated via `sqlc generate`. Postgres reports 0 affected rows when the
+  `WHERE` is false (existing row still live), giving the same "conflict, not
+  expired → false" outcome as before for that case; the existing Go-side
+  `rowsAffected > 0` check needed no change, confirming the plan's own
+  prediction.
+- `gourdiantoken.factories.go`: `NewGourdianTokenMakerWithMongo` dropped
+  `transactionsEnabled bool`, now hardcoding `true` internally (decision #8)
+  — matches the `(ctx, config, handle, opts...)` shape shared by the other
+  three backend factories.
+- **Test-file impact, broader than originally scoped** (the plan anticipated
+  `concurrency_test.go` and a Mongo-arg drop in `factories_test.go`/
+  `example/example.go` — `example/example.go` turned out to need no change,
+  since its Mongo repository construction goes through
+  `NewMongoTokenRepository(db, false)` directly, not the factory):
+  - `concurrency_test.go`: `memRepo.Stats()` → `memRepo.Stats(ctx)` with
+    error handling at both call sites (~lines 888/894 as predicted).
+  - `gourdiantoken.repository_test.go`: `TestMemoryRepository_Stats`
+    updated for the new signature.
+    `TestRepositoryStats_AllBackends`'s per-backend `switch`/type-assertion
+    collapsed into one shared assertion block calling `repo.Stats(ctx)`
+    directly on the `TokenRepository` interface value — no longer needs a
+    type assertion now that `Stats` is part of the interface. New
+    `TestCleanupAll_AllBackends` (not explicitly called for in the plan, but
+    a natural companion test now that `CleanupAll` is also on the
+    interface): seeds one short-TTL entry of each kind, sleeps past
+    expiry, calls `CleanupAll` once, and asserts both `Stats` and
+    `GetTenantRevocationEpoch` reflect the sweep, across all 4 backends.
+    `TestPostgresRepository_CleanupAll`/`_RotatedCleanupFails`/
+    `_TenantRevocationCleanupFails` (pre-existing, Postgres-specific) were
+    left as-is rather than merged into the new generalized test, since they
+    exercise fault-injection paths (`DROP TABLE`) specific to Postgres.
+    The `Close()` idempotency test's Mongo case simplified from
+    `func() error { return r.Close(context.Background()) }` to plain
+    `r.Close` now that all four backends share the same no-argument shape.
+  - `gourdiantoken.factories_test.go`: all 5 `NewGourdianTokenMakerWithMongo`
+    call sites dropped their trailing bool argument.
+    `TestNewGourdianTokenMakerWithMongo_CreatesTransactionEnabledRepository`
+    repurposed from "confirms passing `true` enables transactions" to
+    "confirms the factory always produces a transactions-enabled repository"
+    (the assertion is unchanged; only the doc comment and the removed
+    argument reflect that it's no longer caller-controlled).
+  - `gourdiantoken.repository.mongo_test.go`: 1 call site fixed; added a
+    `CleanupAll` assertion to the existing
+    `TestMongoRepository_OperationsAfterDisconnected` fault-injection test.
+  - `gourdiantoken.repository.redis_test.go`: added a `CleanupAll` assertion
+    to the existing `TestRedisRepository_OperationsAfterClientClosed`
+    fault-injection test.
+  - `gourdiantoken.repository.coverage_test.go`:
+    `TestMarkTokenRotatedAtomic_ReMarksAfterExpiry` generalized from
+    `["Memory", "Redis"]` to all 4 backends, doc comment flipped from
+    "documents a known inconsistency" to "confirms all 4 backends now
+    agree", per the plan.
+  - `gourdiantoken.maker_test.go`/`gourdiantoken.close_test.go`: the two
+    hand-written `TokenRepository` test-double stubs (`erroringRepo`,
+    `cleanupCountingRepo`) needed trivial `Stats`/`CleanupAll` stub methods
+    to keep satisfying the interface — not called out explicitly in the
+    plan's test-file-impact list, but a mechanical consequence of adding
+    two new interface methods.
+- **Coverage note**: overall repo coverage moved from the 95.8-95.9% range
+  carried over from key-material-config Stage 1 down to **95.1%** — still
+  well above the 95% gate, but worth recording why it isn't higher. The new
+  `CleanupAll` methods on Memory/Redis/Mongo each wrap 5 sequential
+  `CleanupExpired*` calls in `if err != nil` branches; Memory's are
+  genuinely unreachable (documented inline, see above). Redis's and Mongo's
+  *are* reachable in principle (a real network/database error), and one
+  fault-injection assertion was added to each backend's existing
+  closed-client/disconnected-client test to cover the first (access-token)
+  branch — but reaching the *later* branches (refresh/verification/rotated/
+  tenant) in isolation would require making only that one specific
+  downstream call fail while every earlier call in the same sequence
+  succeeds, which isn't achievable via "close the client" (fails
+  everything uniformly) the way Postgres's "drop one specific table" trick
+  works, since Redis/Mongo's revoked-token storage is one shared
+  keyspace/collection across all three token types rather than one table
+  per type. Postgres's own `CleanupAll` was already well-covered via its
+  pre-existing `TestPostgresRepository_CleanupAll_RotatedCleanupFails`/
+  `_TenantRevocationCleanupFails` tests plus the pool-closed test's first
+  branch, and needed no new tests.
+- Full verification green: `go build ./...`, `go vet ./...`, `gofmt -l .`
+  (clean), `golangci-lint run` (0 issues), `staticcheck ./...` (clean),
+  `TestMarkTokenRotatedAtomic_ReMarksAfterExpiry` re-run directly and
+  confirmed passing for all 4 backends including Postgres/MongoDB (was
+  Memory/Redis-only before this stage), full suite against all 4 live
+  backends, `make race`, `make coverage-check` (95.1%, meets the 95% gate),
+  and `go run ./example` end-to-end (46/46 scenarios × 6 suites — the 4
+  backends, stateless mode, and the asymmetric-signing (RS256) demo suite
+  added earlier in this session — 276/276 passed).
 
 ## Stage 5 — Docs, CHANGELOG, version bump, example.go
 
