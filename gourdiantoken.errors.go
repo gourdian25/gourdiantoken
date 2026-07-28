@@ -65,4 +65,14 @@ var (
 	// outright rather than silently ignored, so a caller relying on tenant isolation never
 	// mistakes a misconfigured maker for one that's actually enforcing it.
 	ErrTenantIDNotAllowed = errors.New("tenant ID must be empty when MultiTenantEnabled is false")
+
+	// ErrMultiTenantDisabled indicates RevokeTenant was called while
+	// GourdianTokenConfig.MultiTenantEnabled is false.
+	ErrMultiTenantDisabled = errors.New("multi-tenant support is not enabled")
+
+	// ErrTenantRevoked indicates the token's tenant was bulk-revoked via RevokeTenant at
+	// or after the token's "iat", i.e. the token was issued for a tenant that has since
+	// been revoked (or was issued before a later revocation), and is therefore rejected
+	// regardless of its own individual revocation/expiry status.
+	ErrTenantRevoked = errors.New("tenant has been revoked")
 )

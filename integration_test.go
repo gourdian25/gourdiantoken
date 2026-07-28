@@ -312,6 +312,85 @@ func TestRevocationFlow(t *testing.T) {
 	})
 }
 
+// TestTenantOffboardingFlow is a realistic tenant-offboarding scenario: a tenant with
+// several active users/sessions (both access and refresh tokens) gets bulk-revoked via
+// RevokeTenant, e.g. in response to a subscription cancellation or a suspected tenant-wide
+// credential compromise. Every one of that tenant's pre-existing tokens must stop working,
+// across every user and session, while an unrelated tenant sharing the same maker/repository
+// is entirely unaffected — RevokeTenant must not be a blunt instrument that takes down more
+// than the one tenant being offboarded.
+func TestTenantOffboardingFlow(t *testing.T) {
+	config := DefaultTestConfig()
+	config.MultiTenantEnabled = true
+
+	repo := NewMemoryTokenRepository(1 * time.Minute)
+	maker := setupTestMakerWithConfig(t, config, repo)
+	ctx := context.Background()
+
+	const offboardedTenant = "offboarded-corp"
+	const activeTenant = "still-active-corp"
+
+	type userSession struct {
+		access  *AccessTokenResponse
+		refresh *RefreshTokenResponse
+	}
+
+	// Three users, each with their own session, for the tenant being offboarded.
+	offboardedSessions := make([]userSession, 3)
+	for i := range offboardedSessions {
+		userID := uuid.NewString()
+		sessionID := uuid.NewString()
+
+		access, err := maker.CreateAccessToken(ctx, userID, "user", []string{"member"}, sessionID, offboardedTenant)
+		require.NoError(t, err)
+		refresh, err := maker.CreateRefreshToken(ctx, userID, "user", sessionID, offboardedTenant)
+		require.NoError(t, err)
+
+		offboardedSessions[i] = userSession{access: access, refresh: refresh}
+	}
+
+	// One user for a different tenant, sharing the same maker/repository.
+	activeUserID := uuid.NewString()
+	activeSessionID := uuid.NewString()
+	activeAccess, err := maker.CreateAccessToken(ctx, activeUserID, "user", []string{"member"}, activeSessionID, activeTenant)
+	require.NoError(t, err)
+	activeRefresh, err := maker.CreateRefreshToken(ctx, activeUserID, "user", activeSessionID, activeTenant)
+	require.NoError(t, err)
+
+	// Sanity: everyone works before offboarding.
+	for _, s := range offboardedSessions {
+		_, err := maker.VerifyAccessToken(ctx, s.access.Token)
+		require.NoError(t, err)
+		_, err = maker.VerifyRefreshToken(ctx, s.refresh.Token)
+		require.NoError(t, err)
+	}
+	_, err = maker.VerifyAccessToken(ctx, activeAccess.Token)
+	require.NoError(t, err)
+
+	// Offboard the tenant: this single call must invalidate every one of its sessions,
+	// including access tokens the repository has never individually seen.
+	require.NoError(t, maker.RevokeTenant(ctx, offboardedTenant))
+
+	// Every offboarded session's access and refresh tokens are now rejected, and the
+	// refresh tokens can no longer be rotated to mint new access tokens either.
+	for i, s := range offboardedSessions {
+		_, err := maker.VerifyAccessToken(ctx, s.access.Token)
+		assert.ErrorIsf(t, err, ErrTenantRevoked, "session %d access token should be tenant-revoked", i)
+
+		_, err = maker.VerifyRefreshToken(ctx, s.refresh.Token)
+		assert.ErrorIsf(t, err, ErrTenantRevoked, "session %d refresh token should be tenant-revoked", i)
+
+		_, err = maker.RotateRefreshToken(ctx, s.refresh.Token)
+		assert.ErrorIsf(t, err, ErrTenantRevoked, "session %d refresh token should not be rotatable", i)
+	}
+
+	// The unrelated tenant's session is completely unaffected.
+	_, err = maker.VerifyAccessToken(ctx, activeAccess.Token)
+	assert.NoError(t, err, "a different tenant's token must survive an unrelated tenant's offboarding")
+	_, err = maker.VerifyRefreshToken(ctx, activeRefresh.Token)
+	assert.NoError(t, err, "a different tenant's refresh token must survive an unrelated tenant's offboarding")
+}
+
 // TestRepository_AllImplementations tests all repository implementations
 func TestRepository_AllImplementations(t *testing.T) {
 	testCases := []struct {

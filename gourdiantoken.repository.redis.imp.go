@@ -5,6 +5,7 @@ package gourdiantoken
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ const (
 	revokedRefreshPrefix      = "gourdiantoken:revoked:refresh:"
 	revokedVerificationPrefix = "gourdiantoken:revoked:verification:"
 	rotatedPrefix             = "gourdiantoken:rotated:"
+	tenantRevokedPrefix       = "gourdiantoken:tenant_revoked:"
 
 	// Minimum TTL to avoid Redis timing issues
 	// Redis has millisecond precision but very short TTLs can cause race conditions
@@ -618,6 +620,73 @@ func (r *RedisTokenRepository) CleanupExpiredRotatedTokens(ctx context.Context) 
 	return r.cleanupExpiredKeys(ctx, rotatedPrefix)
 }
 
+// RevokeTenant records a bulk revocation epoch for tenantID in Redis.
+// Stores the revocation Unix timestamp (not just a marker) as the key's value, since
+// GetTenantRevocationEpoch needs the actual moment of revocation to compare against a
+// token's "iat", unlike the simple "1" marker used for individual token revocation/rotation.
+//
+// Redis Command:
+//
+//	SET gourdiantoken:tenant_revoked:tenant_id "<unix_seconds>" EX ttl
+func (r *RedisTokenRepository) RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error {
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID cannot be empty")
+	}
+
+	if ttl <= 0 {
+		return fmt.Errorf("ttl must be positive")
+	}
+
+	if ttl < minRedisTTL {
+		ttl = minRedisTTL
+	}
+
+	key := tenantRevokedPrefix + tenantID
+	value := strconv.FormatInt(time.Now().Unix(), 10)
+
+	pipe := r.client.Pipeline()
+	pipe.Set(ctx, key, value, ttl)
+	_, err := pipe.Exec(ctx)
+
+	return err
+}
+
+// GetTenantRevocationEpoch returns the moment tenantID was last revoked, or the zero
+// time.Time if the tenant has no active revocation record.
+//
+// Redis Command:
+//
+//	GET gourdiantoken:tenant_revoked:tenant_id
+func (r *RedisTokenRepository) GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error) {
+	if tenantID == "" {
+		return time.Time{}, fmt.Errorf("tenant ID cannot be empty")
+	}
+
+	key := tenantRevokedPrefix + tenantID
+
+	val, err := r.client.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("redis error: %w", err)
+	}
+
+	unixSeconds, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid tenant revocation epoch value: %w", err)
+	}
+
+	return time.Unix(unixSeconds, 0), nil
+}
+
+// CleanupExpiredTenantRevocations removes expired tenant revocation records from Redis.
+// Note: Redis automatically removes expired keys, but this provides manual control,
+// matching CleanupExpiredRevokedTokens/CleanupExpiredRotatedTokens.
+func (r *RedisTokenRepository) CleanupExpiredTenantRevocations(ctx context.Context) error {
+	return r.cleanupExpiredKeys(ctx, tenantRevokedPrefix)
+}
+
 // cleanupExpiredKeys is a helper function that removes expired keys with a given prefix.
 // Implements production-safe key scanning and deletion.
 //
@@ -787,12 +856,18 @@ func (r *RedisTokenRepository) Stats(ctx context.Context) (map[string]interface{
 		return nil, fmt.Errorf("failed to count rotated tokens: %w", err)
 	}
 
+	tenantRevocationCount, err := countKeys(tenantRevokedPrefix + "*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to count tenant revocations: %w", err)
+	}
+
 	return map[string]interface{}{
 		"total_revoked_tokens":        accessCount + refreshCount + verificationCount,
 		"revoked_access_tokens":       accessCount,
 		"revoked_refresh_tokens":      refreshCount,
 		"revoked_verification_tokens": verificationCount,
 		"rotated_tokens":              rotatedCount,
+		"tenant_revocations":          tenantRevocationCount,
 	}, nil
 }
 

@@ -129,6 +129,33 @@ func TestErrTenantIDNotAllowed_ErrorsIs(t *testing.T) {
 	assert.ErrorIs(t, err, ErrTenantIDNotAllowed)
 }
 
+func TestErrMultiTenantDisabled_ErrorsIs(t *testing.T) {
+	// MultiTenantEnabled defaults to false.
+	maker := setupTestMakerWithConfig(t, DefaultTestConfig(), NewMemoryTokenRepository(1*time.Minute))
+
+	err := maker.RevokeTenant(context.Background(), "acme-corp")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrMultiTenantDisabled)
+}
+
+func TestErrTenantRevoked_ErrorsIs(t *testing.T) {
+	config := DefaultTestConfig()
+	config.MultiTenantEnabled = true
+
+	maker := setupTestMakerWithConfig(t, config, NewMemoryTokenRepository(1*time.Minute))
+	ctx := context.Background()
+
+	tenantID := "acme-corp"
+	token, err := maker.CreateAccessToken(ctx, uuid.NewString(), "user", []string{"admin"}, uuid.NewString(), tenantID)
+	require.NoError(t, err)
+
+	require.NoError(t, maker.RevokeTenant(ctx, tenantID))
+
+	_, err = maker.VerifyAccessToken(ctx, token.Token)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTenantRevoked)
+}
+
 func TestErrTokenMaxLifetimeExceeded_ErrorsIs(t *testing.T) {
 	maker := setupTestMakerWithConfig(t, DefaultTestConfig(), nil)
 

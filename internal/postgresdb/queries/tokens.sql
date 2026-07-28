@@ -40,3 +40,18 @@ SELECT COUNT(*) FROM gourdiantoken_revoked_tokens WHERE token_type = $1;
 
 -- name: CountRotatedTokens :one
 SELECT COUNT(*) FROM gourdiantoken_rotated_tokens;
+
+-- name: UpsertTenantRevocation :exec
+INSERT INTO gourdiantoken_tenant_revocations (tenant_id, revoked_at, expires_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (tenant_id) DO UPDATE SET revoked_at = EXCLUDED.revoked_at, expires_at = EXCLUDED.expires_at;
+
+-- name: GetTenantRevocationEpoch :one
+SELECT revoked_at FROM gourdiantoken_tenant_revocations
+WHERE tenant_id = $1 AND expires_at > $2;
+
+-- name: DeleteExpiredTenantRevocations :execrows
+DELETE FROM gourdiantoken_tenant_revocations WHERE expires_at <= $1;
+
+-- name: CountTenantRevocations :one
+SELECT COUNT(*) FROM gourdiantoken_tenant_revocations;

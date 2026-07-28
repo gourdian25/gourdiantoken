@@ -117,6 +117,48 @@ type TokenRepository interface {
 	// Returns:
 	//   - error: If cleanup fails or context is cancelled
 	CleanupExpiredRotatedTokens(ctx context.Context) error
+
+	// RevokeTenant records a revocation epoch for tenantID: any access/refresh token
+	// issued at-or-before this moment is considered dead, without enumerating individual
+	// tokens (see GourdianTokenMaker.RevokeTenant's doc comment for the full rationale).
+	// Calling this again for the same tenantID overwrites the previous epoch with a newer
+	// one — the revocation cutoff always moves forward, never backward.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - tenantID: The tenant to revoke (must not be empty)
+	//   - ttl: Time-to-live for the revocation record — implementations should not need
+	//     it to outlive the longest-lived pre-epoch token that could still be checked
+	//     against it (see max(AccessExpiryDuration, RefreshExpiryDuration) in
+	//     JWTMaker.RevokeTenant)
+	//
+	// Returns:
+	//   - error: If tenantID is empty, ttl is invalid, or the operation fails
+	RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error
+
+	// GetTenantRevocationEpoch returns the moment tenantID was last revoked via
+	// RevokeTenant, or the zero time.Time if the tenant has no active revocation record
+	// (never revoked, or the record has expired).
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - tenantID: The tenant to look up (must not be empty)
+	//
+	// Returns:
+	//   - time.Time: The revocation epoch, or the zero value if none/expired
+	//   - error: If tenantID is empty or the operation fails
+	GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error)
+
+	// CleanupExpiredTenantRevocations removes expired tenant revocation records from
+	// storage. Should be called periodically by background cleanup goroutines, alongside
+	// CleanupExpiredRevokedTokens/CleanupExpiredRotatedTokens.
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//
+	// Returns:
+	//   - error: If cleanup fails or context is cancelled
+	CleanupExpiredTenantRevocations(ctx context.Context) error
 }
 
 // GourdianTokenMaker is the main interface for token operations.
@@ -313,6 +355,31 @@ type GourdianTokenMaker interface {
 	//	}
 	//	// Return newToken to client
 	RotateRefreshToken(ctx context.Context, oldToken string) (*RefreshTokenResponse, error)
+
+	// RevokeTenant bulk-revokes every access/refresh token for tenantID by recording a
+	// revocation epoch, rather than enumerating and marking individual tokens: any token
+	// whose "iat" is at-or-before this moment is rejected by VerifyAccessToken/
+	// VerifyRefreshToken from this point on, including ones the repository has never
+	// individually seen (this also covers access tokens, which this package never persists
+	// a record of unless separately revoked via RevokeAccessToken). Requires
+	// GourdianTokenConfig.MultiTenantEnabled, RevocationEnabled, and a TokenRepository.
+	//
+	// Use Cases:
+	//   - Tenant offboarding or suspension
+	//   - Responding to a suspected tenant-wide credential compromise
+	//
+	// Parameters:
+	//   - ctx: Context for cancellation and timeout
+	//   - tenantID: The tenant to revoke (must not be empty)
+	//
+	// Returns:
+	//   - error: If multi-tenancy or revocation is disabled, tenantID is empty, or the
+	//     operation fails
+	//
+	// Example:
+	//
+	//	err := maker.RevokeTenant(ctx, "acme-corp")
+	RevokeTenant(ctx context.Context, tenantID string) error
 
 	// Close stops any background cleanup goroutines started by the maker.
 	// Safe to call multiple times.

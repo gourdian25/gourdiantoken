@@ -63,7 +63,7 @@ described below.
 |---|---|---|
 | Stage 1 | Tenant claim foundation | ✅ Done |
 | Stage 2 | Interface consolidation | ✅ Done |
-| Stage 3 | Tenant-scoped bulk revocation | Not started |
+| Stage 3 | Tenant-scoped bulk revocation | ✅ Done |
 | Stage 4 | Repository backend standardization | Not started |
 | Stage 5 | Docs / CHANGELOG / version bump / example.go | Not started |
 | Stage 6 | Full validation pass | Not started |
@@ -429,6 +429,76 @@ cases for the 95% coverage gate.
 **Verification:** `make race`, `make coverage-check`, plus a manual run
 against all 4 live backends (`make docker-up` first) since this touches
 schema/index/collection creation on 3 of them.
+
+### Stage 3 completion notes
+
+Implemented exactly as designed above — `RevokeTenant`/`GetTenantRevocationEpoch`/
+`CleanupExpiredTenantRevocations` on `TokenRepository` and `RevokeTenant` on
+`GourdianTokenMaker`, `ErrMultiTenantDisabled`/`ErrTenantRevoked`, the epoch check
+in `parseAndValidateToken` right after the Stage 1 tid-required block, the
+`max(AccessExpiryDuration, RefreshExpiryDuration)` TTL, and per-backend storage
+(unhashed tenant-ID key, revocation timestamp as the value — not a bare marker,
+since the epoch itself is the payload). A few things worth flagging for whoever
+touches this next:
+
+- **A design detail not spelled out above turned out to matter**: since a JWT's
+  `iat` is second-granular (`toMapClaims` calls `.Unix()`) but the stored epoch
+  can carry sub-second precision on Memory/Postgres/MongoDB (Redis stores it as a
+  plain Unix-second string, so it's the one backend that's naturally
+  second-granular too), a token minted within the same wall-clock second as the
+  `RevokeTenant` call can land on either side of the `iat <= epoch` boundary
+  somewhat arbitrarily. This isn't a bug — the whole system is already
+  second-granular via `iat` — but every test that needed to demonstrate "a token
+  issued after the epoch succeeds" had to sleep past the next whole second
+  first (`TestRevokeTenant_EndToEndEpoch`, `TestRevokeTenant_OverwritesPreviousEpoch`).
+  Document this ~1-second fuzziness if it ever reaches user-facing docs
+  (Stage 5's docs.go/README pass).
+- **Test-infra gap, not a code bug**: `token.test.helper_test.go`'s Postgres/
+  MongoDB factories truncate/drop `gourdiantoken_revoked_tokens`/
+  `gourdiantoken_rotated_tokens` between tests but, before this stage, had no
+  equivalent for the new `gourdiantoken_tenant_revocations`
+  table/collection — caught immediately by `TestRepositoryStats_AllBackends`
+  failing with leftover counts from earlier tests once live services were
+  actually exercised (`make docker-up` first, since Docker wasn't running when
+  this stage started — MongoDB's `client.Ping` in that same helper has no
+  context timeout, so running the suite unfiltered with no live services
+  burns the driver's ~30s default server-selection timeout per repository-backed
+  test rather than skipping fast; harmless once services are up, worth knowing
+  if it happens again). Fixed by adding the truncate/drop to both factories.
+- **Coverage**: initially dropped to 94.0% after this stage's first pass
+  (new repository/maker branches, mostly error-wrapping paths on all three
+  live backends, uncovered). Brought back up to 95.8% — actually above the
+  pre-Stage-3 baseline of 95.4% — via fault-injection tests following each
+  backend's existing convention exactly: Redis's closed-client pattern
+  (`TestRedisRepository_OperationsAfterClientClosed`) plus a raw-client-poke
+  test for the malformed-epoch-value branch; Postgres's closed-pool pattern
+  (`TestPostgresRepository_OperationsAfterPoolClosed`) plus two new
+  drop-only-the-tenant-revocations-table tests mirroring the existing
+  rotated-tokens ones, since `CountTenantRevocations`/
+  `CleanupExpiredTenantRevocations` are last in `Stats`/`CleanupAll`'s call
+  sequence and a blanket pool-close only ever reaches the *first* failing call;
+  Mongo's disconnected-client pattern for the three standalone tenant methods
+  (Mongo's `Stats` has the same last-in-sequence problem as Postgres's, but
+  unlike Postgres, MongoDB doesn't error on an empty/missing collection for
+  `CountDocuments`, so there's no equivalent "drop just one collection" trick —
+  that one specific branch was left as an accepted, pre-existing-pattern gap,
+  consistent with the other four count calls in that same function already
+  being equally unreachable this way before this stage). Also added
+  `erroringRepo.getTenantRevocationEpochErr` for `parseAndValidateToken`'s new
+  branch, and extended `cleanupCountingRepo` plus two new
+  `gourdiantoken.close_test.go` tests for the tenant-cleanup branches in both
+  background goroutines — one of which (the `structuredLogger` path) turned out
+  to also cover a **pre-existing** gap in the non-tenant rotated/revoked
+  `structuredLogger` branches that had no test at all before this stage,
+  since `recordingLogger` (`logger_test.go`) wasn't previously exercised
+  against the cleanup goroutines. Picked up a small drive-by fix while at it:
+  `recordingLogger` gained a mutex, since the two cleanup goroutines can call
+  its `Error` method concurrently and `go test -race` would otherwise flag it.
+- Full verification green against all 4 live backends: `go build ./...`,
+  `go vet ./...`, `gofmt -l .` clean, `golangci-lint run` (0 issues),
+  `go test -count=1 -timeout=5m -cover .` (95.8%), `make race`,
+  `make coverage-check` (95.8%), `go run ./example` end-to-end (230/230
+  passed).
 
 ## Stage 4 — Repository backend standardization
 

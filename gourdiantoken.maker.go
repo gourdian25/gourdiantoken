@@ -800,6 +800,23 @@ func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString st
 		if tid == "" {
 			return nil, fmt.Errorf("%w", ErrTenantIDRequired)
 		}
+
+		// Bulk tenant revocation (see RevokeTenant): reject any token issued at-or-before
+		// its tenant's revocation epoch, even one never individually revoked or rotated.
+		// Only meaningful once a RevokeTenant call could actually have happened, so this is
+		// gated the same way the revocation/rotation checks above are.
+		if maker.config.RevocationEnabled && maker.tokenRepo != nil {
+			epoch, err := maker.tokenRepo.GetTenantRevocationEpoch(ctx, tid)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check tenant revocation: %w", err)
+			}
+			if !epoch.IsZero() {
+				iat := getUnixTime(claims["iat"])
+				if !time.Unix(iat, 0).After(epoch) {
+					return nil, fmt.Errorf("%w", ErrTenantRevoked)
+				}
+			}
+		}
 	}
 
 	return claims, nil
@@ -1411,6 +1428,52 @@ func (maker *JWTMaker) RotateRefreshToken(ctx context.Context, oldToken string) 
 	return newToken, nil
 }
 
+// RevokeTenant bulk-revokes every access/refresh token for tenantID by recording a
+// revocation epoch (see TokenRepository.RevokeTenant), rather than enumerating and marking
+// individual tokens — the only approach that also covers access tokens, which this package
+// never persists a record of unless individually revoked, and which needs no "tokens by
+// tenant" index on any backend.
+//
+// Requires GourdianTokenConfig.MultiTenantEnabled and RevocationEnabled plus a
+// TokenRepository — the same preconditions RevokeAccessToken/RevokeRefreshToken already
+// enforce, since this is built on the same repository.
+//
+// The revocation record's TTL is max(AccessExpiryDuration, RefreshExpiryDuration): past
+// that window, every token issued before the epoch has already failed its own native "exp"
+// check regardless of the epoch record, making the record redundant beyond that point.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - tenantID: The tenant to revoke (must not be empty)
+//
+// Returns:
+//   - error: If multi-tenancy or revocation is disabled, tenantID is empty, or the
+//     repository operation fails
+func (maker *JWTMaker) RevokeTenant(ctx context.Context, tenantID string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context canceled: %w", err)
+	}
+
+	if !maker.config.MultiTenantEnabled {
+		return fmt.Errorf("%w", ErrMultiTenantDisabled)
+	}
+
+	if tenantID == "" {
+		return fmt.Errorf("%w", ErrTenantIDRequired)
+	}
+
+	if !maker.config.RevocationEnabled || maker.tokenRepo == nil {
+		return fmt.Errorf("tenant revocation is not enabled")
+	}
+
+	ttl := maker.config.AccessExpiryDuration
+	if maker.config.RefreshExpiryDuration > ttl {
+		ttl = maker.config.RefreshExpiryDuration
+	}
+
+	return maker.tokenRepo.RevokeTenant(ctx, tenantID, ttl)
+}
+
 // cleanupRotatedTokens is a background goroutine that periodically removes expired rotation markers.
 // Runs automatically when RotationEnabled is true and stops when the context is cancelled.
 //
@@ -1457,6 +1520,18 @@ func (maker *JWTMaker) cleanupRotatedTokens(ctx context.Context) {
 				}
 			}
 			cancel()
+
+			if maker.config.MultiTenantEnabled {
+				tenantCleanupCtx, tenantCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := maker.tokenRepo.CleanupExpiredTenantRevocations(tenantCleanupCtx); err != nil {
+					if maker.structuredLogger != nil {
+						maker.structuredLogger.Error("gourdiantoken: cleanup tenant revocations failed", "error", err)
+					} else {
+						maker.logf("Error cleaning up tenant revocations: %v\n", err)
+					}
+				}
+				tenantCancel()
+			}
 		}
 	}
 }
@@ -1509,6 +1584,18 @@ func (maker *JWTMaker) cleanupRevokedTokens(ctx context.Context) {
 					}
 				}
 				cancel()
+			}
+
+			if maker.config.MultiTenantEnabled {
+				tenantCleanupCtx, tenantCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := maker.tokenRepo.CleanupExpiredTenantRevocations(tenantCleanupCtx); err != nil {
+					if maker.structuredLogger != nil {
+						maker.structuredLogger.Error("gourdiantoken: cleanup tenant revocations failed", "error", err)
+					} else {
+						maker.logf("Error cleaning up tenant revocations: %v\n", err)
+					}
+				}
+				tenantCancel()
 			}
 		}
 	}

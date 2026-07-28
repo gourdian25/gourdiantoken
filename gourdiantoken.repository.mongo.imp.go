@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	mongoRevokedCollectionName = "gourdiantoken_revoked_tokens"
-	mongoRotatedCollectionName = "gourdiantoken_rotated_tokens"
+	mongoRevokedCollectionName           = "gourdiantoken_revoked_tokens"
+	mongoRotatedCollectionName           = "gourdiantoken_rotated_tokens"
+	mongoTenantRevocationsCollectionName = "gourdiantoken_tenant_revocations"
 )
 
 // tokenDocument represents a token entry in MongoDB.
@@ -42,6 +43,15 @@ type tokenDocument struct {
 	TokenType string    `bson:"token_type,omitempty"`
 	ExpiresAt time.Time `bson:"expires_at"`
 	CreatedAt time.Time `bson:"created_at"`
+}
+
+// tenantRevocationDocument represents a bulk tenant-revocation epoch in MongoDB.
+// tenant_id is the document's natural key (not hashed, unlike token_hash above), since
+// tenant IDs aren't secrets the way tokens are.
+type tenantRevocationDocument struct {
+	TenantID  string    `bson:"tenant_id"`
+	RevokedAt time.Time `bson:"revoked_at"`
+	ExpiresAt time.Time `bson:"expires_at"`
 }
 
 // MongoTokenRepository implements TokenRepository using MongoDB.
@@ -72,9 +82,10 @@ type tokenDocument struct {
 //   - Consider sharding for very high throughput
 //   - Implement connection string with retry logic
 type MongoTokenRepository struct {
-	revokedCollection *mongo.Collection
-	rotatedCollection *mongo.Collection
-	useTransactions   bool
+	revokedCollection           *mongo.Collection
+	rotatedCollection           *mongo.Collection
+	tenantRevocationsCollection *mongo.Collection
+	useTransactions             bool
 }
 
 // NewMongoTokenRepository creates a new MongoDB-based token repository.
@@ -152,16 +163,18 @@ func NewMongoTokenRepository(db *mongo.Database, useTransactions bool) (TokenRep
 
 	revokedCollection := db.Collection(mongoRevokedCollectionName)
 	rotatedCollection := db.Collection(mongoRotatedCollectionName)
+	tenantRevocationsCollection := db.Collection(mongoTenantRevocationsCollectionName)
 
 	// Create indexes
-	if err := createMongoIndexes(ctx, revokedCollection, rotatedCollection); err != nil {
+	if err := createMongoIndexes(ctx, revokedCollection, rotatedCollection, tenantRevocationsCollection); err != nil {
 		return nil, fmt.Errorf("failed to create indexes: %w", err)
 	}
 
 	return &MongoTokenRepository{
-		revokedCollection: revokedCollection,
-		rotatedCollection: rotatedCollection,
-		useTransactions:   useTransactions,
+		revokedCollection:           revokedCollection,
+		rotatedCollection:           rotatedCollection,
+		tenantRevocationsCollection: tenantRevocationsCollection,
+		useTransactions:             useTransactions,
 	}, nil
 }
 
@@ -186,7 +199,7 @@ func NewMongoTokenRepository(db *mongo.Database, useTransactions bool) (TokenRep
 //   - Indexes significantly improve query performance
 //   - TTL indexes prevent collection bloat
 //   - Write operations include index maintenance overhead
-func createMongoIndexes(ctx context.Context, revokedCol, rotatedCol *mongo.Collection) error {
+func createMongoIndexes(ctx context.Context, revokedCol, rotatedCol, tenantRevocationsCol *mongo.Collection) error {
 	// Index for revoked tokens with TTL and composite unique key
 	revokedIndexes := []mongo.IndexModel{
 		{
@@ -221,6 +234,23 @@ func createMongoIndexes(ctx context.Context, revokedCol, rotatedCol *mongo.Colle
 
 	if _, err := rotatedCol.Indexes().CreateMany(ctx, rotatedIndexes); err != nil {
 		return fmt.Errorf("failed to create rotated token indexes: %w", err)
+	}
+
+	// Index for tenant revocations: unique on tenant_id (one active epoch per tenant) plus
+	// TTL on expires_at, matching the dual-index pattern above.
+	tenantRevocationsIndexes := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "tenant_id", Value: 1}},
+			Options: options.Index().SetUnique(true),
+		},
+		{
+			Keys:    bson.D{{Key: "expires_at", Value: 1}},
+			Options: options.Index().SetExpireAfterSeconds(0),
+		},
+	}
+
+	if _, err := tenantRevocationsCol.Indexes().CreateMany(ctx, tenantRevocationsIndexes); err != nil {
+		return fmt.Errorf("failed to create tenant revocation indexes: %w", err)
 	}
 
 	return nil
@@ -792,6 +822,99 @@ func (r *MongoTokenRepository) CleanupExpiredRotatedTokens(ctx context.Context) 
 	})
 }
 
+// RevokeTenant records a bulk revocation epoch for tenantID in MongoDB.
+// Uses ReplaceOne with upsert on tenant_id, matching MarkTokenRevoke's pattern — a newer
+// RevokeTenant call for the same tenant overwrites the previous epoch rather than adding
+// another document.
+//
+// MongoDB Query:
+//
+//	db.tenant_revocations.replaceOne(
+//	  { tenant_id: "acme-corp" },
+//	  { tenant_id: "acme-corp", revoked_at: ISODate(), expires_at: ISODate() },
+//	  { upsert: true }
+//	)
+func (r *MongoTokenRepository) RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error {
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID cannot be empty")
+	}
+
+	if ttl <= 0 {
+		return fmt.Errorf("ttl must be positive")
+	}
+
+	now := time.Now()
+	doc := tenantRevocationDocument{
+		TenantID:  tenantID,
+		RevokedAt: now,
+		ExpiresAt: now.Add(ttl),
+	}
+
+	return r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+		opts := options.Replace().SetUpsert(true)
+		filter := bson.M{"tenant_id": tenantID}
+
+		_, err := r.tenantRevocationsCollection.ReplaceOne(sessionCtx, filter, doc, opts)
+		if err != nil {
+			return fmt.Errorf("failed to revoke tenant: %w", err)
+		}
+		return nil
+	})
+}
+
+// GetTenantRevocationEpoch returns the moment tenantID was last revoked, or the zero
+// time.Time if the tenant has no active revocation record.
+//
+// MongoDB Query:
+//
+//	db.tenant_revocations.findOne({
+//	  tenant_id: "acme-corp",
+//	  expires_at: { $gt: ISODate() }
+//	})
+func (r *MongoTokenRepository) GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error) {
+	if tenantID == "" {
+		return time.Time{}, fmt.Errorf("tenant ID cannot be empty")
+	}
+
+	filter := bson.M{
+		"tenant_id":  tenantID,
+		"expires_at": bson.M{"$gt": time.Now()},
+	}
+
+	var doc tenantRevocationDocument
+	err := r.tenantRevocationsCollection.FindOne(ctx, filter).Decode(&doc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("mongodb error: %w", err)
+	}
+
+	return doc.RevokedAt, nil
+}
+
+// CleanupExpiredTenantRevocations removes expired tenant revocation records from MongoDB.
+// Note: MongoDB TTL indexes handle automatic cleanup, but this provides manual control,
+// matching CleanupExpiredRevokedTokens/CleanupExpiredRotatedTokens.
+func (r *MongoTokenRepository) CleanupExpiredTenantRevocations(ctx context.Context) error {
+	return r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+		filter := bson.M{
+			"expires_at": bson.M{"$lte": time.Now()},
+		}
+
+		result, err := r.tenantRevocationsCollection.DeleteMany(sessionCtx, filter)
+		if err != nil {
+			return fmt.Errorf("failed to cleanup expired tenant revocations: %w", err)
+		}
+
+		if result.DeletedCount > 0 {
+			fmt.Printf("Cleaned up %d expired tenant revocations\n", result.DeletedCount)
+		}
+
+		return nil
+	})
+}
+
 // Stats returns statistics about the repository for monitoring and debugging.
 // Provides insights into token revocation and rotation patterns.
 //
@@ -857,12 +980,18 @@ func (r *MongoTokenRepository) Stats(ctx context.Context) (map[string]interface{
 		return nil, fmt.Errorf("failed to count verification tokens: %w", err)
 	}
 
+	tenantRevocationCount, err := r.tenantRevocationsCollection.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to count tenant revocations: %w", err)
+	}
+
 	return map[string]interface{}{
 		"total_revoked_tokens":        revokedCount,
 		"revoked_access_tokens":       accessCount,
 		"revoked_refresh_tokens":      refreshCount,
 		"revoked_verification_tokens": verificationCount,
 		"rotated_tokens":              rotatedCount,
+		"tenant_revocations":          tenantRevocationCount,
 	}, nil
 }
 

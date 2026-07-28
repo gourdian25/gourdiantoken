@@ -1968,6 +1968,7 @@ func TestRepositoryStats_AllBackends(t *testing.T) {
 			require.NoError(t, repo.MarkTokenRevoke(ctx, RefreshToken, "stats-refresh", 1*time.Hour))
 			require.NoError(t, repo.MarkTokenRevoke(ctx, VerificationToken, "stats-verification", 5*time.Minute))
 			require.NoError(t, repo.MarkTokenRotated(ctx, "stats-rotated", 1*time.Hour))
+			require.NoError(t, repo.RevokeTenant(ctx, "stats-tenant", 1*time.Hour))
 
 			switch name {
 			case "Memory":
@@ -1978,6 +1979,7 @@ func TestRepositoryStats_AllBackends(t *testing.T) {
 				assert.Equal(t, 1, stats["revoked_refresh_tokens"])
 				assert.Equal(t, 1, stats["revoked_verification_tokens"])
 				assert.Equal(t, 1, stats["rotated_tokens"])
+				assert.Equal(t, 1, stats["tenant_revocations"])
 			case "Redis":
 				redisRepo, ok := repo.(*RedisTokenRepository)
 				require.True(t, ok)
@@ -1988,6 +1990,7 @@ func TestRepositoryStats_AllBackends(t *testing.T) {
 				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
 				assert.EqualValues(t, 1, stats["rotated_tokens"])
 				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
+				assert.EqualValues(t, 1, stats["tenant_revocations"])
 			case "Postgres":
 				pgRepo, ok := repo.(*PostgresTokenRepository)
 				require.True(t, ok)
@@ -1998,6 +2001,7 @@ func TestRepositoryStats_AllBackends(t *testing.T) {
 				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
 				assert.EqualValues(t, 1, stats["rotated_tokens"])
 				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
+				assert.EqualValues(t, 1, stats["tenant_revocations"])
 			case "MongoDB":
 				mongoRepo, ok := repo.(*MongoTokenRepository)
 				require.True(t, ok)
@@ -2008,6 +2012,7 @@ func TestRepositoryStats_AllBackends(t *testing.T) {
 				assert.EqualValues(t, 1, stats["revoked_verification_tokens"])
 				assert.EqualValues(t, 1, stats["rotated_tokens"])
 				assert.EqualValues(t, 3, stats["total_revoked_tokens"])
+				assert.EqualValues(t, 1, stats["tenant_revocations"])
 			}
 		})
 	}
@@ -2044,6 +2049,260 @@ func TestMarkTokenRotatedAtomic_AllBackends(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// RevokeTenant / GetTenantRevocationEpoch / CleanupExpiredTenantRevocations Tests
+// =============================================================================
+
+// TestRevokeTenant_Success verifies that revoking a tenant records a revocation epoch
+// close to "now" that GetTenantRevocationEpoch then returns.
+func TestRevokeTenant_Success(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			tenantID := fmt.Sprintf("tenant-%s-12345", name)
+
+			before := time.Now()
+			err := repo.RevokeTenant(ctx, tenantID, 1*time.Hour)
+			require.NoError(t, err, "should successfully revoke tenant")
+			after := time.Now()
+
+			epoch, err := repo.GetTenantRevocationEpoch(ctx, tenantID)
+			require.NoError(t, err, "should successfully get tenant revocation epoch")
+			assert.False(t, epoch.IsZero(), "epoch should be recorded")
+			assert.True(t, !epoch.Before(before.Add(-time.Second)) && !epoch.After(after.Add(time.Second)),
+				"epoch %v should fall between %v and %v", epoch, before, after)
+		})
+	}
+}
+
+// TestRevokeTenant_EmptyTenantID verifies that revoking an empty tenant ID returns an error.
+func TestRevokeTenant_EmptyTenantID(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			err := repo.RevokeTenant(context.Background(), "", 1*time.Hour)
+			assert.Error(t, err, "should return error for empty tenant ID")
+			assert.Contains(t, err.Error(), "tenant ID cannot be empty")
+		})
+	}
+}
+
+// TestRevokeTenant_ZeroTTL verifies that revoking a tenant with zero TTL returns an error.
+func TestRevokeTenant_ZeroTTL(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			err := repo.RevokeTenant(context.Background(), "tenant-zero-ttl", 0)
+			assert.Error(t, err, "should return error for zero TTL")
+			assert.Contains(t, err.Error(), "ttl must be positive")
+		})
+	}
+}
+
+// TestRevokeTenant_NegativeTTL verifies that revoking a tenant with negative TTL returns
+// an error.
+func TestRevokeTenant_NegativeTTL(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			err := repo.RevokeTenant(context.Background(), "tenant-negative-ttl", -1*time.Minute)
+			assert.Error(t, err, "should return error for negative TTL")
+			assert.Contains(t, err.Error(), "ttl must be positive")
+		})
+	}
+}
+
+// TestRevokeTenant_OverwritesPreviousEpoch verifies that revoking the same tenant twice
+// moves the recorded epoch forward to the newer revocation, rather than keeping the first
+// one or recording a second entry — a tenant can only ever have one active epoch.
+func TestRevokeTenant_OverwritesPreviousEpoch(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			tenantID := fmt.Sprintf("tenant-overwrite-%s-12345", name)
+
+			require.NoError(t, repo.RevokeTenant(ctx, tenantID, 1*time.Hour))
+			firstEpoch, err := repo.GetTenantRevocationEpoch(ctx, tenantID)
+			require.NoError(t, err)
+			require.False(t, firstEpoch.IsZero())
+
+			// Sleep over a full second: Redis stores the epoch as a Unix-second timestamp
+			// (matching "iat"'s own second-granularity, which is all the epoch is ever
+			// compared against), so two revocations within the same second would otherwise
+			// read back identical on that backend even though the DB row was genuinely
+			// overwritten.
+			time.Sleep(1100 * time.Millisecond)
+
+			require.NoError(t, repo.RevokeTenant(ctx, tenantID, 1*time.Hour))
+			secondEpoch, err := repo.GetTenantRevocationEpoch(ctx, tenantID)
+			require.NoError(t, err)
+			assert.True(t, secondEpoch.After(firstEpoch), "second revocation should move the epoch forward")
+		})
+	}
+}
+
+// TestGetTenantRevocationEpoch_NoRevocation verifies that looking up a tenant with no
+// revocation record returns the zero time.Time and no error.
+func TestGetTenantRevocationEpoch_NoRevocation(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			epoch, err := repo.GetTenantRevocationEpoch(context.Background(), "never-revoked-tenant")
+			assert.NoError(t, err)
+			assert.True(t, epoch.IsZero(), "epoch should be zero for a tenant that was never revoked")
+		})
+	}
+}
+
+// TestGetTenantRevocationEpoch_EmptyTenantID verifies that looking up an empty tenant ID
+// returns an error.
+func TestGetTenantRevocationEpoch_EmptyTenantID(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			_, err := repo.GetTenantRevocationEpoch(context.Background(), "")
+			assert.Error(t, err, "should return error for empty tenant ID")
+			assert.Contains(t, err.Error(), "tenant ID cannot be empty")
+		})
+	}
+}
+
+// TestGetTenantRevocationEpoch_ExpiredRevocation verifies that a tenant revocation record
+// past its TTL reads back as the zero time.Time, mirroring TestGetRotationTTL_ExpiredToken's
+// expiry-polling pattern to tolerate Redis's own expiry timing looseness.
+func TestGetTenantRevocationEpoch_ExpiredRevocation(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+			tenantID := fmt.Sprintf("tenant-expired-%s-12345", name)
+
+			shortTTL := 300 * time.Millisecond
+			require.NoError(t, repo.RevokeTenant(ctx, tenantID, shortTTL))
+
+			// Verify the epoch is set immediately - poll with retries for Redis.
+			var epoch time.Time
+			var epochErr error
+			for i := 0; i < 3; i++ {
+				epoch, epochErr = repo.GetTenantRevocationEpoch(ctx, tenantID)
+				if epochErr == nil && !epoch.IsZero() {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			require.NoError(t, epochErr)
+			require.False(t, epoch.IsZero(), "epoch should be set immediately")
+
+			time.Sleep(shortTTL + 100*time.Millisecond)
+
+			var finalEpoch time.Time
+			var finalErr error
+			for i := 0; i < 5; i++ {
+				finalEpoch, finalErr = repo.GetTenantRevocationEpoch(ctx, tenantID)
+				assert.NoError(t, finalErr, "should not error for expired revocation")
+				if finalEpoch.IsZero() {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			assert.True(t, finalEpoch.IsZero(), "expired revocation should read back as the zero time")
+		})
+	}
+}
+
+// TestCleanupExpiredTenantRevocations_Success mirrors TestCleanupExpiredRotatedTokens_Success:
+// an expired tenant revocation is removed while a still-valid one for a different tenant
+// survives the same cleanup pass.
+func TestCleanupExpiredTenantRevocations_Success(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			ctx := context.Background()
+
+			expiredTenant := fmt.Sprintf("expired-tenant-%s-12345", name)
+			require.NoError(t, repo.RevokeTenant(ctx, expiredTenant, 50*time.Millisecond))
+
+			validTenant := fmt.Sprintf("valid-tenant-%s-12345", name)
+			require.NoError(t, repo.RevokeTenant(ctx, validTenant, 1*time.Hour))
+
+			// Verify both are recorded initially.
+			epoch, err := repo.GetTenantRevocationEpoch(ctx, expiredTenant)
+			require.NoError(t, err)
+			require.False(t, epoch.IsZero())
+
+			epoch, err = repo.GetTenantRevocationEpoch(ctx, validTenant)
+			require.NoError(t, err)
+			require.False(t, epoch.IsZero())
+
+			time.Sleep(100 * time.Millisecond)
+
+			require.NoError(t, repo.CleanupExpiredTenantRevocations(ctx))
+
+			epoch, err = repo.GetTenantRevocationEpoch(ctx, expiredTenant)
+			assert.NoError(t, err)
+			assert.True(t, epoch.IsZero(), "expired tenant revocation should be cleaned up")
+
+			epoch, err = repo.GetTenantRevocationEpoch(ctx, validTenant)
+			assert.NoError(t, err)
+			assert.False(t, epoch.IsZero(), "valid tenant revocation should still be present after cleanup")
+		})
+	}
+}
+
+// TestCleanupExpiredTenantRevocations_EmptyRepository verifies that cleanup succeeds even
+// when there are no tenant revocations to clean up.
+func TestCleanupExpiredTenantRevocations_EmptyRepository(t *testing.T) {
+	factories := getTestRepositoryFactories()
+
+	for name, factory := range factories {
+		t.Run(name, func(t *testing.T) {
+			repo, cleanup := factory(t)
+			defer cleanup()
+
+			err := repo.CleanupExpiredTenantRevocations(context.Background())
+			assert.NoError(t, err, "cleanup should succeed on an empty repository")
+		})
+	}
+}
+
 // TestPostgresRepository_CleanupAll verifies the Postgres-specific CleanupAll convenience
 // method sweeps expired access, refresh, and verification revocations plus expired
 // rotation records in one call.
@@ -2063,6 +2322,7 @@ func TestPostgresRepository_CleanupAll(t *testing.T) {
 	require.NoError(t, pgRepo.MarkTokenRevoke(ctx, RefreshToken, "cleanup-all-refresh", 50*time.Millisecond))
 	require.NoError(t, pgRepo.MarkTokenRevoke(ctx, VerificationToken, "cleanup-all-verification", 50*time.Millisecond))
 	require.NoError(t, pgRepo.MarkTokenRotated(ctx, "cleanup-all-rotated", 50*time.Millisecond))
+	require.NoError(t, pgRepo.RevokeTenant(ctx, "cleanup-all-tenant", 50*time.Millisecond))
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -2079,6 +2339,10 @@ func TestPostgresRepository_CleanupAll(t *testing.T) {
 	rotated, err := pgRepo.IsTokenRotated(ctx, "cleanup-all-rotated")
 	require.NoError(t, err)
 	assert.False(t, rotated)
+
+	epoch, err := pgRepo.GetTenantRevocationEpoch(ctx, "cleanup-all-tenant")
+	require.NoError(t, err)
+	assert.True(t, epoch.IsZero(), "CleanupAll should also sweep expired tenant revocations")
 }
 
 // TestMemoryRepository_Close verifies that Close properly stops cleanup goroutines.

@@ -53,10 +53,12 @@ func (c *countedContext) Err() error {
 // branches of parseAndValidateToken/revokeToken/RotateRefreshToken that
 // MemoryTokenRepository never fails.
 type erroringRepo struct {
-	isTokenRevokedErr       error
-	isTokenRotatedErr       error
-	markTokenRotatedAtomic  bool
-	markTokenRotatedAtomErr error
+	isTokenRevokedErr           error
+	isTokenRotatedErr           error
+	markTokenRotatedAtomic      bool
+	markTokenRotatedAtomErr     error
+	getTenantRevocationEpoch    time.Time
+	getTenantRevocationEpochErr error
 }
 
 func (r *erroringRepo) MarkTokenRevoke(ctx context.Context, tokenType TokenType, token string, ttl time.Duration) error {
@@ -90,6 +92,16 @@ func (r *erroringRepo) CleanupExpiredRevokedTokens(ctx context.Context, tokenTyp
 	return nil
 }
 func (r *erroringRepo) CleanupExpiredRotatedTokens(ctx context.Context) error { return nil }
+func (r *erroringRepo) RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error {
+	return nil
+}
+func (r *erroringRepo) GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error) {
+	if r.getTenantRevocationEpochErr != nil {
+		return time.Time{}, r.getTenantRevocationEpochErr
+	}
+	return r.getTenantRevocationEpoch, nil
+}
+func (r *erroringRepo) CleanupExpiredTenantRevocations(ctx context.Context) error { return nil }
 
 func makerWithRepo(t *testing.T, repo TokenRepository) *JWTMaker {
 	t.Helper()
@@ -244,6 +256,26 @@ func TestParseAndValidateToken_RevocationCheckError(t *testing.T) {
 	_, err = maker.VerifyAccessToken(context.Background(), token.Token)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to check token revocation")
+}
+
+// TestParseAndValidateToken_TenantRevocationCheckError exercises parseAndValidateToken's
+// GetTenantRevocationEpoch error-propagation branch, gated behind MultiTenantEnabled so it
+// needs its own maker rather than makerWithRepo's default config.
+func TestParseAndValidateToken_TenantRevocationCheckError(t *testing.T) {
+	repo := &erroringRepo{getTenantRevocationEpochErr: fmt.Errorf("boom")}
+
+	config := DefaultTestConfig()
+	config.RevocationEnabled = true
+	config.MultiTenantEnabled = true
+	maker, err := NewGourdianTokenMaker(context.Background(), config, repo)
+	require.NoError(t, err)
+
+	token, err := maker.(*JWTMaker).CreateAccessToken(context.Background(), "user-1", "user", []string{"admin"}, "session-1", "acme-corp")
+	require.NoError(t, err)
+
+	_, err = maker.(*JWTMaker).VerifyAccessToken(context.Background(), token.Token)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to check tenant revocation")
 }
 
 func TestParseAndValidateToken_RotationCheckError(t *testing.T) {

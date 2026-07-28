@@ -101,7 +101,7 @@ func TestParseECDSAPublicKey_AllPaths(t *testing.T) {
 		certPEM := selfSignedCert(t, &ecdsaKey.PublicKey, ecdsaKey)
 		pub, err := parseECDSAPublicKey(certPEM)
 		require.NoError(t, err)
-		assert.Equal(t, ecdsaKey.X, pub.X)
+		assert.True(t, pub.Equal(&ecdsaKey.PublicKey), "parsed public key should match the original")
 	})
 
 	t.Run("certificate containing non-ECDSA key", func(t *testing.T) {

@@ -113,6 +113,46 @@ func TestPostgresRepository_CleanupAll_RotatedCleanupFails(t *testing.T) {
 	require.Contains(t, err.Error(), "failed to cleanup rotated tokens")
 }
 
+// TestPostgresRepository_Stats_TenantRevocationCountFails mirrors
+// TestPostgresRepository_Stats_RotatedCountFails: CountTenantRevocations is the last of
+// Stats' five count queries, so only dropping its own table (leaving every earlier table
+// intact) reaches this specific branch.
+func TestPostgresRepository_Stats_TenantRevocationCountFails(t *testing.T) {
+	factories := getTestRepositoryFactories()
+	repo, cleanup := factories["Postgres"](t)
+	defer cleanup()
+
+	pgRepo := repo.(*PostgresTokenRepository)
+	ctx := context.Background()
+
+	_, err := pgRepo.pool.Exec(ctx, "DROP TABLE gourdiantoken_tenant_revocations")
+	require.NoError(t, err)
+
+	_, err = pgRepo.Stats(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to count tenant revocations")
+}
+
+// TestPostgresRepository_CleanupAll_TenantRevocationCleanupFails mirrors
+// TestPostgresRepository_CleanupAll_RotatedCleanupFails: CleanupExpiredTenantRevocations is
+// the last of CleanupAll's four cleanup calls, so only dropping its own table reaches this
+// specific branch.
+func TestPostgresRepository_CleanupAll_TenantRevocationCleanupFails(t *testing.T) {
+	factories := getTestRepositoryFactories()
+	repo, cleanup := factories["Postgres"](t)
+	defer cleanup()
+
+	pgRepo := repo.(*PostgresTokenRepository)
+	ctx := context.Background()
+
+	_, err := pgRepo.pool.Exec(ctx, "DROP TABLE gourdiantoken_tenant_revocations")
+	require.NoError(t, err)
+
+	err = pgRepo.CleanupAll(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to cleanup tenant revocations")
+}
+
 func TestPostgresRepository_OperationsAfterPoolClosed(t *testing.T) {
 	factories := getTestRepositoryFactories()
 	repo, cleanup := factories["Postgres"](t)
@@ -158,6 +198,18 @@ func TestPostgresRepository_OperationsAfterPoolClosed(t *testing.T) {
 	err = pgRepo.CleanupExpiredRotatedTokens(ctx)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to cleanup expired rotated tokens")
+
+	err = pgRepo.RevokeTenant(ctx, "acme-corp", time.Hour)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to revoke tenant")
+
+	_, err = pgRepo.GetTenantRevocationEpoch(ctx, "acme-corp")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "database error")
+
+	err = pgRepo.CleanupExpiredTenantRevocations(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to cleanup expired tenant revocations")
 
 	_, err = pgRepo.Stats(ctx)
 	require.Error(t, err)

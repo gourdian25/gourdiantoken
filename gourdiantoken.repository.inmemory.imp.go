@@ -26,6 +26,14 @@ type tokenEntry struct {
 	expiresAt time.Time
 }
 
+// tenantRevocation records a bulk tenant-revocation epoch. Unlike tokenEntry, the map key
+// is the tenant ID itself, not a hash — tenant IDs aren't secrets the way tokens are, so
+// there's no need to hash them before storing.
+type tenantRevocation struct {
+	revokedAt time.Time
+	expiresAt time.Time
+}
+
 // MemoryTokenRepository is an in-memory implementation of TokenRepository.
 // Suitable for development, testing, or single-instance deployments.
 //
@@ -58,6 +66,7 @@ type MemoryTokenRepository struct {
 	revokedRefresh      map[string]tokenEntry
 	revokedVerification map[string]tokenEntry
 	rotatedTokens       map[string]tokenEntry
+	tenantRevocations   map[string]tenantRevocation
 	cleanupInterval     time.Duration
 	stopCleanup         chan struct{}
 	cleanupOnce         sync.Once
@@ -116,6 +125,7 @@ func NewMemoryTokenRepository(cleanupInterval time.Duration) TokenRepository {
 		revokedRefresh:      make(map[string]tokenEntry),
 		revokedVerification: make(map[string]tokenEntry),
 		rotatedTokens:       make(map[string]tokenEntry),
+		tenantRevocations:   make(map[string]tenantRevocation),
 		cleanupInterval:     cleanupInterval,
 		stopCleanup:         make(chan struct{}),
 	}
@@ -569,6 +579,90 @@ func (m *MemoryTokenRepository) CleanupExpiredRotatedTokens(ctx context.Context)
 	return nil
 }
 
+// RevokeTenant records a bulk revocation epoch for tenantID in memory.
+// Thread-safe operation with write lock protection.
+//
+// Parameters:
+//   - ctx: Context for cancellation (not used in memory implementation)
+//   - tenantID: The tenant to revoke
+//   - ttl: Time-to-live duration for the revocation record
+//
+// Returns:
+//   - error: If tenantID is empty or TTL is invalid
+func (m *MemoryTokenRepository) RevokeTenant(ctx context.Context, tenantID string, ttl time.Duration) error {
+	if tenantID == "" {
+		return fmt.Errorf("tenant ID cannot be empty")
+	}
+
+	if ttl <= 0 {
+		return fmt.Errorf("ttl must be positive")
+	}
+
+	now := time.Now()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.tenantRevocations[tenantID] = tenantRevocation{
+		revokedAt: now,
+		expiresAt: now.Add(ttl),
+	}
+
+	return nil
+}
+
+// GetTenantRevocationEpoch returns the moment tenantID was last revoked, or the zero
+// time.Time if the tenant has no active revocation record.
+//
+// Parameters:
+//   - ctx: Context for cancellation (not used in memory implementation)
+//   - tenantID: The tenant to look up
+//
+// Returns:
+//   - time.Time: The revocation epoch, or the zero value if none/expired
+//   - error: If tenantID is empty
+func (m *MemoryTokenRepository) GetTenantRevocationEpoch(ctx context.Context, tenantID string) (time.Time, error) {
+	if tenantID == "" {
+		return time.Time{}, fmt.Errorf("tenant ID cannot be empty")
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	entry, exists := m.tenantRevocations[tenantID]
+	if !exists {
+		return time.Time{}, nil
+	}
+
+	if time.Now().After(entry.expiresAt) {
+		return time.Time{}, nil
+	}
+
+	return entry.revokedAt, nil
+}
+
+// CleanupExpiredTenantRevocations removes expired tenant revocation records from memory.
+// Thread-safe operation with write lock protection.
+//
+// Parameters:
+//   - ctx: Context for cancellation (not used in memory implementation)
+//
+// Returns:
+//   - error: Always nil (error included for interface compatibility)
+func (m *MemoryTokenRepository) CleanupExpiredTenantRevocations(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	for tenantID, entry := range m.tenantRevocations {
+		if now.After(entry.expiresAt) {
+			delete(m.tenantRevocations, tenantID)
+		}
+	}
+
+	return nil
+}
+
 // periodicCleanup runs background cleanup of expired entries.
 // Started automatically by NewMemoryTokenRepository and runs until Close() is called.
 //
@@ -604,6 +698,7 @@ func (m *MemoryTokenRepository) periodicCleanup() {
 			_ = m.CleanupExpiredRevokedTokens(ctx, RefreshToken)
 			_ = m.CleanupExpiredRevokedTokens(ctx, VerificationToken)
 			_ = m.CleanupExpiredRotatedTokens(ctx)
+			_ = m.CleanupExpiredTenantRevocations(ctx)
 		}
 	}
 }
@@ -678,5 +773,6 @@ func (m *MemoryTokenRepository) Stats() map[string]int {
 		"revoked_refresh_tokens":      len(m.revokedRefresh),
 		"revoked_verification_tokens": len(m.revokedVerification),
 		"rotated_tokens":              len(m.rotatedTokens),
+		"tenant_revocations":          len(m.tenantRevocations),
 	}
 }
