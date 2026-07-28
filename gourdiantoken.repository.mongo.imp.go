@@ -1047,8 +1047,9 @@ func (r *MongoTokenRepository) CleanupAll(ctx context.Context) error {
 //   - No explicit connection closing needed for collections
 //   - Client should be closed at application level
 //   - This method exists for interface compatibility with the other three backends'
-//     concrete Close() methods (not part of the TokenRepository interface itself — see
-//     decision #7 in docs/plan/multi-tenant-support-plan.md)
+//     concrete Close() methods (not part of the TokenRepository interface itself —
+//     Postgres's Close() has real pool-ownership caveats that make a uniform interface
+//     method a poor fit, so each backend keeps its own concrete Close() instead)
 //
 // Returns:
 //   - error: Always nil (included for interface compatibility)

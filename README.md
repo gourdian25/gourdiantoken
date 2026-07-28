@@ -385,65 +385,53 @@ func main() {
 
 ### Core Components
 
-``` txt
-┌─────────────────────────────────────────────────────────────┐
-│                    GourdianTokenMaker                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │   Create     │  │    Verify    │  │   Revoke/    │     │
-│  │   Tokens     │  │   Tokens     │  │   Rotate     │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-        ┌───────────────┴───────────────┐
-        │                               │
-┌───────▼──────┐               ┌───────▼──────┐
-│  Cryptographic│               │   Token      │
-│   Signing     │               │  Repository  │
-│  (JWT Library)│               │  (Storage)   │
-└───────────────┘               └───────┬──────┘
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    │                   │                   │
-            ┌───────▼─────┐   ┌────────▼────────┐  ┌──────▼──────┐
-            │  In-Memory  │   │     Redis       │  │  SQL/MongoDB│
-            │  (Testing)  │   │  (Production)   │  │(Enterprise) │
-            └─────────────┘   └─────────────────┘  └─────────────┘
+```mermaid
+flowchart TD
+    Maker["GourdianTokenMaker"]
+    Create["Create<br/>Access / Refresh / Verification"]
+    Verify["Verify<br/>Access / Refresh / Verification"]
+    Revoke["Revoke / Rotate<br/>+ RevokeTenant"]
+
+    Maker --> Create
+    Maker --> Verify
+    Maker --> Revoke
+
+    Sign["Cryptographic Signing<br/>HMAC / RSA / ECDSA / EdDSA"]
+    Repo["TokenRepository (Storage)"]
+
+    Create --> Sign
+    Verify --> Sign
+    Verify --> Repo
+    Revoke --> Repo
+
+    Repo --> Memory["In-Memory<br/>(Testing)"]
+    Repo --> Redis["Redis<br/>(Production)"]
+    Repo --> Postgres["PostgreSQL<br/>(Enterprise)"]
+    Repo --> Mongo["MongoDB<br/>(Enterprise)"]
+    Repo --> Custom["Custom backend<br/>(your implementation)"]
 ```
 
 ### Token Lifecycle
 
-``` txt
-┌──────────┐
-│  Login   │
-└────┬─────┘
-     │
-     ▼
-┌──────────────────────┐
-│ CreateAccessToken    │◄──────────────┐
-│ CreateRefreshToken   │               │
-└────┬─────────────────┘               │
-     │                                 │
-     ▼                                 │
-┌──────────────────────┐         ┌────┴─────────────┐
-│   API Request with   │         │ RotateRefreshToken│
-│   Access Token       │         │ (Get New Access)  │
-└────┬─────────────────┘         └──────────────────┘
-     │                                 ▲
-     ▼                                 │
-┌──────────────────────┐               │
-│ VerifyAccessToken    │───────────────┘
-└────┬─────────────────┘      Token Expired
-     │
-     ▼
-┌──────────────────────┐
-│   Grant Access /     │
-│  Check Revocation    │
-└────┬─────────────────┘
-     │
-     ▼
-┌──────────────────────┐
-│  Logout / Revoke     │
-└──────────────────────┘
+```mermaid
+flowchart TD
+    Login["Login"] --> Create["CreateAccessToken / CreateRefreshToken"]
+    Create --> Request["API request with Access Token"]
+    Request --> Verify["VerifyAccessToken"]
+
+    Verify --> Revoked{"Revoked?"}
+    Revoked -- yes --> RejectRevoked["Reject: ErrTokenRevoked"]
+    Revoked -- no --> TenantCheck{"MultiTenantEnabled &&<br/>tenant revoked at-or-before iat?"}
+
+    TenantCheck -- yes --> RejectTenant["Reject: ErrTenantRevoked"]
+    TenantCheck -- no --> Grant["Grant access"]
+
+    Grant --> Expired{"Access token expired?"}
+    Expired -- no --> Request
+    Expired -- yes --> Rotate["RotateRefreshToken<br/>(atomic compare-and-swap)"]
+    Rotate --> Create
+
+    Grant --> Logout["Logout: RevokeAccessToken / RevokeRefreshToken"]
 ```
 
 ---
@@ -1194,6 +1182,31 @@ that tenant — including ones the repository has never seen — via one indexed
 `max(AccessExpiryDuration, RefreshExpiryDuration)`: past that window every pre-epoch token
 has already failed its own native `exp` check regardless, so a longer-lived record would be
 redundant.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Maker as GourdianTokenMaker
+    participant Repo as TokenRepository
+
+    App->>Maker: RevokeTenant(ctx, "acme-corp")
+    Maker->>Repo: RevokeTenant("acme-corp", ttl)
+    Repo-->>Maker: epoch T recorded
+
+    Note over App,Repo: Later verification calls...
+
+    App->>Maker: VerifyAccessToken(oldToken)
+    Note right of App: oldToken.iat <= T
+    Maker->>Repo: GetTenantRevocationEpoch("acme-corp")
+    Repo-->>Maker: epoch T
+    Maker-->>App: ErrTenantRevoked
+
+    App->>Maker: VerifyAccessToken(newToken)
+    Note right of App: newToken.iat > T
+    Maker->>Repo: GetTenantRevocationEpoch("acme-corp")
+    Repo-->>Maker: epoch T
+    Maker-->>App: claims (valid)
+```
 
 **Precision note:** a JWT's `iat` is second-granular, but the revocation epoch itself may
 carry sub-second precision depending on backend. A token minted within the same wall-clock

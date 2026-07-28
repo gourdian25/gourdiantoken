@@ -203,11 +203,10 @@ func TestRevokeTenant_RevocationDisabled(t *testing.T) {
 	assert.Contains(t, err.Error(), "tenant revocation is not enabled")
 }
 
-// TestRevokeTenant_EndToEndEpoch exercises the full bulk-revocation story described in
-// docs/plan/multi-tenant-support-plan.md's Stage 3: a token issued for a tenant before that
-// tenant's revocation epoch fails verification (and, for refresh tokens, rotation) after the
-// epoch is recorded, while a token issued after the epoch succeeds, and a different tenant's
-// pre-existing token is entirely unaffected.
+// TestRevokeTenant_EndToEndEpoch exercises the full bulk-revocation story: a token issued
+// for a tenant before that tenant's revocation epoch fails verification (and, for refresh
+// tokens, rotation) after the epoch is recorded, while a token issued after the epoch
+// succeeds, and a different tenant's pre-existing token is entirely unaffected.
 func TestRevokeTenant_EndToEndEpoch(t *testing.T) {
 	config := DefaultTestConfig()
 	config.MultiTenantEnabled = true

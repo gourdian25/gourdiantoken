@@ -740,10 +740,9 @@ func TestRotateRefreshToken_ContextCancellation(t *testing.T) {
 	})
 }
 
-// TestRotateRefreshToken_PropagatesTenantID is a regression test for the tenant-propagation
-// bug flagged in docs/plan/multi-tenant-support-plan.md's Stage 1: RotateRefreshToken's
-// internal CreateRefreshToken call must forward claims.TenantID, or the tenant claim is
-// silently dropped on every refresh-token rotation.
+// TestRotateRefreshToken_PropagatesTenantID is a regression test for a tenant-propagation
+// bug: RotateRefreshToken's internal CreateRefreshToken call must forward claims.TenantID,
+// or the tenant claim is silently dropped on every refresh-token rotation.
 func TestRotateRefreshToken_PropagatesTenantID(t *testing.T) {
 	config := DefaultTestConfig()
 	config.MultiTenantEnabled = true

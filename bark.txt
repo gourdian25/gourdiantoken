@@ -1,7 +1,6 @@
 .
 ├── CHANGELOG.md
 ├── CLAUDE.md
-├── ECOSYSTEM_PLAN.md
 ├── LICENSE
 ├── Makefile
 ├── README.md
@@ -9,12 +8,10 @@
 ├── concurrency_test.go
 ├── config.validation_test.go
 ├── cryptographic_test.go
-├── docs/
-│   └── plan/
-│       └── multi-tenant-support-plan.md
 ├── docs.go
 ├── edge.case_test.go
 ├── example/
+│   ├── custom_repository_example.go
 │   └── example.go
 ├── go.mod
 ├── go.sum
@@ -65,4 +62,4 @@
 ├── token.verification_token_test.go
 └── version.go
 
-6 directories, 59 files
+4 directories, 58 files

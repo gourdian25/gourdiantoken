@@ -19,8 +19,9 @@
 // installation instructions, a runnable quick-start, a full field-by-field
 // GourdianTokenConfig reference (including how each field maps onto
 // NewGourdianTokenConfig's positional arguments), framework integration
-// examples, and current benchmark numbers, see the module's README:
-// https://github.com/gourdian25/gourdiantoken#readme.
+// examples, current benchmark numbers, and Mermaid diagrams of the
+// architecture, token lifecycle, and tenant-revocation flow, see the
+// module's README: https://github.com/gourdian25/gourdiantoken#readme.
 //
 // # Token Types
 //
