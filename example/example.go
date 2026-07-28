@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -1423,6 +1424,102 @@ func runRealWorldScenarioTests(ctx context.Context, tokenMaker gourdiantoken.Gou
 	return results
 }
 
+// runMultiTenantDemo exercises GourdianTokenConfig.MultiTenantEnabled and
+// GourdianTokenMaker.RevokeTenant end to end: creating tenant-scoped tokens, verifying the
+// "tid" claim round-trips, and confirming a tenant-wide revocation invalidates only tokens
+// issued at-or-before the revocation epoch while a fresh token for the same tenant, issued
+// afterward, still verifies. Kept as its own standalone demo (with its own dedicated maker)
+// rather than folded into RunComprehensiveTests' fixed pipeline, since every other test
+// group there passes an empty tenantID and would fail outright against a
+// MultiTenantEnabled=true maker.
+func runMultiTenantDemo(ctx context.Context, tokenMaker gourdiantoken.GourdianTokenMaker) []TestResult {
+	var results []TestResult
+	fmt.Printf("\n┌─ %s\n", "MULTI-TENANCY (MultiTenantEnabled + RevokeTenant)")
+
+	userID := uuid.NewString()
+	sessionID := uuid.NewString()
+	tenantID := "acme-corp"
+
+	var preRevocationToken string
+
+	results = append(results, runTest("Create access token with tenantID", func() (string, error) {
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, "alice@acme-corp.com", []string{"user"}, sessionID, tenantID)
+		if err != nil {
+			return "", err
+		}
+		preRevocationToken = token.Token
+		return fmt.Sprintf("Token issued for tenant %q", tenantID), nil
+	}))
+
+	results = append(results, runTest("Reject empty tenantID when MultiTenantEnabled", func() (string, error) {
+		_, err := tokenMaker.CreateAccessToken(ctx, userID, "alice@acme-corp.com", []string{"user"}, sessionID, "")
+		if !errors.Is(err, gourdiantoken.ErrTenantIDRequired) {
+			return "", fmt.Errorf("expected ErrTenantIDRequired, got %v", err)
+		}
+		return "Empty tenantID correctly rejected", nil
+	}))
+
+	results = append(results, runTest("Verify token carries tid claim", func() (string, error) {
+		claims, err := tokenMaker.VerifyAccessToken(ctx, preRevocationToken)
+		if err != nil {
+			return "", err
+		}
+		if claims.TenantID != tenantID {
+			return "", fmt.Errorf("expected TenantID %q, got %q", tenantID, claims.TenantID)
+		}
+		return fmt.Sprintf("claims.TenantID = %q", claims.TenantID), nil
+	}))
+
+	results = append(results, runTest("Revoke entire tenant", func() (string, error) {
+		if err := tokenMaker.RevokeTenant(ctx, tenantID); err != nil {
+			return "", err
+		}
+		// The revocation epoch is accurate to about one second, not the millisecond (see
+		// JWTMaker.RevokeTenant's own doc comment) — pause so the "issued after revocation"
+		// token below unambiguously lands on the post-revocation side of the epoch.
+		time.Sleep(1100 * time.Millisecond)
+		return fmt.Sprintf("Tenant %q revoked", tenantID), nil
+	}))
+
+	results = append(results, runTest("Pre-revocation token now rejected", func() (string, error) {
+		_, err := tokenMaker.VerifyAccessToken(ctx, preRevocationToken)
+		if !errors.Is(err, gourdiantoken.ErrTenantRevoked) {
+			return "", fmt.Errorf("expected ErrTenantRevoked, got %v", err)
+		}
+		return "Pre-revocation token correctly rejected", nil
+	}))
+
+	results = append(results, runTest("Post-revocation token for same tenant still valid", func() (string, error) {
+		token, err := tokenMaker.CreateAccessToken(ctx, userID, "alice@acme-corp.com", []string{"user"}, sessionID, tenantID)
+		if err != nil {
+			return "", err
+		}
+		claims, err := tokenMaker.VerifyAccessToken(ctx, token.Token)
+		if err != nil {
+			return "", fmt.Errorf("new token for same tenant should verify after revocation: %w", err)
+		}
+		return fmt.Sprintf("New token for tenant %q issued after revocation verifies successfully (tid=%s)", tenantID, claims.TenantID), nil
+	}))
+
+	results = append(results, runTest("RotateRefreshToken preserves tenantID", func() (string, error) {
+		refresh, err := tokenMaker.CreateRefreshToken(ctx, userID, "alice@acme-corp.com", sessionID, tenantID)
+		if err != nil {
+			return "", err
+		}
+		rotated, err := tokenMaker.RotateRefreshToken(ctx, refresh.Token)
+		if err != nil {
+			return "", err
+		}
+		if rotated.TenantID != tenantID {
+			return "", fmt.Errorf("expected rotated token to preserve TenantID %q, got %q", tenantID, rotated.TenantID)
+		}
+		return fmt.Sprintf("Rotated refresh token preserves tid=%q", rotated.TenantID), nil
+	}))
+
+	printTestSummary(results, "Multi-Tenancy Demo")
+	return results
+}
+
 // runTest executes a single test and returns the result
 func runTest(name string, testFunc func() (string, error)) TestResult {
 	fmt.Printf("│  ├─ %s ... ", name)
@@ -1825,6 +1922,41 @@ func main() {
 			fmt.Printf("⚠️  Cleanup warning for %s: %v\n", repoConfig.Name, err)
 		}
 
+		fmt.Println()
+	}
+
+	// Multi-tenancy demo: MultiTenantEnabled + RevokeTenant, run once against its own
+	// dedicated in-memory maker rather than folded into the loop above (see
+	// runMultiTenantDemo's doc comment for why).
+	{
+		suiteName := "Multi-Tenant Demo (RevokeTenant)"
+		printRepositoryHeader(suiteName, "MultiTenantEnabled + tenant-wide bulk revocation via revocation epoch")
+
+		tenantConfig := gourdiantoken.GourdianTokenConfig{
+			RevocationEnabled:        true,
+			RotationEnabled:          true,
+			MultiTenantEnabled:       true,
+			SigningMethod:            gourdiantoken.Symmetric,
+			Algorithm:                "HS256",
+			SymmetricKey:             "multi-tenant-demo-key-32-bytes!!",
+			Issuer:                   "test.gourdian.com",
+			Audience:                 []string{"api.test.com"},
+			AllowedAlgorithms:        []string{"HS256", "HS384", "HS512"},
+			RequiredClaims:           []string{"iss", "aud", "nbf", "mle"},
+			AccessExpiryDuration:     15 * time.Minute,
+			AccessMaxLifetimeExpiry:  24 * time.Hour,
+			RefreshExpiryDuration:    7 * 24 * time.Hour,
+			RefreshMaxLifetimeExpiry: 30 * 24 * time.Hour,
+			RefreshReuseInterval:     5 * time.Minute,
+			CleanupInterval:          5 * time.Minute,
+		}
+
+		tenantMaker, err := gourdiantoken.NewGourdianTokenMakerWithMemory(ctx, tenantConfig)
+		if err != nil {
+			log.Fatalf("Failed to create multi-tenant demo maker: %v", err)
+		}
+
+		allResults[suiteName] = runMultiTenantDemo(ctx, tenantMaker)
 		fmt.Println()
 	}
 

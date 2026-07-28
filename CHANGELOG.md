@@ -6,7 +6,48 @@ All notable changes to `gourdiantoken` are documented in this file.
 
 **Breaking changes** — see
 [README.md's "Upgrading to v2.3.0"](./README.md#️-upgrading-to-v230)
-for the full migration guide.
+for the full migration guide. Two independent initiatives landed in this
+release: in-memory key material configuration, and multi-tenancy support
+(including a repository-backend standardization pass).
+
+### Added
+
+- **Multi-tenancy support.** `GourdianTokenConfig.MultiTenantEnabled` (opt-in,
+  default `false`) gates a new `tid` claim on access/refresh tokens, backing
+  a new `TenantID string` field on `AccessTokenClaims`, `RefreshTokenClaims`,
+  `AccessTokenResponse`, and `RefreshTokenResponse`. `CreateAccessToken`/
+  `CreateRefreshToken` gain a required trailing `tenantID string` parameter
+  — see "Breaking" below. Fails loud in both directions: a non-empty
+  `tenantID` when the flag is `false` is rejected (`ErrTenantIDNotAllowed`),
+  as is an empty one when it's `true` (`ErrTenantIDRequired`), both on
+  create and on verify. `VerificationTokenClaims` gets no `TenantID` field —
+  tenant-scoping a verification token is a documented convention of putting
+  `"tenant_id"` in its existing free-form `Metadata` map instead.
+  `RotateRefreshToken` forwards the old token's `TenantID` to the new one.
+- **`GourdianTokenMaker.RevokeTenant(ctx, tenantID) error`** bulk-revokes
+  every access/refresh token for a tenant via a revocation epoch rather than
+  enumeration: it records "this tenant was revoked at time T," and
+  verification rejects any `AccessToken`/`RefreshToken` whose `iat` is
+  at-or-before that epoch — including tokens never individually seen by the
+  repository, which enumeration-based revocation fundamentally cannot reach
+  for access tokens. Requires `MultiTenantEnabled`, `RevocationEnabled`, and
+  a `TokenRepository`. New `TokenRepository` methods backing it:
+  `RevokeTenant(ctx, tenantID, ttl) error`,
+  `GetTenantRevocationEpoch(ctx, tenantID) (time.Time, error)`,
+  `CleanupExpiredTenantRevocations(ctx) error` — implemented identically
+  across all four backends.
+- Four new sentinel errors for use with `errors.Is`: `ErrTenantIDRequired`,
+  `ErrTenantIDNotAllowed`, `ErrMultiTenantDisabled`, `ErrTenantRevoked`.
+- **`TokenRepository` gains `Stats(ctx) (map[string]interface{}, error)` and
+  `CleanupAll(ctx) error`**, now part of the interface and implemented
+  identically across all four backends (previously Postgres-only extensions
+  reached via a type assertion; Redis/Memory/Mongo had no equivalents).
+- `example/example.go`: a new "Asymmetric (RS256) - In-Memory Repository"
+  suite demonstrating `PrivateKeyPEM`/`PublicKeyPEM` end to end, and a new
+  "Multi-Tenant Demo (RevokeTenant)" suite demonstrating
+  `MultiTenantEnabled` + `RevokeTenant` end to end (create with tenantID →
+  verify → revoke tenant → pre-revocation token rejected → post-revocation
+  token for the same tenant still valid → rotation preserves `tid`).
 
 ### Breaking
 
@@ -24,6 +65,64 @@ for the full migration guide.
   `NewGourdianTokenConfig`'s deprecated positional constructor changed to
   match: `privateKeyPath, publicKeyPath string` → `privateKeyPEM,
   publicKeyPEM []byte`, same argument positions.
+- **`CreateAccessToken`/`CreateRefreshToken` gain a required trailing
+  `tenantID string` parameter.** Breaks every existing call site regardless
+  of whether multi-tenancy is used — pass `""` to keep prior single-tenant
+  behavior. Appended rather than inserted mid-list to avoid transposing
+  adjacent string arguments across the ~294 existing call sites this touched
+  (tests plus `example/example.go`).
+- **`GourdianTokenMakerCloser`/`GourdianTokenMakerVerification` (the two
+  optional interfaces split out of `GourdianTokenMaker` in earlier releases)
+  are removed, merged back into a single flat `GourdianTokenMaker`** — which
+  now also carries `RevokeTenant`. Any type assertion reaching `Close`/
+  `CreateVerificationToken`/`VerifyVerificationToken`/
+  `MarkVerificationTokenUsed` should be dropped; every constructor's return
+  value already satisfies the merged interface. No back-compat alias kept
+  for either removed interface name — confirmed zero real external
+  implementers before removing them.
+- **`NewGourdianTokenMakerWithMongo` drops its `transactionsEnabled bool`
+  parameter**, now matching the `(ctx, config, handle, opts...)` shape
+  shared by the other three backend factories. Transactions are hardcoded
+  `true` internally. Construct `NewMongoTokenRepository(mongoDB, false)`
+  plus `NewGourdianTokenMaker` directly if you need them disabled (e.g. a
+  standalone dev MongoDB without a replica set).
+- **`MongoTokenRepository.Close(ctx context.Context) error` →
+  `Close() error`**, dropping its context parameter (confirmed a literal
+  no-op internally), matching the other three backends' bare `Close() error`.
+
+### Fixed
+
+- **Cross-backend `MarkTokenRotatedAtomic` inconsistency** (flagged, not
+  fixed, in v2.2.0's changelog entry): Postgres and MongoDB previously
+  treated *any* existing rotation record as a conflict, even one whose own
+  TTL had already logically expired, so re-marking the same token after its
+  prior rotation record expired incorrectly reported `false` (Memory/Redis
+  always allowed this correctly). Postgres's `InsertRotatedTokenIfNotExists`
+  query changed from unconditional `ON CONFLICT (token_hash) DO NOTHING` to
+  a conditional `ON CONFLICT ... DO UPDATE ... WHERE expires_at <=
+  EXCLUDED.created_at`. MongoDB's `MarkTokenRotatedAtomic` changed from a
+  blind `InsertOne` to a conditional upsert (`UpdateOne` with
+  `upsert=true`, filtered on the existing document already being expired).
+  All four backends now agree; see `TestMarkTokenRotatedAtomic_ReMarksAfterExpiry`.
+
+### Testing
+
+- Root-package coverage: 95.1% (down slightly from the 95.8-95.9% range
+  carried by the prior release, still above the 95% gate) — the new
+  `CleanupAll` methods on Memory/Redis/Mongo each wrap five sequential
+  `CleanupExpired*` calls in error-handling branches; Memory's are
+  genuinely unreachable (documented inline), and reaching Redis's/Mongo's
+  *later* branches in isolation (refresh/verification/rotated/tenant, as
+  opposed to the first, access-token branch) isn't achievable via the
+  established "close the client" fault-injection technique, since — unlike
+  Postgres, which has one table per token type — their revoked-token
+  storage is one shared keyspace/collection across all three types.
+- `TestMarkTokenRotatedAtomic_ReMarksAfterExpiry` generalized from
+  `["Memory", "Redis"]` to all four backends now that the underlying bug is
+  fixed everywhere.
+- New `TestCleanupAll_AllBackends`, `TestRepositoryStats_AllBackends`
+  simplified to call `Stats`/`CleanupAll` directly on the `TokenRepository`
+  interface value (no more per-backend type assertion).
 
 ## v2.2.0
 

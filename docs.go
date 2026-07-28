@@ -10,8 +10,10 @@
 // refresh, and verification): creation, verification, revocation, and (for
 // refresh tokens) rotation. It supports symmetric (HMAC) and asymmetric (RSA,
 // RSA-PSS, ECDSA, EdDSA) signing, four pluggable storage backends for
-// revocation/rotation tracking, and automatic background cleanup of expired
-// entries.
+// revocation/rotation tracking, automatic background cleanup of expired
+// entries, and opt-in multi-tenancy (a "tid" claim plus tenant-wide bulk
+// revocation via GourdianTokenMaker.RevokeTenant — see "Multi-Tenancy"
+// below).
 //
 // This documentation covers API-level behavior, invariants, and pitfalls. For
 // installation instructions, a runnable quick-start, a full field-by-field
@@ -80,8 +82,11 @@
 //   - MongoTokenRepository: document storage with TTL indexes for cleanup and
 //     optional multi-document transactions (requires a replica set).
 //
-// Each has a concrete Close() (idempotent; Mongo's takes a context.Context)
-// that is not part of the TokenRepository interface itself.
+// Each has a concrete, no-argument Close() (idempotent) that is not part of the
+// TokenRepository interface itself — Postgres's has real pool-ownership caveats that make it
+// a poor fit for a uniform interface method. Stats(ctx) (map[string]interface{}, error) and
+// CleanupAll(ctx) error, by contrast, are part of TokenRepository and shared identically
+// across all four backends.
 //
 // # Configuration
 //
@@ -103,6 +108,39 @@
 //     Configuration table for the full field list and, for existing callers
 //     of NewGourdianTokenConfig, exactly which positional slot each field
 //     occupies.
+//
+// # Multi-Tenancy
+//
+// GourdianTokenConfig.MultiTenantEnabled (opt-in, default false) gates a "tid" claim on
+// access/refresh tokens, backing AccessTokenClaims.TenantID/RefreshTokenClaims.TenantID
+// (and both *Response structs). CreateAccessToken/CreateRefreshToken take a tenantID
+// parameter that must be non-empty when the flag is true (ErrTenantIDRequired otherwise)
+// and must be empty when it's false (ErrTenantIDNotAllowed if not) — fails loud in both
+// directions rather than silently dropping a caller-supplied value. The same requirement is
+// enforced again on the verify side for AccessToken/RefreshToken. VerificationTokenClaims
+// has no TenantID field at all; any tenant scoping for a verification token is a documented
+// convention of putting "tenant_id" in its free-form Metadata map instead.
+// RotateRefreshToken forwards the old token's TenantID to the new one, so rotation
+// preserves the tenant claim.
+//
+// GourdianTokenMaker.RevokeTenant(ctx, tenantID) bulk-revokes every access/refresh token for
+// a tenant — e.g. offboarding or a suspected tenant-wide compromise — via a revocation
+// epoch, not enumeration: it records "this tenant was revoked at time T"
+// (TokenRepository.RevokeTenant/GetTenantRevocationEpoch/CleanupExpiredTenantRevocations),
+// and verification rejects (ErrTenantRevoked) any AccessToken/RefreshToken whose "iat" is
+// at-or-before that epoch — including tokens the repository has never individually seen.
+// That's the reason for the epoch design: this library never persists a record of an access
+// token unless it's individually revoked, so an enumeration-based "revoke every token row
+// for this tenant" approach fundamentally can't reach them. RevokeTenant requires
+// RevocationEnabled plus a TokenRepository in addition to MultiTenantEnabled, mirroring
+// RevokeAccessToken/RevokeRefreshToken's own preconditions (ErrMultiTenantDisabled if the
+// flag itself is off). The revocation record's TTL is
+// max(AccessExpiryDuration, RefreshExpiryDuration) — past that window every pre-epoch token
+// has already failed its own native "exp" check regardless. Because a JWT's "iat" is
+// second-granular but the epoch itself may carry sub-second precision (backend-dependent),
+// a token minted within the same wall-clock second as the RevokeTenant call can land on
+// either side of the boundary — treat bulk tenant revocation as accurate to about one
+// second, not the millisecond.
 //
 // # Factory Methods
 //
@@ -186,6 +224,12 @@
 //   - ErrMissingExpClaim: a token being revoked has no "exp" claim, so its
 //     repository TTL cannot be computed.
 //   - ErrTokenMaxLifetimeExceeded: the "mle" claim has passed.
+//   - ErrTenantIDRequired, ErrTenantIDNotAllowed: a tenantID argument to
+//     CreateAccessToken/CreateRefreshToken (or a token's "tid" claim on verify) doesn't
+//     match MultiTenantEnabled's requirement — see "Multi-Tenancy" above.
+//   - ErrMultiTenantDisabled: RevokeTenant called with MultiTenantEnabled false.
+//   - ErrTenantRevoked: VerifyAccessToken/VerifyRefreshToken on a token issued at-or-before
+//     its tenant's RevokeTenant epoch.
 //
 // These sentinels are intentionally not prefixed with a package name (unlike
 // the "pkgname: message" convention elsewhere in the gourdian25 ecosystem) —
@@ -235,6 +279,9 @@
 //   - MarkVerificationTokenUsed requires RevocationEnabled plus a
 //     TokenRepository even when VerificationTokensEnabled is true; without
 //     them it returns an explicit error rather than silently no-op'ing.
+//   - Passing a non-empty tenantID to CreateAccessToken/CreateRefreshToken while
+//     MultiTenantEnabled is false (or an empty one while it's true) is a hard error, not a
+//     silent no-op — pass "" for every call site if you don't use multi-tenancy.
 //
 // # Testing
 //

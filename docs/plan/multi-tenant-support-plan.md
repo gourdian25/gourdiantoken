@@ -65,7 +65,7 @@ described below.
 | Stage 2 | Interface consolidation | ✅ Done |
 | Stage 3 | Tenant-scoped bulk revocation | ✅ Done |
 | Stage 4 | Repository backend standardization | ✅ Done |
-| Stage 5 | Docs / CHANGELOG / version bump / example.go | Not started |
+| Stage 5 | Docs / CHANGELOG / version bump / example.go | ✅ Done |
 | Stage 6 | Full validation pass | Not started |
 
 **Note:** after Stage 3, `docs/plan/key-material-config-plan.md` (in-memory
@@ -756,6 +756,105 @@ Last, once the API surface from Stages 1-4 is final.
 **Verification:** `go build ./example/...` and run it end-to-end against at
 least Memory (all 4 backends if `make docker-up` is available); `gofmt`/
 `goimports` clean; `bark check` reports no header debris on touched files.
+
+### Stage 5 completion notes
+
+Landed with a substantially wider documentation-accuracy pass than the plan
+originally scoped, per explicit instruction to audit `docs.go` and
+`README.md` against the real current code rather than just append new
+sections:
+
+- **`example/example.go`**: added a standalone "Multi-Tenant Demo
+  (RevokeTenant)" suite (`runMultiTenantDemo`, 7 scenarios: create with
+  tenantID → reject empty tenantID → verify carries `tid` → revoke tenant →
+  pre-revocation token rejected → post-revocation token for the same tenant
+  still valid → `RotateRefreshToken` preserves `tid`), run against its own
+  dedicated maker rather than folded into `RunComprehensiveTests`' shared
+  pipeline — every other test group there passes an empty `tenantID` and
+  would fail outright against a `MultiTenantEnabled=true` maker. (The
+  equivalent asymmetric-signing suite was added earlier in this session,
+  ahead of Stage 4, per separate explicit instruction — noted here since
+  Stage 5's own file-touched list originally called for it.)
+- **`docs.go`**: new "Multi-Tenancy" `#`-section (flag, `tid` claim,
+  `RevokeTenant`'s epoch design and rationale, the `Metadata` convention for
+  verification tokens), plus fixes found during the audit that predated
+  this stage: the "Storage Backends" section still claimed Mongo's `Close()`
+  took a `context.Context` (fixed in Stage 4, not reflected in docs.go
+  until now) and didn't mention `Stats`/`CleanupAll` joining the interface;
+  "Error Handling" was missing all four tenant sentinels; "Common Pitfalls"
+  gained a tenant-related entry; the package-level "Overview" paragraph
+  gained a one-line mention of multi-tenancy for discoverability.
+- **`README.md`**: extensive drift found and fixed, most of it predating
+  Stage 5 entirely (accumulated across Stages 1-4 without a doc pass):
+  - The `GourdianTokenMaker Interface` code block was still the pre-Stage-1
+    7-method version with no `tenantID` parameters, no `RevokeTenant`, no
+    `Close`, no verification-token methods — replaced with the full current
+    12-method merged interface.
+  - **Every** `CreateAccessToken`/`CreateRefreshToken` call site in the
+    README (11 locations: both Quick Start examples, the API Reference
+    signatures/examples, `setupAsymmetric`, all three numbered Examples, and
+    all three Testing-section snippets) was still missing the `tenantID`
+    argument entirely — none of this example code would have compiled
+    against the actual `v2.3.0` API. All given a trailing `""` (or
+    `claims.TenantID` in the one rotation-flow example where propagating it
+    was the more correct choice).
+  - Five references to the removed `GourdianTokenMakerVerification`/
+    `GourdianTokenMakerCloser` split interfaces — including a `maker.(...)`
+    type assertion pattern in the runnable verification-token example and
+    in the `CreateVerificationToken`/`VerifyVerificationToken`/
+    `MarkVerificationTokenUsed` API Reference entries — removed; those
+    interfaces were merged away in Stage 2 but README never caught up.
+  - Both `NewGourdianTokenMakerWithMongo` call sites still passed the
+    `transactionsEnabled` bool Stage 4 removed; fixed, with the MongoDB
+    Storage section's feature bullet reworded to explain transactions are
+    now always-on and how to opt out (construct the repository directly).
+  - `GourdianTokenConfig`'s struct block and field-reference table were
+    missing `MultiTenantEnabled` entirely (field count corrected `~21` →
+    `~22`); `AccessTokenClaims`'s Go struct block and `RefreshTokenClaims`'s
+    note were missing `TenantID`.
+  - "Secure Defaults" and "Best Practices → Key Management" both still
+    claimed gourdiantoken checks private-key file permissions (0600) —
+    removed in the key-material-config plan, before Stage 4 even started;
+    reworded to note this is now the caller's own responsibility if a key
+    ever touches disk upstream of this library.
+  - New top-level "🏢 Multi-Tenancy" section added near "Security Features"
+    (with a Table of Contents entry) covering enabling the flag, the
+    required/forbidden `tenantID` contract, the `Metadata` convention for
+    verification tokens, and `RevokeTenant`'s epoch design — condensed from
+    the same explanation now in `docs.go` and `CLAUDE.md`, kept consistent
+    across all three.
+  - "Upgrading to v2.3.0" (created by key-material-config Stage 2) extended
+    with four more numbered breaking-change entries covering the
+    `tenantID` parameter, the interface merge, the Mongo factory signature
+    change, and `TokenRepository`'s `Stats`/`CleanupAll`/`Close` changes —
+    each with a concrete before/after, matching the section's existing
+    style and this repo's changelog convention generally.
+- **`CHANGELOG.md`**: extended the existing `## v2.3.0` section (also
+  created by key-material-config Stage 2) with `### Added` (multi-tenancy,
+  `RevokeTenant`, the four new sentinels, `Stats`/`CleanupAll`, the two new
+  example suites), further `### Breaking` entries (the four items listed
+  above), a new `### Fixed` entry for the two `MarkTokenRotatedAtomic`
+  bugs, and a `### Testing` entry explaining the 95.1% coverage number —
+  rather than creating a second `## v2.3.0` section, per the note left in
+  this plan's own tracker after key-material-config Stage 2.
+- **`version.go`**/**`Makefile`**: `Version`/`VERSION` bumped `v2.2.0` →
+  `v2.3.0`. No test asserts the literal version string, so no test-file
+  impact.
+- **`CLAUDE.md`**: consistency pass across every bullet touched
+  incrementally in Stages 1-4 — the coverage-percentage callout (now
+  references `v2.3.0`'s Testing section and 95.1%), the `example/example.go`
+  file-layout bullet (now describes the two standalone demo suites and the
+  per-entry config-override mechanism they use), the "Multi-tenancy"
+  section's stale "Stage 1+3" self-reference (now "Stages 1-4"), and the
+  "In-progress work" section (both plan docs' actual current stage status).
+- Full verification green: `go build ./...`, `go vet ./...`, `gofmt -l .`
+  (clean), `golangci-lint run` (0 issues), `staticcheck ./...` (clean), full
+  test suite against all 4 live backends, `make race` (cache cleared and
+  re-run fresh to confirm, since `version.go` changed), `make coverage-check`
+  (95.1%, unchanged from Stage 4 — this stage was docs/example-only for the
+  root package's own test surface), and `go run ./example` end-to-end — all
+  7 suites (4 backends + stateless + asymmetric + multi-tenant demo) passed
+  100%, 0 failures across 237 total scenarios.
 
 ## Stage 6 — Full validation pass
 
