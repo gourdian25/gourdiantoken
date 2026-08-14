@@ -1,13 +1,17 @@
 -- File: internal/postgresdb/schema.sql
 --
--- Schema for gourdiantoken's PostgreSQL-backed token repository. Applied by
--- connectPostgres (gourdiantoken.repository.postgres.imp.go) on every
--- connect, serialized by a Postgres advisory lock (applyPostgresSchema) so
--- concurrent connects don't race on this DDL. CREATE TABLE IF NOT EXISTS is
--- sufficient for this library's one linear schema — there is no separate
--- migration tool.
+-- Schema for gourdiantoken's PostgreSQL-backed token repository. Returned as
+-- text by PostgresSchemaSQL() (gourdiantoken.repository.postgres.imp.go) for
+-- the consuming application to apply through its own project's migration
+-- tool (golang-migrate, Flyway, a plain SQL file in CI, ...) -- gourdiantoken
+-- itself never applies this; NewPostgresTokenRepository assumes it already
+-- exists. CREATE TABLE IF NOT EXISTS is used so applying it more than once
+-- (e.g. re-running your own migration) is harmless, but that alone does not
+-- remove the need for a CREATE-capable role to run it at least once -- see
+-- docs/postgres.md for the least-privilege-runtime-role rationale and the
+-- full pattern.
 --
--- BREAKING (v3.0.0): table names are prefixed with gourdiantoken_, replacing
+-- BREAKING (v2.2.0): table names are prefixed with gourdiantoken_, replacing
 -- the unprefixed revoked_tokens/rotated_tokens names used by the removed
 -- GORM backend. This is a new table, not a rename in place — upgrading
 -- deployments will not see their existing revocation/rotation state under

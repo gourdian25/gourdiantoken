@@ -2,6 +2,50 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## v2.4.0
+
+**Breaking**, for the Postgres backend only. Closes a gap found while
+wiring `NewGourdianTokenMakerWithPostgres` into `grauth`: its schema
+auto-apply on every connect required `CREATE` on the target schema, which
+a deliberately least-privilege application role (a common production
+setup — a separate role owns migrations, the app connects with a
+DML-only role) doesn't have, failing construction with `permission
+denied for schema ...` — and this can't be worked around by
+pre-creating the tables some other way, since `CREATE TABLE IF NOT
+EXISTS` still checks `CREATE` privilege before checking whether the
+table exists, so the attempt fails every time regardless.
+
+Rather than add a flag to opt out of auto-apply on a per-call basis,
+`NewPostgresTokenRepository`/`NewGourdianTokenMakerWithPostgres` now
+**never** apply schema at all — see
+[docs/postgres.md](../gourdiantoken/docs/postgres.md) (new file; the
+Postgres factory doc comments have referenced it since `v2.0` but it was
+never actually written until now).
+
+### Changed
+
+- **`NewPostgresTokenRepository(ctx, pool)` no longer applies schema.**
+  Signature is unchanged (still 2 args — an earlier draft of this release
+  added a `WithSkipSchemaEnsure()` opt-out instead of removing auto-apply
+  outright; that approach was dropped before release in favor of the
+  simpler "always the caller's job" rule below), but its behavior is:
+  construction now only pings the pool. Call `PostgresSchemaSQL()` and
+  apply the result through your own project's migration tool before
+  constructing — see docs/postgres.md. Existing deployments that relied
+  on the implicit auto-apply need to add that migration step; the schema
+  itself is unchanged (still `CREATE TABLE/INDEX IF NOT EXISTS`, still the
+  same 3 `gourdiantoken_`-prefixed tables).
+- **`NewGourdianTokenMakerWithPostgres`** is unchanged in signature and is
+  still exactly `NewPostgresTokenRepository` + `NewGourdianTokenMaker`
+  composed for convenience — it inherits the same "schema must already
+  exist" requirement.
+
+### Added
+
+- **`PostgresSchemaSQL() string`**, returning gourdiantoken's Postgres
+  schema as text, for applying through your own migration tool (see
+  docs/postgres.md).
+
 ## v2.3.0
 
 **Breaking changes** — see

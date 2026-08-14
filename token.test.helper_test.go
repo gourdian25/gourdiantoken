@@ -187,6 +187,13 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 				t.Skipf("PostgreSQL not available, skipping: %v", err)
 			}
 
+			// NewPostgresTokenRepository no longer applies schema itself
+			// (see its own doc comment) -- gourdiantoken_test's role
+			// (postgres_user) is a superuser in this test environment, so
+			// applying it directly here keeps the suite self-contained
+			// without needing a real migration tool.
+			require.NoError(t, applyPostgresSchema(ctx, pool))
+
 			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_revoked_tokens RESTART IDENTITY CASCADE")
 			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_rotated_tokens RESTART IDENTITY CASCADE")
 			_, _ = pool.Exec(ctx, "TRUNCATE TABLE gourdiantoken_tenant_revocations")
