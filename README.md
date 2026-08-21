@@ -142,6 +142,8 @@ go get go.mongodb.org/mongo-driver
    maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
    ```
 
+   (As of v2.4.0, this also requires `gourdiantoken.PostgresSchemaSQL()` to already be applied via your own migration tool first — see [Upgrading to v2.4.0](#️-upgrading-to-v240) below.)
+
 2. **Storage names changed to a `gourdiantoken`-prefixed convention**, matching the rest of the gourdian25 ecosystem:
 
    | Storage | Old name | New name |
@@ -240,6 +242,26 @@ go get go.mongodb.org/mongo-driver
    ```
 
    `MarkTokenRotatedAtomic` also became consistent across all four backends in this release: Postgres and MongoDB previously treated *any* existing rotation record as a conflict, even an already-expired one (Memory/Redis always allowed re-marking an expired entry); all four now agree.
+
+## ⚠️ Upgrading to v2.4.0
+
+**v2.4.0 is breaking, for the Postgres backend only.** Neither `NewPostgresTokenRepository` nor `NewGourdianTokenMakerWithPostgres` applies schema at construction time anymore — signatures are unchanged, but you now need to apply the schema yourself, once, before calling either:
+
+```go
+// Before (v2.3.x) — schema applied automatically on every connect
+pool, _ := pgxpool.New(ctx, dsn)
+maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
+
+// After (v2.4.0+) — apply gourdiantoken.PostgresSchemaSQL() through your own
+// migration tool first (golang-migrate, Flyway, a plain SQL file in CI, ...),
+// then construct exactly as before
+pool, _ := pgxpool.New(ctx, dsn)
+maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
+```
+
+Why: the old auto-apply required the pool's connection role to have `CREATE` on the target schema, which a deliberately least-privilege application role (a common production setup — a separate role owns migrations, the app connects with a DML-only role) doesn't have — it failed loudly with `permission denied for schema ...`, and pre-creating the tables some other way didn't help either, since `CREATE TABLE IF NOT EXISTS` still checks `CREATE` privilege before checking whether the table exists. Rather than add a flag to opt out of auto-apply on a per-call basis, gourdiantoken now simply never does it — see [docs/postgres.md](docs/postgres.md) for the full pattern and rationale.
+
+If your Postgres role already had `CREATE` (the common case for a dev database or a single-role deployment), nothing about your setup breaks except the timing: apply `PostgresSchemaSQL()` once via any method (even a one-off `psql -f` piping its output) before your application first connects, and everything else works exactly as before.
 
 ---
 
@@ -757,8 +779,13 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisCli
 
 ### 4. PostgreSQL Storage
 
+gourdiantoken never applies its own schema — apply `PostgresSchemaSQL()` through your own project's migration tool (golang-migrate, Flyway, a plain SQL file in CI, ...) once, before constructing:
+
 ```go
 import "github.com/jackc/pgx/v5/pgxpool"
+
+// One-time: apply gourdiantoken.PostgresSchemaSQL() via your own migration
+// tool, with whatever role owns your migrations. See docs/postgres.md.
 
 pool, _ := pgxpool.New(ctx, dsn)
 defer pool.Close()
@@ -769,7 +796,7 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
 
 - pgx/v5 + sqlc-generated queries — no ORM overhead
 - ACID transactions
-- Schema applied automatically (`CREATE TABLE/INDEX IF NOT EXISTS`, advisory-lock-guarded so concurrent callers don't race)
+- Schema is your migration's job, not gourdiantoken's — see [docs/postgres.md](docs/postgres.md) for why (a locked-down, least-privilege application role commonly used at runtime won't have `CREATE` on the target schema even if it can read/write the tables themselves)
 - Connection pooling via the caller-provided `*pgxpool.Pool` — share one pool across your whole backend instead of opening a separate one per store
 
 **Best For:**

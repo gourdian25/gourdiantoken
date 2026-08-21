@@ -197,9 +197,17 @@ func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenCo
 //   - No ORM overhead — hand-written queries via sqlc
 //
 // Setup Requirements:
-//   - Schema is applied automatically (CREATE TABLE/INDEX IF NOT EXISTS),
-//     serialized by a Postgres advisory lock so concurrent callers building
-//     a repository against the same fresh database don't race on the DDL
+//   - The tables this repository queries (gourdiantoken_revoked_tokens,
+//     gourdiantoken_rotated_tokens, gourdiantoken_tenant_revocations) must
+//     already exist — apply PostgresSchemaSQL() through your own project's
+//     migration tool (golang-migrate, Flyway, a plain SQL file in CI, ...)
+//     before calling this. This function never runs DDL: it's exactly
+//     NewPostgresTokenRepository(ctx, pool) plus
+//     NewGourdianTokenMaker(ctx, config, tokenRepo), nothing more. See
+//     docs/postgres.md for the full pattern and why (a locked-down,
+//     least-privilege application role commonly used at runtime won't
+//     have CREATE on the target schema even if it can read/write the
+//     tables themselves).
 //   - The caller builds and owns the *pgxpool.Pool — share one pool across
 //     your backend instead of each store opening its own; see
 //     docs/postgres.md for the recommended pattern
@@ -207,12 +215,13 @@ func NewGourdianTokenMakerWithMemory(ctx context.Context, config GourdianTokenCo
 // Parameters:
 //   - ctx: Context for initialization (cancellation, timeout support)
 //   - config: Configuration for the token maker
-//   - pool: An already-constructed *pgxpool.Pool connected to PostgreSQL
+//   - pool: An already-constructed *pgxpool.Pool connected to PostgreSQL,
+//     with PostgresSchemaSQL() already applied
 //
 // Returns:
 //   - GourdianTokenMaker: A configured token maker instance with Postgres storage
-//   - error: If the connectivity check fails, schema application fails,
-//     configuration is invalid, or context is cancelled
+//   - error: If the connectivity check fails, configuration is invalid, or
+//     context is cancelled
 //
 // Example:
 //

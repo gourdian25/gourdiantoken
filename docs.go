@@ -77,9 +77,9 @@
 //   - RedisTokenRepository: TTL-based keys, gourdiantoken:-prefixed, safe for
 //     Redis Cluster/Sentinel deployments.
 //   - PostgresTokenRepository: pgx/v5 driver with sqlc-generated queries (no
-//     ORM); schema DDL is idempotent (CREATE TABLE/INDEX IF NOT EXISTS) and
-//     serialized by a Postgres advisory lock. The caller builds and owns the
-//     *pgxpool.Pool.
+//     ORM). Construction never applies schema itself — apply
+//     PostgresSchemaSQL() through your own migration tool first, see
+//     docs/postgres.md. The caller builds and owns the *pgxpool.Pool.
 //   - MongoTokenRepository: document storage with TTL indexes for cleanup and
 //     optional multi-document transactions (requires a replica set).
 //
@@ -163,7 +163,9 @@
 //     false.
 //   - NewGourdianTokenMakerWithMemory(ctx, config, opts...)
 //   - NewGourdianTokenMakerWithRedis(ctx, config, *redis.Client, opts...)
-//   - NewGourdianTokenMakerWithPostgres(ctx, config, *pgxpool.Pool, opts...)
+//   - NewGourdianTokenMakerWithPostgres(ctx, config, *pgxpool.Pool, opts...):
+//     schema must already exist — apply PostgresSchemaSQL() via your own
+//     migration tool first, see docs/postgres.md
 //   - NewGourdianTokenMakerWithMongo(ctx, config, *mongo.Database, opts...):
 //     transactions always enabled; use NewMongoTokenRepository(db, false) plus
 //     NewGourdianTokenMaker directly for a standalone dev MongoDB without one
