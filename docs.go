@@ -308,6 +308,6 @@
 // (internal token ID / "jti" generation only — callers passing their own
 // string identifiers do not need to import it). Optional, only required by
 // the storage backend actually used: github.com/jackc/pgx/v5 (Postgres),
-// go.mongodb.org/mongo-driver (MongoDB), github.com/redis/go-redis/v9
+// go.mongodb.org/mongo-driver/v2 (MongoDB), github.com/redis/go-redis/v9
 // (Redis).
 package gourdiantoken

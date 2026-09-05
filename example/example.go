@@ -19,8 +19,8 @@ import (
 	"github.com/gourdian25/gourdiantoken/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // generateRSAKeyPairPEM generates a fresh in-memory RSA key pair, PEM-encoded as bytes —
@@ -1812,7 +1812,7 @@ func main() {
 			Name:        "MongoDB Repository",
 			Description: "Document-based storage with TTL indexes",
 			CreateRepo: func() (gourdiantoken.TokenRepository, error) {
-				client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+				client, err := mongo.Connect(options.Client().ApplyURI(mongoURI))
 				if err != nil {
 					return nil, fmt.Errorf("mongodb unavailable: %w", err)
 				}

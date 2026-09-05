@@ -10,9 +10,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func setupTestMaker(t *testing.T) *JWTMaker {
@@ -145,7 +145,7 @@ func getTestRepositoryFactories() map[string]TestRepositoryFactory {
 			mongoURI := "mongodb://root:mongo_password@localhost:27018/?directConnection=true"
 
 			ctx := context.Background()
-			client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+			client, err := mongo.Connect(options.Client().ApplyURI(mongoURI))
 			require.NoError(t, err)
 
 			if err := client.Ping(ctx, nil); err != nil {
