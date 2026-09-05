@@ -2,6 +2,58 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## v2.5.0
+
+**Breaking**, for the MongoDB backend only. Migrates from
+`go.mongodb.org/mongo-driver` (v1, upstream-deprecated) to
+`go.mongodb.org/mongo-driver/v2`, matching grsentry's already-completed
+migration and bringing gourdiantoken in line with the rest of the
+`gourdian25` org. Unlike the Redis/Postgres backends, this one genuinely
+breaks callers: `NewGourdianTokenMakerWithMongo` and
+`NewMongoTokenRepository` both take a `*mongo.Database` parameter directly,
+and Go treats `go.mongodb.org/mongo-driver/mongo.Database` and
+`go.mongodb.org/mongo-driver/v2/mongo.Database` as distinct, incompatible
+types — see [README.md's "Upgrading to v2.5.0"](README.md#️-upgrading-to-v250)
+for the exact before/after.
+
+### Breaking
+
+- **Any consumer building their own `*mongo.Database` to pass into
+  `NewGourdianTokenMakerWithMongo`/`NewMongoTokenRepository` must import
+  `go.mongodb.org/mongo-driver/v2/mongo` instead of the bare v1 module.**
+  Signatures are otherwise unchanged. `mongo.Connect` also dropped its
+  `context.Context` parameter in v2 (it never blocked on the network —
+  `Ping` remains the real connectivity check), so any consumer copying the
+  README's own connection snippets needs to drop that argument too.
+
+### Changed
+
+- `gourdiantoken.repository.mongo.imp.go`, `gourdiantoken.factories.go`,
+  and `example/example.go` now import
+  `go.mongodb.org/mongo-driver/v2/{bson,mongo,mongo/options}`.
+- `mongo.SessionContext` is removed in v2 — the internal `withTransaction`
+  helper's `session.WithTransaction` callback now takes a plain
+  `context.Context` rather than the old wrapper type, with the session
+  travelling inside the context itself. This is purely internal to
+  `withTransaction`'s implementation (used by `MarkTokenRotatedAtomic`'s
+  duplicate-key-race handling) and isn't part of the exported API.
+- v1's generic `options.Update()` is removed in v2 (replaced by separate
+  `options.UpdateOne()`/`options.UpdateMany()` builders); the upsert in
+  `gourdiantoken.repository.mongo.imp.go`, paired with `UpdateOne`, now uses
+  `options.UpdateOne().SetUpsert(true)`. `mongo.ErrNoDocuments` and
+  `mongo.IsDuplicateKeyError` are unchanged.
+- `go.mod`: `go.mongodb.org/mongo-driver v1.17.9` replaced with
+  `go.mongodb.org/mongo-driver/v2 v2.8.0`; no longer present at any
+  version, direct or indirect.
+
+### Documentation
+
+- `docs.go`'s optional-dependencies list and `README.md` (the MongoDB
+  install snippet and both MongoDB code examples) updated to the `/v2`
+  import path and the context-less `mongo.Connect` signature. New
+  "Upgrading to v2.5.0" section added to README.md following this
+  project's own convention for breaking `v2.x` releases.
+
 ## v2.4.0
 
 **Breaking**, for the Postgres backend only. Closes a gap found while

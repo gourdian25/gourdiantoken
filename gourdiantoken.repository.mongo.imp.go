@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const (
@@ -116,7 +116,7 @@ type MongoTokenRepository struct {
 // Example (Production with transactions):
 //
 //	// Initialize MongoDB client with connection pooling
-//	client, err := mongo.Connect(ctx, options.Client().
+//	client, err := mongo.Connect(options.Client().
 //	    ApplyURI(mongoURI).
 //	    SetMaxPoolSize(100).
 //	    SetMinPoolSize(10))
@@ -132,7 +132,7 @@ type MongoTokenRepository struct {
 //
 // Example (Development without transactions):
 //
-//	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+//	client, err := mongo.Connect(options.Client().ApplyURI("mongodb://localhost:27017"))
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -281,7 +281,7 @@ func createMongoIndexes(ctx context.Context, revokedCol, rotatedCol, tenantRevoc
 //
 // Returns:
 //   - error: If transaction fails or wrapped function returns error
-func (r *MongoTokenRepository) withTransaction(ctx context.Context, fn func(sessionCtx mongo.SessionContext) error) error {
+func (r *MongoTokenRepository) withTransaction(ctx context.Context, fn func(txCtx context.Context) error) error {
 	if !r.useTransactions {
 		return fn(nil)
 	}
@@ -292,8 +292,12 @@ func (r *MongoTokenRepository) withTransaction(ctx context.Context, fn func(sess
 	}
 	defer session.EndSession(ctx)
 
-	transactionFn := func(sessionCtx mongo.SessionContext) (interface{}, error) {
-		return nil, fn(sessionCtx)
+	// v2's Session.WithTransaction callback receives a plain context.Context (the
+	// session travels inside it, retrievable via mongo.SessionFromContext) rather than
+	// v1's mongo.SessionContext type -- so it's handed to fn directly, with no wrapper
+	// type involved.
+	transactionFn := func(txCtx context.Context) (interface{}, error) {
+		return nil, fn(txCtx)
 	}
 
 	_, err = session.WithTransaction(ctx, transactionFn)
@@ -366,12 +370,12 @@ func (r *MongoTokenRepository) MarkTokenRevoke(ctx context.Context, tokenType To
 		CreatedAt: time.Now(),
 	}
 
-	return r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+	return r.withTransaction(ctx, func(txCtx context.Context) error {
 		opts := options.Replace().SetUpsert(true)
 		// Filter by BOTH token_hash AND token_type for proper composite key behavior
 		filter := bson.M{"token_hash": tokenHash, "token_type": string(tokenType)}
 
-		_, err := r.revokedCollection.ReplaceOne(sessionCtx, filter, doc, opts)
+		_, err := r.revokedCollection.ReplaceOne(txCtx, filter, doc, opts)
 		if err != nil {
 			return fmt.Errorf("failed to mark token as revoked: %w", err)
 		}
@@ -501,11 +505,11 @@ func (r *MongoTokenRepository) MarkTokenRotated(ctx context.Context, token strin
 		CreatedAt: time.Now(),
 	}
 
-	return r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+	return r.withTransaction(ctx, func(txCtx context.Context) error {
 		opts := options.Replace().SetUpsert(true)
 		filter := bson.M{"token_hash": tokenHash}
 
-		_, err := r.rotatedCollection.ReplaceOne(sessionCtx, filter, doc, opts)
+		_, err := r.rotatedCollection.ReplaceOne(txCtx, filter, doc, opts)
 		if err != nil {
 			return fmt.Errorf("failed to mark token as rotated: %w", err)
 		}
@@ -580,13 +584,15 @@ func (r *MongoTokenRepository) MarkTokenRotatedAtomic(ctx context.Context, token
 		CreatedAt: now,
 	}
 
-	err := r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+	err := r.withTransaction(ctx, func(txCtx context.Context) error {
 		filter := bson.M{
 			"token_hash": tokenHash,
 			"expires_at": bson.M{"$lte": now},
 		}
-		opts := options.Update().SetUpsert(true)
-		_, err := r.rotatedCollection.UpdateOne(sessionCtx, filter, bson.M{"$set": doc}, opts)
+		// v1's generic options.Update() constructor is removed in v2 -- UpdateOne/
+		// UpdateMany now have separate builders; this call site is UpdateOne.
+		opts := options.UpdateOne().SetUpsert(true)
+		_, err := r.rotatedCollection.UpdateOne(txCtx, filter, bson.M{"$set": doc}, opts)
 		return err
 	})
 
@@ -763,13 +769,13 @@ func (r *MongoTokenRepository) CleanupExpiredRevokedTokens(ctx context.Context, 
 		return fmt.Errorf("invalid token type: %s", tokenType)
 	}
 
-	return r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+	return r.withTransaction(ctx, func(txCtx context.Context) error {
 		filter := bson.M{
 			"token_type": string(tokenType),
 			"expires_at": bson.M{"$lte": time.Now()},
 		}
 
-		result, err := r.revokedCollection.DeleteMany(sessionCtx, filter)
+		result, err := r.revokedCollection.DeleteMany(txCtx, filter)
 		if err != nil {
 			return fmt.Errorf("failed to cleanup expired revoked tokens: %w", err)
 		}
@@ -818,12 +824,12 @@ func (r *MongoTokenRepository) CleanupExpiredRevokedTokens(ctx context.Context, 
 //	  expires_at: { $lte: ISODate() }
 //	})
 func (r *MongoTokenRepository) CleanupExpiredRotatedTokens(ctx context.Context) error {
-	return r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+	return r.withTransaction(ctx, func(txCtx context.Context) error {
 		filter := bson.M{
 			"expires_at": bson.M{"$lte": time.Now()},
 		}
 
-		result, err := r.rotatedCollection.DeleteMany(sessionCtx, filter)
+		result, err := r.rotatedCollection.DeleteMany(txCtx, filter)
 		if err != nil {
 			return fmt.Errorf("failed to cleanup expired rotated tokens: %w", err)
 		}
@@ -864,11 +870,11 @@ func (r *MongoTokenRepository) RevokeTenant(ctx context.Context, tenantID string
 		ExpiresAt: now.Add(ttl),
 	}
 
-	return r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+	return r.withTransaction(ctx, func(txCtx context.Context) error {
 		opts := options.Replace().SetUpsert(true)
 		filter := bson.M{"tenant_id": tenantID}
 
-		_, err := r.tenantRevocationsCollection.ReplaceOne(sessionCtx, filter, doc, opts)
+		_, err := r.tenantRevocationsCollection.ReplaceOne(txCtx, filter, doc, opts)
 		if err != nil {
 			return fmt.Errorf("failed to revoke tenant: %w", err)
 		}
@@ -911,12 +917,12 @@ func (r *MongoTokenRepository) GetTenantRevocationEpoch(ctx context.Context, ten
 // Note: MongoDB TTL indexes handle automatic cleanup, but this provides manual control,
 // matching CleanupExpiredRevokedTokens/CleanupExpiredRotatedTokens.
 func (r *MongoTokenRepository) CleanupExpiredTenantRevocations(ctx context.Context) error {
-	return r.withTransaction(ctx, func(sessionCtx mongo.SessionContext) error {
+	return r.withTransaction(ctx, func(txCtx context.Context) error {
 		filter := bson.M{
 			"expires_at": bson.M{"$lte": time.Now()},
 		}
 
-		result, err := r.tenantRevocationsCollection.DeleteMany(sessionCtx, filter)
+		result, err := r.tenantRevocationsCollection.DeleteMany(txCtx, filter)
 		if err != nil {
 			return fmt.Errorf("failed to cleanup expired tenant revocations: %w", err)
 		}

@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // NewGourdianTokenMakerNoStorage creates a GourdianTokenMaker without any token storage backend.
@@ -305,7 +305,7 @@ func NewGourdianTokenMakerWithPostgres(ctx context.Context, config GourdianToken
 // Example (Production with transactions):
 //
 //	// Initialize MongoDB client first
-//	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+//	client, err := mongo.Connect(options.Client().ApplyURI(mongoURI))
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -336,7 +336,7 @@ func NewGourdianTokenMakerWithPostgres(ctx context.Context, config GourdianToken
 // Example (Development without replica set):
 //
 //	// For development without replica set, transactions may be limited
-//	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+//	client, err := mongo.Connect(options.Client().ApplyURI("mongodb://localhost:27017"))
 //	if err != nil {
 //	    log.Fatal(err)
 //	}

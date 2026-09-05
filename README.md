@@ -116,7 +116,7 @@ go get github.com/redis/go-redis/v9
 go get github.com/jackc/pgx/v5
 
 # For MongoDB
-go get go.mongodb.org/mongo-driver
+go get go.mongodb.org/mongo-driver/v2
 ```
 
 ---
@@ -262,6 +262,36 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
 Why: the old auto-apply required the pool's connection role to have `CREATE` on the target schema, which a deliberately least-privilege application role (a common production setup — a separate role owns migrations, the app connects with a DML-only role) doesn't have — it failed loudly with `permission denied for schema ...`, and pre-creating the tables some other way didn't help either, since `CREATE TABLE IF NOT EXISTS` still checks `CREATE` privilege before checking whether the table exists. Rather than add a flag to opt out of auto-apply on a per-call basis, gourdiantoken now simply never does it — see [docs/postgres.md](docs/postgres.md) for the full pattern and rationale.
 
 If your Postgres role already had `CREATE` (the common case for a dev database or a single-role deployment), nothing about your setup breaks except the timing: apply `PostgresSchemaSQL()` once via any method (even a one-off `psql -f` piping its output) before your application first connects, and everything else works exactly as before.
+
+## ⚠️ Upgrading to v2.5.0
+
+**v2.5.0 is breaking, for the MongoDB backend only.** `NewGourdianTokenMakerWithMongo` and `NewMongoTokenRepository` both take a `*mongo.Database` parameter, and that type now comes from `go.mongodb.org/mongo-driver/v2` instead of the v1 module — Go treats `go.mongodb.org/mongo-driver/mongo.Database` and `go.mongodb.org/mongo-driver/v2/mongo.Database` as distinct, incompatible types, so any consumer building their own Mongo client to pass in must update their own import too:
+
+```go
+// Before (v2.4.x)
+import (
+    "go.mongodb.org/mongo-driver/mongo"
+    "go.mongodb.org/mongo-driver/mongo/options"
+)
+
+client, _ := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+mongoDB := client.Database("auth_service")
+maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
+
+// After (v2.5.0+) — import path changes to /v2, and mongo.Connect no
+// longer takes a context (it never blocked on the network; Ping remains
+// the real connectivity check)
+import (
+    "go.mongodb.org/mongo-driver/v2/mongo"
+    "go.mongodb.org/mongo-driver/v2/mongo/options"
+)
+
+client, _ := mongo.Connect(options.Client().ApplyURI(mongoURI))
+mongoDB := client.Database("auth_service")
+maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
+```
+
+Why: `go.mongodb.org/mongo-driver` (v1) is upstream-deprecated in favor of `/v2`, and this release completes that migration — matching grsentry's already-completed migration and the rest of the `gourdian25` org. The Redis and Postgres backends are unaffected; if you don't use `NewGourdianTokenMakerWithMongo`/`NewMongoTokenRepository`, this release has no impact on you.
 
 ---
 
@@ -625,7 +655,7 @@ maker, _ := gourdiantoken.NewGourdianTokenMakerWithRedis(ctx, config, redisClien
 #### High Security (EdDSA with MongoDB)
 
 ```go
-client, _ := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+client, _ := mongo.Connect(options.Client().ApplyURI("mongodb://localhost:27017"))
 mongoDB := client.Database("auth")
 
 // e.g. injected as env vars by a Kubernetes Secret, or fetched from a
@@ -808,7 +838,7 @@ maker, err := gourdiantoken.NewGourdianTokenMakerWithPostgres(ctx, config, pool)
 ### 5. MongoDB Storage
 
 ```go
-client, _ := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+client, _ := mongo.Connect(options.Client().ApplyURI(mongoURI))
 mongoDB := client.Database("auth_service")
 maker, err := gourdiantoken.NewGourdianTokenMakerWithMongo(ctx, config, mongoDB)
 ```

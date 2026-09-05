@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // TestNewMongoTokenRepository_NilDatabase exercises the repository
@@ -29,7 +29,7 @@ func TestNewMongoTokenRepository_NilDatabase(t *testing.T) {
 // validates the URI and never dials eagerly, so this constructs
 // successfully while Ping fails immediately.
 func TestNewMongoTokenRepository_PingFailure(t *testing.T) {
-	client, err := mongo.Connect(context.Background(), options.Client().
+	client, err := mongo.Connect(options.Client().
 		ApplyURI("mongodb://127.0.0.1:1/?connectTimeoutMS=200&serverSelectionTimeoutMS=200"))
 	require.NoError(t, err)
 	defer func() { _ = client.Disconnect(context.Background()) }()
@@ -44,7 +44,7 @@ func TestNewMongoTokenRepository_PingFailure(t *testing.T) {
 // distinct from calling NewMongoTokenRepository directly (see
 // TestNewMongoTokenRepository_PingFailure).
 func TestNewGourdianTokenMakerWithMongo_WrapsRepositoryError(t *testing.T) {
-	client, err := mongo.Connect(context.Background(), options.Client().
+	client, err := mongo.Connect(options.Client().
 		ApplyURI("mongodb://127.0.0.1:1/?connectTimeoutMS=200&serverSelectionTimeoutMS=200"))
 	require.NoError(t, err)
 	defer func() { _ = client.Disconnect(context.Background()) }()
