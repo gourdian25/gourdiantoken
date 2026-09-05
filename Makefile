@@ -1,9 +1,9 @@
 # File: Makefile
 
-.PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs release install goreleaser-release goreleaser-check docker-up docker-down
+.PHONY: help build test coverage coverage-summary lint fmt clean bench race staticcheck docs guard-version tag release install goreleaser-release goreleaser-check docker-up docker-down
 
 # Variables
-VERSION := v2.3.0
+VERSION ?=
 MAIN_PACKAGE := github.com/gourdian25/gourdiantoken/v2
 MODULE := github.com/gourdian25/gourdiantoken/v2
 GO := go
@@ -218,33 +218,47 @@ precommit: clean fmt vet lint coverage-check
 	@echo "✓ All pre-commit checks passed"
 	@echo "Ready to commit!"
 
+# Ensure VERSION is set before any tagging/release action, matching the
+# convention used by grpop/graudit/grcache/grnoti. A stale hardcoded
+# default here previously caused a bare `make goreleaser-release` (no
+# VERSION= override) to silently re-target an already-released version
+# instead of failing loudly.
+guard-version:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "VERSION is required (example: make release VERSION=v2.5.0)"; \
+		exit 1; \
+	fi
+
+# Tag and push for release (creates git tag)
+tag: guard-version
+	@echo "Tagging $(VERSION)..."
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "✗ Working directory is dirty. Commit changes before releasing."; \
+		exit 1; \
+	fi
+	git tag $(VERSION)
+	git push origin $(VERSION)
+	@echo "✓ Tagged and pushed $(VERSION)"
+
 # Pre-release checks (comprehensive testing)
 prerelease: clean fmt vet lint coverage-check race
 	@echo ""
 	@echo "✓ All pre-release checks passed"
 	@echo "Ready to release version $(VERSION)"
 
-# Tag and push for release (creates git tag)
-release: prerelease
-	@echo "Releasing version $(VERSION)..."
-	@if [ -z "$$(git status --porcelain)" ]; then \
-		git tag -a $(VERSION) -m "Release $(VERSION)"; \
-		git push origin $(VERSION); \
-		echo "✓ Version $(VERSION) tagged and pushed"; \
-	else \
-		echo "✗ Working directory is dirty. Commit changes before releasing."; \
-		exit 1; \
-	fi
-
-# Create a release using goreleaser (requires: go install github.com/goreleaser/goreleaser@latest)
-# Depends on `release` so the VERSION tag exists and is pushed *before* goreleaser runs —
-# goreleaser determines its own release version from the actual git tag at HEAD (via `git
-# describe`), not from this Makefile's VERSION variable, so running this target without
-# tagging first would build/publish under the wrong (previous) version.
-goreleaser-release: release
-	@echo "Building release with goreleaser..."
+# Full release: guard VERSION, run the pre-release check suite, tag, then
+# publish with goreleaser — matching the tag/release/goreleaser-check shape
+# every other gourdian25 repo uses, with gourdiantoken's own stricter
+# pre-flight pipeline layered in ahead of tagging.
+release: guard-version prerelease tag
+	@echo "Releasing $(VERSION) with goreleaser..."
 	@which goreleaser > /dev/null || (echo "goreleaser not found. Install with: go install github.com/goreleaser/goreleaser/v2@latest" && exit 1)
 	goreleaser release --clean
+	@echo "✓ Released $(VERSION)"
+
+# Back-compat alias: release now does the full tag+goreleaser publish
+# itself, so this is just an alias for anyone still typing the old name.
+goreleaser-release: release
 
 # Validate .goreleaser.yml and do a full local dry-run (no publish) without needing a real tag
 goreleaser-check:
