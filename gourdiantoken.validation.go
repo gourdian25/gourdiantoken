@@ -3,6 +3,7 @@
 package gourdiantoken
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -674,6 +675,36 @@ func resolveVerificationTTL(config *GourdianTokenConfig, requested time.Duration
 		return 0, fmt.Errorf("requested ttl %s exceeds maximum allowed %s", requested, config.VerificationMaxExpiryDuration)
 	}
 	return requested, nil
+}
+
+// requireCanonicalToken refuses a parsed token whose signature segment is not the one
+// spelling of its bytes this package itself emits (unpadded base64url, no spare bits set).
+//
+// Revocation, rotation and single-use state is keyed on a hash of the token *string*
+// (hashToken), so a second spelling of the same valid token would look like a different,
+// never-seen token to every repository: a used verification token, a rotated refresh token
+// or a revoked access token would verify again. Two kinds of respelling exist, and the
+// signature is the only segment that has either:
+//
+//   - Spare bits. When the signature's length isn't a multiple of three bytes, its last
+//     base64 character carries 2 or 4 bits no decoder uses (HS256: 2; HS512, ES256, EdDSA
+//     and a 2048-bit RS256: 4), so 3 or 15 other strings decode to the same signature.
+//     There are none when the length is a multiple of three (HS384).
+//   - Line breaks. Go's decoder skips CR and LF even in strict mode (see the documentation
+//     of base64.Encoding.Strict), so jwt.WithStrictDecoding doesn't close this one: a
+//     newline spliced into the signature of a token carried in a JSON body decodes the same.
+//
+// The header and the payload can't be respelled: the signature covers their exact text,
+// so any change to them fails verification. What remains is one check, made after the
+// signature has verified: the final segment must be exactly what encoding the decoded
+// signature gives. base64url has no '.', so the suffix match can only be the whole last
+// segment. Every token this package issues passes it (jwt's SignedString emits
+// base64.RawURLEncoding), so nothing legitimate is refused.
+func requireCanonicalToken(token *jwt.Token) error {
+	if !strings.HasSuffix(token.Raw, "."+base64.RawURLEncoding.EncodeToString(token.Signature)) {
+		return fmt.Errorf("%w: signature is not in canonical form", ErrInvalidToken)
+	}
+	return nil
 }
 
 // validateTokenClaims performs comprehensive validation of JWT claims.

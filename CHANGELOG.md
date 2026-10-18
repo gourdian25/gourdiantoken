@@ -2,6 +2,58 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## v2.5.1
+
+**Security fix**, no API change. A token that had been revoked, rotated or (for
+a verification token) marked used could be accepted again by presenting a
+different spelling of the same token. Every v2 release up to and including
+v2.5.0 is affected.
+
+### Security
+
+- Revocation, rotation and verification-token single-use state is keyed on a
+  hash of the token *string* (`hashToken`), but `golang-jwt` accepts any
+  base64url spelling of the signature. Two kinds exist: the spare bits in the
+  signature's last character (2 or 4 bits that no decoder uses, so 3 or 15 other
+  strings decode to the same signature; none when the signature is a multiple
+  of three bytes, as with HS384), and CR/LF, which Go's decoder skips even in
+  strict mode, so `jwt.WithStrictDecoding()` alone would not have closed it. A
+  respelled token verified as a valid JWT and looked brand new to every
+  repository, so it could: pass `VerifyAccessToken` after the token was
+  revoked, pass `VerifyRefreshToken`/`RotateRefreshToken` after it was rotated
+  (defeating reuse detection), and pass `VerifyVerificationToken` after
+  `MarkVerificationTokenUsed` (defeating single use). `RevokeAccessToken`,
+  `RevokeRefreshToken`, `RotateRefreshToken` and `MarkVerificationTokenUsed`
+  called with a respelling also recorded the respelling's hash, which never
+  matches the real token, so the real token stayed valid.
+- Fixed by `requireCanonicalToken`, run right after the signature verifies at
+  both parse sites (`parseAndValidateToken`, `revokeToken`): the signature
+  segment must be exactly what encoding the decoded signature gives, else the
+  call fails with `ErrInvalidToken`. Header and payload need no check, because
+  the signature covers their exact text. Every token this package issues is in
+  that form (`SignedString` emits `base64.RawURLEncoding`), so no legitimate
+  token is refused; only a re-encoded or hand-edited copy is.
+
+### Behaviour change
+
+- A respelling of a *rotated* refresh token is now an `ErrInvalidToken`, not an
+  `ErrTokenRotated`, so a consumer that revokes the session on `ErrTokenRotated`
+  (reuse detection) won't see that signal for a respelling. It is refused either
+  way; presenting the real rotated token still reports `ErrTokenRotated`.
+
+### Tests
+
+- `token.canonical_test.go`: for HS256, HS384 and HS512 and for access,
+  refresh and verification tokens, every spare-bit and line-break respelling is
+  refused by `Verify*`, `Revoke*`, `MarkVerificationTokenUsed` and
+  `RotateRefreshToken`, fails to retire anything, and stays refused once the
+  real token is revoked, rotated or used.
+
+### Documentation
+
+- `docs.go`: the rule is stated under "Security Considerations", with a matching
+  entry under "Common Pitfalls".
+
 ## v2.5.0
 
 **Breaking**, for the MongoDB backend only. Migrates from

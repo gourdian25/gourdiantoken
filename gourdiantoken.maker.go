@@ -773,6 +773,12 @@ func (maker *JWTMaker) parseAndValidateToken(ctx context.Context, tokenString st
 		return nil, fmt.Errorf("token failed validation")
 	}
 
+	// The revocation and rotation lookups above were made with this exact string, so it
+	// must be the one spelling this package issues (see requireCanonicalToken).
+	if err := requireCanonicalToken(token); err != nil {
+		return nil, err
+	}
+
 	// Check context before claims processing
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context canceled during claims processing: %w", err)
@@ -1043,6 +1049,12 @@ func (maker *JWTMaker) revokeToken(ctx context.Context, tokenType TokenType, tok
 	}
 	if !parsed.Valid {
 		return fmt.Errorf("token failed validation")
+	}
+
+	// The repository keys the revocation on this exact string, so only the one spelling
+	// verification looks up may be stored (see requireCanonicalToken).
+	if err := requireCanonicalToken(parsed); err != nil {
+		return err
 	}
 
 	claims, ok := parsed.Claims.(jwt.MapClaims)
