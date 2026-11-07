@@ -2,6 +2,14 @@
 
 All notable changes to `gourdiantoken` are documented in this file.
 
+## v2.5.2
+
+### Changed
+
+- Licence: standard MIT text, copyright holder Manish Kumar. No change to the terms granted.
+- README: replaced unsupported claims with measured ones, corrected the grpolicy description.
+- Makefile: `docker-up` uses the shared containers from grsentry's `docker-compose.yml` (creating missing ones from it, or with the new `docker-create` fallback), checks Mongo on its real port 27018, and gives up after 60 s instead of waiting forever.
+
 ## v2.5.1
 
 **Security fix**, no API change. A token that had been revoked, rotated or (for
