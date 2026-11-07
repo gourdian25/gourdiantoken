@@ -270,12 +270,26 @@
 // stolen refresh token and surfaces reuse as a signal, while revocation
 // makes logout and incident response effective before natural expiry.
 //
+// Revocation, rotation and verification-token single-use state is keyed on a
+// hash of the token string, so a token is accepted only in the exact spelling
+// this package issued it in. base64url has other spellings of the same
+// signature (spare bits in its last character, and CR/LF, which Go's decoder
+// skips even in strict mode); a token carrying one still verifies as a JWT, but
+// every Verify*, Revoke*, MarkVerificationTokenUsed and RotateRefreshToken call
+// refuses it with ErrInvalidToken, so it can't be used to slip past a
+// revocation, a rotation or a single-use mark. Tokens this package issued are
+// always in the accepted spelling: only a re-encoded or hand-edited copy is
+// refused.
+//
 // # Common Pitfalls
 //
 //   - Calling jwt.Parse directly instead of VerifyAccessToken/
 //     VerifyRefreshToken/VerifyVerificationToken bypasses every check this
 //     package performs (revocation, rotation, mle, required claims, type).
 //     Always go through the Verify* methods.
+//   - Pass a token back exactly as it was issued. A copy that was re-encoded or
+//     re-wrapped (even one that still verifies as a JWT) fails with
+//     ErrInvalidToken; see Security Considerations.
 //   - RotationEnabled or RevocationEnabled set to true with no
 //     TokenRepository (or with NewGourdianTokenMakerNoStorage) fails
 //     construction with ErrTokenRepositoryRequired — either disable the flag

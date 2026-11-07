@@ -1,10 +1,10 @@
-# Gourdiantoken – Enterprise-Grade JWT Management for Go
+# Gourdiantoken – JWT Management for Go
 
 ![Go Version](https://img.shields.io/badge/Go-1.26.4%2B-blue)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![GoDoc](https://pkg.go.dev/badge/github.com/gourdian25/gourdiantoken/v2)](https://pkg.go.dev/github.com/gourdian25/gourdiantoken/v2)
 
-**gourdiantoken** is a production-ready, comprehensive JWT token management system designed for modern Go applications. Built with security-first principles and performance optimization, it provides everything needed for enterprise authentication systems — from basic token generation to advanced features like automatic rotation, Redis-backed revocation, and multi-algorithm cryptographic support.
+**gourdiantoken** is a comprehensive JWT token management library for Go applications. Built with security-first principles and performance optimization, it covers everything from basic token generation to advanced features like automatic rotation, Redis-backed revocation, and multi-algorithm cryptographic support.
 
 ## 🌐 Part of the gourdian25 ecosystem
 
@@ -22,7 +22,7 @@ used together:
 - [graudit](https://github.com/gourdian25/graudit) — an append-only,
   tamper-evident audit log with pluggable storage backends.
 - [grpolicy](https://github.com/gourdian25/grpolicy) — attribute-based
-  policy evaluation (RBAC/ABAC), independent of any notion of "user" or
+  policy evaluation, independent of any notion of "user" or
   "role".
 - [grnoti](https://github.com/gourdian25/grnoti) — a push-notification
   service handling FCM dispatch, idempotent event processing, device-token
@@ -33,11 +33,11 @@ used together:
 ## 🎯 Why Gourdiantoken?
 
 - 🔐 **Complete Security**: Token rotation, revocation, replay attack prevention, and strict claim validation
-- ⚡ **High Performance**: Up to 200k operations/second with optimized algorithms
+- ⚡ **Fast**: Microsecond-scale token creation and verification (measured numbers in the benchmarks below)
 - 🔧 **Flexible Storage**: In-memory, Redis, PostgreSQL, MongoDB — choose what fits your architecture
 - 🧩 **Algorithm Support**: HMAC (HS256/384/512), RSA (RS256/384/512, PS256/384/512), ECDSA (ES256/384/512), EdDSA
-- 🛡️ **Production Ready**: Thread-safe, context-aware, automatic cleanup, comprehensive error handling
-- 📊 **Battle Tested**: Extensive test coverage with real-world scenarios and edge cases
+- 🛡️ **Robust**: Thread-safe, context-aware, automatic cleanup, comprehensive error handling
+- 📊 **Well Tested**: Extensive test coverage with real-world scenarios and edge cases
 
 ---
 
